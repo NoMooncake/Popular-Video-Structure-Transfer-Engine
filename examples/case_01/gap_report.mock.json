@@ -1,0 +1,106 @@
+{
+  "id": "gap_report_case_01_mock",
+  "version": "0.1.0",
+  "created_at": "2026-05-28T14:00:00+08:00",
+  "source": {
+    "type": "mock"
+  },
+  "structure_blueprint_ref": "structure_blueprint_case_01_mock",
+  "material_analysis_ref": "material_analysis_case_01_mock",
+  "summary": {
+    "total_gaps": 3,
+    "blocking_gaps": 0,
+    "overall_status": "partial",
+    "notes": "素材足以生成 20 秒 timeline，但开头吸引力和对比证明需要用包装补全。"
+  },
+  "gaps": [
+    {
+      "gap_id": "gap_01",
+      "slot_id": "slot_01",
+      "slot_type": "risk_or_pain_hook",
+      "missing": "缺少开头强吸引镜头",
+      "impact": "前 3 秒停留风险较高，现有猫咪吃粮素材情绪冲击不足。",
+      "severity": "medium",
+      "required_materials": [
+        "opening_attraction",
+        "title_copy"
+      ],
+      "available_material_refs": [
+        "m3",
+        "m5"
+      ],
+      "strategy": "用猫粮包装特写、警示大字标题、快速 zoom 和音效补全开头吸引力。",
+      "fill_options": [
+        {
+          "type": "copy_or_subtitle",
+          "description": "生成强标题：新手买猫粮，最怕不是买贵了，而是买错了。",
+          "priority": "primary"
+        },
+        {
+          "type": "packaging",
+          "description": "使用警示色标题条、快速 zoom 和关键词高亮。",
+          "priority": "primary"
+        },
+        {
+          "type": "material_reuse",
+          "description": "从猫咪吃粮视频截取 1 秒画面作为背景。"
+        }
+      ]
+    },
+    {
+      "gap_id": "gap_02",
+      "slot_id": "slot_04",
+      "slot_type": "proof_comparison",
+      "missing": "缺少产品特写 / 多产品横向对比镜头",
+      "impact": "推荐理由不够直观，用户难以快速理解不同需求对应的选择。",
+      "severity": "medium",
+      "required_materials": [
+        "comparison_visual",
+        "product_closeup"
+      ],
+      "available_material_refs": [
+        "m1",
+        "m2",
+        "m4"
+      ],
+      "strategy": "用现有产品图和成分表生成横向对比卡片，替代真实对比镜头。",
+      "fill_options": [
+        {
+          "type": "packaging",
+          "description": "生成 2x2 对比卡：肠胃敏感、容易过敏、挑食、黑下巴。",
+          "priority": "primary"
+        },
+        {
+          "type": "material_reuse",
+          "description": "裁切产品图和成分表局部，做成拼贴式对比。"
+        }
+      ]
+    },
+    {
+      "gap_id": "gap_03",
+      "slot_id": "slot_06",
+      "slot_type": "cta",
+      "missing": "缺少结尾 CTA 专用画面",
+      "impact": "结尾行动引导不够聚焦，但可以用现有猫咪视频和底部评论条解决。",
+      "severity": "low",
+      "required_materials": [
+        "cta_visual"
+      ],
+      "available_material_refs": [
+        "m3"
+      ],
+      "strategy": "复用猫咪吃粮视频末尾画面，并添加底部评论引导条。",
+      "fill_options": [
+        {
+          "type": "packaging",
+          "description": "添加底部 CTA：你家猫是什么情况？评论区告诉我。",
+          "priority": "primary"
+        },
+        {
+          "type": "material_reuse",
+          "description": "复用猫咪吃粮视频最后 1 秒作为收尾背景。"
+        }
+      ]
+    }
+  ]
+}

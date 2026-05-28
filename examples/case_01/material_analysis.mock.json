@@ -1,0 +1,179 @@
+{
+  "id": "material_analysis_case_01_mock",
+  "version": "0.1.0",
+  "created_at": "2026-05-28T14:00:00+08:00",
+  "source": {
+    "type": "mock",
+    "project_id": "case_01"
+  },
+  "target_content_ref": "case_01",
+  "materials": [
+    {
+      "material_id": "m1",
+      "type": "image",
+      "uri": "mock://case_01/user/pet_food_pack_01.jpg",
+      "description": "猫粮包装图 1，适合展示肠胃养护型方向。",
+      "tags": [
+        "pet_food_packaging",
+        "product_image",
+        "gut_care"
+      ],
+      "metadata": {
+        "width": 1080,
+        "height": 1440
+      }
+    },
+    {
+      "material_id": "m2",
+      "type": "image",
+      "uri": "mock://case_01/user/pet_food_pack_02.jpg",
+      "description": "猫粮包装图 2，适合展示单一肉源方向。",
+      "tags": [
+        "pet_food_packaging",
+        "product_image",
+        "single_protein"
+      ],
+      "metadata": {
+        "width": 1080,
+        "height": 1440
+      }
+    },
+    {
+      "material_id": "m3",
+      "type": "video",
+      "uri": "mock://case_01/user/cat_eating.mp4",
+      "description": "猫咪吃粮视频，可用于问题背景、产品出现或 CTA。",
+      "tags": [
+        "cat",
+        "feeding_scene",
+        "daily_life"
+      ],
+      "metadata": {
+        "duration_seconds": 8,
+        "width": 1080,
+        "height": 1920
+      }
+    },
+    {
+      "material_id": "m4",
+      "type": "image",
+      "uri": "mock://case_01/user/ingredient_table.jpg",
+      "description": "猫粮成分表截图，可用于选购标准说明。",
+      "tags": [
+        "ingredient_table",
+        "criteria",
+        "proof"
+      ],
+      "metadata": {
+        "width": 1080,
+        "height": 1920
+      }
+    },
+    {
+      "material_id": "m5",
+      "type": "copy",
+      "description": "产品卖点文案：肠胃养护、单一肉源、适口性、低油。",
+      "tags": [
+        "selling_points",
+        "copy"
+      ],
+      "metadata": {
+        "language": "zh-CN"
+      }
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "seg_01",
+      "material_ref": "m3",
+      "time_range": "0-3s",
+      "content": "猫咪低头吃粮的日常画面，可以承接问题背景或结尾 CTA。",
+      "tags": [
+        "cat_eating",
+        "daily_life"
+      ],
+      "recommended_slot": "pain_desire",
+      "quality_score": 0.78,
+      "usable": true,
+      "limitations": [
+        "情绪冲击不够强，不适合直接做开头风险 Hook。"
+      ]
+    },
+    {
+      "segment_id": "seg_02",
+      "material_ref": "m1",
+      "content": "肠胃养护型猫粮包装图，可用于产品方向展示。",
+      "tags": [
+        "product_packaging",
+        "gut_care"
+      ],
+      "recommended_slot": "product_reveal",
+      "quality_score": 0.86,
+      "usable": true,
+      "limitations": [
+        "单张产品图无法形成横向对比。"
+      ]
+    },
+    {
+      "segment_id": "seg_03",
+      "material_ref": "m2",
+      "content": "单一肉源猫粮包装图，可用于产品方向展示。",
+      "tags": [
+        "product_packaging",
+        "single_protein"
+      ],
+      "recommended_slot": "product_reveal",
+      "quality_score": 0.84,
+      "usable": true,
+      "limitations": [
+        "缺少清晰产品特写和使用结果。"
+      ]
+    },
+    {
+      "segment_id": "seg_04",
+      "material_ref": "m4",
+      "content": "成分表截图，可以用于选购标准和理由证明。",
+      "tags": [
+        "ingredient_table",
+        "selection_criteria",
+        "proof"
+      ],
+      "recommended_slot": "proof_comparison",
+      "quality_score": 0.72,
+      "usable": true,
+      "limitations": [
+        "信息密度高，需要包装成卡片或高亮。"
+      ]
+    },
+    {
+      "segment_id": "seg_05",
+      "material_ref": "m5",
+      "content": "卖点文案可以生成分类推荐字幕和避坑提醒。",
+      "tags": [
+        "copy",
+        "selling_points",
+        "warning_copy"
+      ],
+      "recommended_slot": "decision_warning",
+      "quality_score": 0.9,
+      "usable": true,
+      "limitations": [
+        "仅有文字，必须依赖字幕或包装表达。"
+      ]
+    }
+  ],
+  "coverage_summary": {
+    "supported_slot_types": [
+      "pain_desire",
+      "product_reveal",
+      "proof_comparison",
+      "decision_warning",
+      "cta"
+    ],
+    "weak_slot_types": [
+      "risk_or_pain_hook",
+      "proof_comparison"
+    ],
+    "notes": "现有素材可以支撑产品出现、卖点说明和部分证明，但缺少强开头风险画面和多产品横向对比图。"
+  }
+}
