@@ -1,0 +1,271 @@
+{
+  "case_id": "case_01",
+  "version": "0.1.0",
+  "case_name": "宠物猫粮种草拔草结构迁移 MVP",
+  "vertical": "seeding_de_seeding",
+  "category_mode": "multi_category",
+  "primary_demo_category": "pet_food",
+  "language": "zh-CN",
+  "source_sample": {
+    "status": "reference_from_transcripts_until_real_videos_are_ready",
+    "duration_range_seconds": {
+      "min": 120,
+      "max": 600,
+      "typical": 240
+    },
+    "reference_videos": [
+      {
+        "reference_id": "video_01",
+        "category": "fashion_outfit",
+        "content_type": "tutorial_seeding",
+        "role": "secondary_reference",
+        "structure_summary": "穿搭痛点、单品展示、原因分析、试穿对比、搭配方法、总结建议"
+      },
+      {
+        "reference_id": "video_02",
+        "category": "fashion_coat",
+        "content_type": "selection_recommendation",
+        "role": "secondary_reference",
+        "structure_summary": "购买场景、选购标准、多款推荐、适合人群、收藏款分享、轻 CTA"
+      },
+      {
+        "reference_id": "video_03",
+        "category": "pet_safety",
+        "content_type": "warning_de_seeding",
+        "role": "primary_reference",
+        "structure_summary": "强情绪 Hook、亲身经历、风险升级、专业解释、行动建议、转发 CTA"
+      },
+      {
+        "reference_id": "video_04",
+        "category": "pet_food",
+        "content_type": "multi_product_recommendation",
+        "role": "primary_reference",
+        "structure_summary": "品类背景、信任建立、多产品拆解、适合对象、选购建议、评论互动"
+      }
+    ],
+    "general_structure_slots": [
+      {
+        "slot_type": "risk_or_pain_hook",
+        "relative_position": "0%-10%",
+        "purpose": "用风险、痛点、反常识或强情绪抓住注意力",
+        "transferability": "high"
+      },
+      {
+        "slot_type": "context_setup",
+        "relative_position": "10%-25%",
+        "purpose": "交代背景、用户处境、为什么这个问题值得看",
+        "transferability": "high"
+      },
+      {
+        "slot_type": "criteria_or_problem_explanation",
+        "relative_position": "25%-40%",
+        "purpose": "解释判断标准、问题原因或选购逻辑",
+        "transferability": "high"
+      },
+      {
+        "slot_type": "product_or_solution_breakdown",
+        "relative_position": "40%-75%",
+        "purpose": "展示产品、功能、使用过程、多款对比或解决方案",
+        "transferability": "high"
+      },
+      {
+        "slot_type": "proof_or_fit_mapping",
+        "relative_position": "75%-88%",
+        "purpose": "说明适合人群、效果证据、前后对比或使用建议",
+        "transferability": "high"
+      },
+      {
+        "slot_type": "de_seeding_warning",
+        "relative_position": "88%-95%",
+        "purpose": "提醒避坑、限制条件、错误用法或不适合人群",
+        "transferability": "high"
+      },
+      {
+        "slot_type": "cta",
+        "relative_position": "95%-100%",
+        "purpose": "引导评论、收藏、转发或进一步咨询",
+        "transferability": "high"
+      }
+    ]
+  },
+  "target_output": {
+    "duration_seconds": {
+      "recommended_for_mvp": 90,
+      "compressed_demo_optional": 30
+    },
+    "aspect_ratio": "9:16",
+    "platform_style": "short_video",
+    "output_forms": [
+      "structure_blueprint",
+      "script",
+      "storyboard",
+      "timeline_plan",
+      "gap_report",
+      "packaging_suggestions"
+    ]
+  },
+  "target_content": {
+    "topic": "新手养猫怎么选猫粮：不同猫咪需求对应不同猫粮，不要盲买",
+    "category": "pet_food",
+    "product_mode": "multi_product_recommendation",
+    "target_audience": [
+      "新手铲屎官",
+      "准备给猫咪换粮的人",
+      "猫咪肠胃敏感或容易挑食的用户",
+      "担心猫粮踩雷的人"
+    ],
+    "core_angle": "先拔草盲买，再种草按需求选择",
+    "positioning": "帮助新手按猫咪真实需求选择猫粮，而不是只看热门推荐",
+    "selling_points": [
+      "肠胃敏感猫适合看肠胃养护型",
+      "容易过敏的猫适合看单一肉源",
+      "挑食猫可以关注适口性和冻干包裹",
+      "担心油脂和黑下巴可以关注低油或烘焙粮",
+      "换粮建议先小包装试吃，不要直接囤大袋"
+    ],
+    "possible_objections": [
+      "不知道自家猫属于哪种需求",
+      "担心推荐不够客观",
+      "担心猫不吃",
+      "担心频繁换粮影响肠胃"
+    ],
+    "desired_tone": "真诚、直接、有避坑感，但不过度制造焦虑"
+  },
+  "user_materials": {
+    "status": "partially_available",
+    "available": [
+      {
+        "material_id": "m1",
+        "type": "image",
+        "description": "猫粮包装图 2-4 张"
+      },
+      {
+        "material_id": "m2",
+        "type": "video",
+        "description": "猫咪吃粮视频 1 段"
+      },
+      {
+        "material_id": "m3",
+        "type": "image",
+        "description": "猫粮成分表截图 1 张"
+      },
+      {
+        "material_id": "m4",
+        "type": "copy",
+        "description": "产品卖点文案 3-5 条"
+      },
+      {
+        "material_id": "m5",
+        "type": "image",
+        "description": "猫咪日常照片 1 张"
+      }
+    ],
+    "missing": [
+      {
+        "missing_id": "gap_01",
+        "description": "缺少开头强风险画面"
+      },
+      {
+        "missing_id": "gap_02",
+        "description": "缺少多产品横向对比图"
+      },
+      {
+        "missing_id": "gap_03",
+        "description": "缺少猫咪肠胃不适或挑食表现画面"
+      },
+      {
+        "missing_id": "gap_04",
+        "description": "缺少结尾 CTA 专用画面"
+      }
+    ]
+  },
+  "expected_transfer_timeline": [
+    {
+      "time_range": "0-8s",
+      "slot_type": "risk_or_pain_hook",
+      "content_goal": "用不要盲买猫粮的风险抓住新手铲屎官",
+      "example_copy": "新手买猫粮，最怕不是买贵了，而是买错了。"
+    },
+    {
+      "time_range": "8-18s",
+      "slot_type": "context_setup",
+      "content_goal": "说明不同猫咪需求不同，不能只看热门推荐",
+      "example_copy": "挑食、肠胃敏感、容易过敏、黑下巴，选粮逻辑完全不一样。"
+    },
+    {
+      "time_range": "18-50s",
+      "slot_type": "product_or_solution_breakdown",
+      "content_goal": "按猫咪需求分类推荐猫粮方向",
+      "example_copy": "肠胃敏感看养护型，容易过敏看单一肉源，挑食看适口性。"
+    },
+    {
+      "time_range": "50-65s",
+      "slot_type": "criteria_or_problem_explanation",
+      "content_goal": "总结选购标准，把推荐变成方法论",
+      "example_copy": "重点看肉源、消化率、油脂感，以及是否适合自家猫的体质。"
+    },
+    {
+      "time_range": "65-78s",
+      "slot_type": "de_seeding_warning",
+      "content_goal": "提醒用户不要盲目跟风或直接囤大袋",
+      "example_copy": "别只看网红推荐，也别一上来囤大袋，先小包装试吃。"
+    },
+    {
+      "time_range": "78-90s",
+      "slot_type": "cta",
+      "content_goal": "引导评论互动",
+      "example_copy": "你家猫是什么情况？评论区告诉我，我帮你按需求拆。"
+    }
+  ],
+  "expected_gaps": [
+    {
+      "gap_id": "gap_01",
+      "slot_type": "risk_or_pain_hook",
+      "missing": "开头强风险画面",
+      "preferred_strategy": "用猫粮包装特写、大字标题、快速 zoom 和警示色包装补全"
+    },
+    {
+      "gap_id": "gap_02",
+      "slot_type": "product_or_solution_breakdown",
+      "missing": "多产品横向对比图",
+      "preferred_strategy": "用现有产品图生成对比卡片"
+    },
+    {
+      "gap_id": "gap_03",
+      "slot_type": "context_setup",
+      "missing": "猫咪肠胃不适或挑食表现画面",
+      "preferred_strategy": "用字幕解释、图标标签和现有猫咪视频裁切补全"
+    },
+    {
+      "gap_id": "gap_04",
+      "slot_type": "cta",
+      "missing": "结尾 CTA 专用画面",
+      "preferred_strategy": "用产品摆拍、底部评论引导条和轻动效补全"
+    }
+  ],
+  "replacement_policy": {
+    "is_fixed_final_demo": false,
+    "description": "本 case 是第一版可参考 demo，不是最终写死内容。后续可以替换真实样例视频、品类和商品。",
+    "can_replace": [
+      "source_sample.reference_videos",
+      "source_sample.general_structure_slots",
+      "target_content.topic",
+      "target_content.category",
+      "target_content.selling_points",
+      "user_materials"
+    ],
+    "should_keep_stable": [
+      "case_id",
+      "vertical",
+      "category_mode",
+      "target_output.output_forms",
+      "P0 flow definition"
+    ]
+  },
+  "notes": {
+    "real_video_dependency": "T01 不依赖真实视频文件。当前使用字幕和结构假设作为参考。",
+    "long_video_handling": "参考样例通常是 2-5 分钟，因此 source_sample 使用相对结构和百分比描述。后续可以迁移压缩成 60-90 秒或 20-30 秒结果。",
+    "copyright_boundary": "样例视频只用于结构学习，不复制原视频具体画面、字幕和表达。",
+    "multi_category_requirement": "虽然第一版 demo 使用宠物猫粮，但结构需要支持迁移到服饰、美妆、数码、食品、生活用品和 AI 工具等品类。"
+  }
+}
