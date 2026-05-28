@@ -1,0 +1,207 @@
+{
+  "id": "structure_blueprint_case_01_mock",
+  "version": "0.1.0",
+  "created_at": "2026-05-28T14:00:00+08:00",
+  "source": {
+    "type": "mock",
+    "ref_id": "sample_analysis_case_01_mock"
+  },
+  "sample_analysis_ref": "sample_analysis_case_01_mock",
+  "vertical": "seeding_de_seeding",
+  "category": "pet_food",
+  "summary": "中长种草拔草样例被压缩为 20 秒短视频结构：风险 Hook、痛点/需求、产品方向出现、对比证明、避坑决策和评论 CTA。",
+  "detected_structures": [
+    "script",
+    "rhythm",
+    "packaging",
+    "visual"
+  ],
+  "slots": [
+    {
+      "slot_id": "slot_01",
+      "slot_type": "risk_or_pain_hook",
+      "time_range": "0-3s",
+      "content_goal": "用不要盲买猫粮的风险抓住新手铲屎官。",
+      "rhythm": "fast",
+      "required_materials": [
+        {
+          "type": "opening_attraction",
+          "description": "强风险画面或能制造注意力的猫粮/猫咪画面",
+          "priority": "required"
+        },
+        {
+          "type": "title_copy",
+          "description": "一句话风险标题",
+          "priority": "required"
+        }
+      ],
+      "packaging_features": [
+        {
+          "type": "large_title",
+          "description": "大字标题压屏，突出“别盲买”",
+          "style": "warning"
+        },
+        {
+          "type": "zoom_in",
+          "description": "开头快速推进到猫粮包装或猫咪表情",
+          "style": "fast"
+        }
+      ],
+      "migration_rule": "将样例中的事故/风险前置结构迁移为新主题中的核心购买风险。",
+      "source_evidence": [
+        "视频 3 的强情绪事故开头",
+        "视频 4 的全程无广告信任建立"
+      ],
+      "confidence": 0.93
+    },
+    {
+      "slot_id": "slot_02",
+      "slot_type": "pain_desire",
+      "time_range": "3-6s",
+      "content_goal": "说明不同猫咪需求不同，用户不能只看热门推荐。",
+      "rhythm": "fast",
+      "required_materials": [
+        {
+          "type": "problem_context",
+          "description": "猫咪吃粮、挑食、肠胃敏感或用户困惑素材",
+          "priority": "recommended"
+        }
+      ],
+      "packaging_features": [
+        {
+          "type": "problem_tags",
+          "description": "用标签列出挑食、软便、过敏、黑下巴",
+          "style": "tag_list"
+        }
+      ],
+      "migration_rule": "将样例中的背景铺垫压缩为用户需求分层说明。",
+      "source_evidence": [
+        "视频 4 按不同猫咪需求解释产品适配"
+      ],
+      "confidence": 0.9
+    },
+    {
+      "slot_id": "slot_03",
+      "slot_type": "product_reveal",
+      "time_range": "6-11s",
+      "content_goal": "按需求快速展示可选猫粮方向。",
+      "rhythm": "fast",
+      "required_materials": [
+        {
+          "type": "product_image",
+          "description": "猫粮包装图或产品图",
+          "priority": "required"
+        },
+        {
+          "type": "selling_points",
+          "description": "每类猫粮对应卖点文案",
+          "priority": "required"
+        }
+      ],
+      "packaging_features": [
+        {
+          "type": "selling_point_card",
+          "description": "每个产品方向一张卖点卡片",
+          "style": "card"
+        }
+      ],
+      "migration_rule": "将样例中的多产品拆解迁移为短视频中的分类推荐卡片。",
+      "source_evidence": [
+        "视频 4 的四款猫粮分段拆解"
+      ],
+      "confidence": 0.92
+    },
+    {
+      "slot_id": "slot_04",
+      "slot_type": "proof_comparison",
+      "time_range": "11-15s",
+      "content_goal": "用对比或标准解释推荐理由。",
+      "rhythm": "medium",
+      "required_materials": [
+        {
+          "type": "comparison_visual",
+          "description": "多产品横向对比图、成分表或前后差异画面",
+          "priority": "required"
+        }
+      ],
+      "packaging_features": [
+        {
+          "type": "comparison_card",
+          "description": "用表格/双栏卡片对比不同需求和选择方向",
+          "style": "comparison"
+        }
+      ],
+      "migration_rule": "将样例中的解释段落迁移为可视化对比证据。",
+      "source_evidence": [
+        "视频 1/2 的选购标准解释",
+        "视频 4 的适合对象说明"
+      ],
+      "confidence": 0.87
+    },
+    {
+      "slot_id": "slot_05",
+      "slot_type": "decision_warning",
+      "time_range": "15-18s",
+      "content_goal": "加入拔草提醒，降低盲目下单风险。",
+      "rhythm": "medium",
+      "required_materials": [
+        {
+          "type": "warning_copy",
+          "description": "不要囤大袋、先小包装试吃、换粮循序渐进",
+          "priority": "required"
+        }
+      ],
+      "packaging_features": [
+        {
+          "type": "warning_card",
+          "description": "红色避坑卡片强调错误做法",
+          "style": "warning"
+        }
+      ],
+      "migration_rule": "将样例中的避坑知识迁移为消费决策前的风险提醒。",
+      "source_evidence": [
+        "视频 3 的正确行动建议"
+      ],
+      "confidence": 0.91
+    },
+    {
+      "slot_id": "slot_06",
+      "slot_type": "cta",
+      "time_range": "18-20s",
+      "content_goal": "引导评论区互动，收集用户自家猫情况。",
+      "rhythm": "fast",
+      "required_materials": [
+        {
+          "type": "cta_visual",
+          "description": "结尾产品摆拍或猫咪画面",
+          "priority": "recommended"
+        }
+      ],
+      "packaging_features": [
+        {
+          "type": "bottom_cta_bar",
+          "description": "底部评论引导条",
+          "style": "comment"
+        }
+      ],
+      "migration_rule": "将样例中的评论互动结尾迁移为按猫咪情况咨询的 CTA。",
+      "source_evidence": [
+        "视频 4 的评论区分享使用体验"
+      ],
+      "confidence": 0.89
+    }
+  ],
+  "global_rhythm": {
+    "pace": "fast",
+    "shot_frequency": "前 6 秒快速切换，6-15 秒卡片式信息密集呈现，15 秒后收束到避坑和 CTA。",
+    "climax_position": "11-15s",
+    "notes": "将 2-5 分钟中长讲解压缩为 20 秒短视频方案，保留种草拔草关键结构。"
+  },
+  "packaging_summary": {
+    "subtitle_density": "high",
+    "title_style": "大字标题 + 关键词高亮",
+    "highlight_style": "红色警示词、绿色推荐标签、黄色重点标注",
+    "transition_style": "快速切换、卡片滑入、轻微 zoom",
+    "cover_style": "猫粮包装特写 + 不要盲买猫粮 + 适合新手铲屎官"
+  }
+}

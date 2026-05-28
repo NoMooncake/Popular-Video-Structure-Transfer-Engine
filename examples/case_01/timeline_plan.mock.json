@@ -1,0 +1,216 @@
+{
+  "id": "timeline_plan_case_01_mock",
+  "version": "0.1.0",
+  "created_at": "2026-05-28T14:00:00+08:00",
+  "source": {
+    "type": "mock"
+  },
+  "structure_blueprint_ref": "structure_blueprint_case_01_mock",
+  "material_analysis_ref": "material_analysis_case_01_mock",
+  "gap_report_ref": "gap_report_case_01_mock",
+  "target_video": {
+    "duration_seconds": 20,
+    "aspect_ratio": "9:16",
+    "platform_style": "short_video",
+    "title": "新手养猫怎么选猫粮"
+  },
+  "script": {
+    "title": "新手买猫粮，别只看热门推荐",
+    "summary": "用 20 秒把猫粮选择从盲买风险讲到按需求选择，再用避坑提醒和评论 CTA 收尾。",
+    "full_text": "新手买猫粮，最怕不是买贵了，而是买错了。挑食、肠胃敏感、容易过敏、黑下巴，选粮逻辑完全不一样。肠胃敏感看养护型，容易过敏看单一肉源，挑食看适口性，担心油脂看低油或烘焙粮。别只看网红推荐，也别一上来囤大袋，先小包装试吃。你家猫是什么情况？评论区告诉我。"
+  },
+  "timeline": [
+    {
+      "item_id": "tl_01",
+      "slot_id": "slot_01",
+      "time_range": "0-3s",
+      "slot_type": "risk_or_pain_hook",
+      "content_goal": "用盲买风险抓住新手铲屎官。",
+      "visual_source": "reuse",
+      "visual_description": "复用猫咪吃粮视频截帧做背景，叠加猫粮包装局部和警示标题。",
+      "subtitle": "新手买猫粮，最怕不是买贵了",
+      "voiceover": "新手买猫粮，最怕不是买贵了，",
+      "packaging": [
+        {
+          "type": "large_title",
+          "text": "别盲买猫粮",
+          "style": "warning",
+          "position": "center"
+        },
+        {
+          "type": "keyword_highlight",
+          "text": "买错",
+          "style": "red",
+          "position": "subtitle"
+        }
+      ],
+      "material_ref": [
+        "m3",
+        "m5"
+      ],
+      "gap_ref": "gap_01",
+      "transition": "quick_zoom"
+    },
+    {
+      "item_id": "tl_02",
+      "slot_id": "slot_02",
+      "time_range": "3-6s",
+      "slot_type": "pain_desire",
+      "content_goal": "说明不同猫咪需求不同，不能跟风。",
+      "visual_source": "user_material",
+      "visual_description": "猫咪吃粮视频作为背景，旁边弹出需求标签。",
+      "subtitle": "挑食、软便、过敏、黑下巴，选粮逻辑都不一样",
+      "voiceover": "挑食、软便、过敏、黑下巴，选粮逻辑都不一样。",
+      "packaging": [
+        {
+          "type": "tag_list",
+          "text": "挑食 / 软便 / 过敏 / 黑下巴",
+          "style": "floating_tags",
+          "position": "right"
+        }
+      ],
+      "material_ref": "m3",
+      "transition": "card_slide"
+    },
+    {
+      "item_id": "tl_03",
+      "slot_id": "slot_03",
+      "time_range": "6-11s",
+      "slot_type": "product_reveal",
+      "content_goal": "按猫咪需求展示猫粮选择方向。",
+      "visual_source": "user_material",
+      "visual_description": "两张猫粮包装图和卖点文案组成分类推荐卡。",
+      "subtitle": "肠胃敏感看养护型，容易过敏看单一肉源",
+      "voiceover": "肠胃敏感看养护型，容易过敏看单一肉源。",
+      "packaging": [
+        {
+          "type": "selling_point_card",
+          "text": "肠胃敏感：养护型",
+          "style": "green_card",
+          "position": "left"
+        },
+        {
+          "type": "selling_point_card",
+          "text": "容易过敏：单一肉源",
+          "style": "blue_card",
+          "position": "right"
+        }
+      ],
+      "material_ref": [
+        "m1",
+        "m2",
+        "m5"
+      ],
+      "transition": "split_card"
+    },
+    {
+      "item_id": "tl_04",
+      "slot_id": "slot_04",
+      "time_range": "11-15s",
+      "slot_type": "proof_comparison",
+      "content_goal": "用对比卡片把推荐变成可理解的选择标准。",
+      "visual_source": "generated_graphic",
+      "visual_description": "基于产品图和成分表生成 2x2 需求对比卡。",
+      "subtitle": "重点看肉源、消化率、油脂感和猫咪体质",
+      "voiceover": "重点看肉源、消化率、油脂感和猫咪体质。",
+      "packaging": [
+        {
+          "type": "comparison_card",
+          "text": "需求 → 选择方向",
+          "style": "table_card",
+          "position": "center"
+        }
+      ],
+      "material_ref": [
+        "m1",
+        "m2",
+        "m4"
+      ],
+      "gap_ref": "gap_02",
+      "transition": "zoom_in"
+    },
+    {
+      "item_id": "tl_05",
+      "slot_id": "slot_05",
+      "time_range": "15-18s",
+      "slot_type": "decision_warning",
+      "content_goal": "提醒用户不要盲目囤大袋。",
+      "visual_source": "text_card",
+      "visual_description": "红色避坑文字卡承接前面的推荐。",
+      "subtitle": "别一上来囤大袋，先小包装试吃",
+      "voiceover": "别一上来囤大袋，先小包装试吃。",
+      "packaging": [
+        {
+          "type": "warning_card",
+          "text": "先小包装试吃",
+          "style": "red_warning",
+          "position": "center"
+        }
+      ],
+      "material_ref": "m5",
+      "transition": "hard_cut"
+    },
+    {
+      "item_id": "tl_06",
+      "slot_id": "slot_06",
+      "time_range": "18-20s",
+      "slot_type": "cta",
+      "content_goal": "引导用户评论自家猫情况。",
+      "visual_source": "reuse",
+      "visual_description": "复用猫咪吃粮视频末尾画面，添加底部评论引导。",
+      "subtitle": "你家猫是什么情况？评论区告诉我",
+      "voiceover": "你家猫是什么情况？评论区告诉我。",
+      "packaging": [
+        {
+          "type": "bottom_cta_bar",
+          "text": "评论区告诉我",
+          "style": "comment",
+          "position": "bottom"
+        }
+      ],
+      "material_ref": "m3",
+      "gap_ref": "gap_03",
+      "transition": "fade_out"
+    }
+  ],
+  "packaging_suggestions": [
+    {
+      "type": "subtitle_style",
+      "text": "全程高密度字幕，关键词使用红黄双色强调。",
+      "style": "high_density",
+      "position": "bottom"
+    },
+    {
+      "type": "title_bar",
+      "text": "别盲买猫粮",
+      "style": "warning",
+      "position": "top"
+    },
+    {
+      "type": "comparison_card",
+      "text": "需求 → 选择方向",
+      "style": "table_card",
+      "position": "center"
+    }
+  ],
+  "variants": [
+    {
+      "variant_id": "high_click",
+      "name": "高点击版",
+      "changes": [
+        "强化前 3 秒风险标题",
+        "增加警示色和快速 zoom",
+        "把避坑提醒提前到 12 秒"
+      ]
+    },
+    {
+      "variant_id": "high_conversion",
+      "name": "高转化版",
+      "changes": [
+        "产品方向更早出现",
+        "强化适合人群标签",
+        "CTA 改为按猫咪情况推荐"
+      ]
+    }
+  ]
+}

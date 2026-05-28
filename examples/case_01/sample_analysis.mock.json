@@ -1,0 +1,266 @@
+{
+  "id": "sample_analysis_case_01_mock",
+  "version": "0.1.0",
+  "created_at": "2026-05-28T14:00:00+08:00",
+  "source": {
+    "type": "mock",
+    "reference_id": "case_01_reference_pet_food_and_warning"
+  },
+  "video": {
+    "duration_seconds": 240,
+    "width": 1080,
+    "height": 1920,
+    "resolution": "1080x1920",
+    "aspect_ratio": "9:16",
+    "fps": 30,
+    "codec": "h264",
+    "format": "mp4",
+    "cover_frame": {
+      "uri": "mock://case_01/sample/cover.jpg",
+      "mime_type": "image/jpeg",
+      "width": 1080,
+      "height": 1920
+    }
+  },
+  "shot_count": 18,
+  "shots": [
+    {
+      "shot_id": "shot_01",
+      "time_range": {
+        "start_seconds": 0,
+        "end_seconds": 18,
+        "relative_start_percent": 0,
+        "relative_end_percent": 8
+      },
+      "keyframe_refs": [
+        "kf_01"
+      ],
+      "visual_tags": [
+        "pet_food_packaging",
+        "creator_talking",
+        "large_title"
+      ],
+      "description": "开场用猫粮选购风险建立注意力，强调不要盲买。",
+      "confidence": 0.92
+    },
+    {
+      "shot_id": "shot_02",
+      "time_range": {
+        "start_seconds": 18,
+        "end_seconds": 60,
+        "relative_start_percent": 8,
+        "relative_end_percent": 25
+      },
+      "keyframe_refs": [
+        "kf_02"
+      ],
+      "visual_tags": [
+        "cat",
+        "feeding_scene",
+        "problem_context"
+      ],
+      "description": "解释不同猫咪有不同需求，包括挑食、肠胃敏感、过敏和黑下巴。",
+      "confidence": 0.88
+    },
+    {
+      "shot_id": "shot_03",
+      "time_range": {
+        "start_seconds": 60,
+        "end_seconds": 156,
+        "relative_start_percent": 25,
+        "relative_end_percent": 65
+      },
+      "keyframe_refs": [
+        "kf_03",
+        "kf_04"
+      ],
+      "visual_tags": [
+        "multi_product",
+        "ingredient_table",
+        "recommendation"
+      ],
+      "description": "按猫咪需求拆解多类猫粮方向，并解释每类适合对象。",
+      "confidence": 0.9
+    },
+    {
+      "shot_id": "shot_04",
+      "time_range": {
+        "start_seconds": 156,
+        "end_seconds": 204,
+        "relative_start_percent": 65,
+        "relative_end_percent": 85
+      },
+      "keyframe_refs": [
+        "kf_05"
+      ],
+      "visual_tags": [
+        "criteria",
+        "comparison",
+        "text_card"
+      ],
+      "description": "总结选粮标准，从单品推荐上升到选择方法。",
+      "confidence": 0.86
+    },
+    {
+      "shot_id": "shot_05",
+      "time_range": {
+        "start_seconds": 204,
+        "end_seconds": 240,
+        "relative_start_percent": 85,
+        "relative_end_percent": 100
+      },
+      "keyframe_refs": [
+        "kf_06"
+      ],
+      "visual_tags": [
+        "warning",
+        "cta",
+        "comment_prompt"
+      ],
+      "description": "提醒不要盲目囤大袋，并引导评论区互动。",
+      "confidence": 0.91
+    }
+  ],
+  "keyframes": [
+    {
+      "frame_id": "kf_01",
+      "time_seconds": 3,
+      "media": {
+        "uri": "mock://case_01/sample/keyframes/kf_01.jpg",
+        "mime_type": "image/jpeg",
+        "width": 1080,
+        "height": 1920
+      },
+      "visual_tags": [
+        "large_warning_title",
+        "pet_food"
+      ],
+      "description": "猫粮包装特写叠加警示标题。"
+    },
+    {
+      "frame_id": "kf_02",
+      "time_seconds": 32,
+      "media": {
+        "uri": "mock://case_01/sample/keyframes/kf_02.jpg",
+        "mime_type": "image/jpeg",
+        "width": 1080,
+        "height": 1920
+      },
+      "visual_tags": [
+        "cat_eating",
+        "problem_labels"
+      ],
+      "description": "猫咪吃粮画面，旁边出现挑食和肠胃敏感标签。"
+    },
+    {
+      "frame_id": "kf_03",
+      "time_seconds": 76,
+      "media": {
+        "uri": "mock://case_01/sample/keyframes/kf_03.jpg",
+        "mime_type": "image/jpeg",
+        "width": 1080,
+        "height": 1920
+      },
+      "visual_tags": [
+        "product_01",
+        "selling_point_card"
+      ],
+      "description": "第一类猫粮包装和核心卖点卡片。"
+    },
+    {
+      "frame_id": "kf_04",
+      "time_seconds": 124,
+      "media": {
+        "uri": "mock://case_01/sample/keyframes/kf_04.jpg",
+        "mime_type": "image/jpeg",
+        "width": 1080,
+        "height": 1920
+      },
+      "visual_tags": [
+        "product_02",
+        "ingredient_table"
+      ],
+      "description": "成分表截图和单一肉源说明。"
+    },
+    {
+      "frame_id": "kf_05",
+      "time_seconds": 176,
+      "media": {
+        "uri": "mock://case_01/sample/keyframes/kf_05.jpg",
+        "mime_type": "image/jpeg",
+        "width": 1080,
+        "height": 1920
+      },
+      "visual_tags": [
+        "comparison_card",
+        "selection_criteria"
+      ],
+      "description": "选购标准以对比卡片形式出现。"
+    },
+    {
+      "frame_id": "kf_06",
+      "time_seconds": 224,
+      "media": {
+        "uri": "mock://case_01/sample/keyframes/kf_06.jpg",
+        "mime_type": "image/jpeg",
+        "width": 1080,
+        "height": 1920
+      },
+      "visual_tags": [
+        "cta",
+        "comment_prompt"
+      ],
+      "description": "结尾引导用户评论自家猫情况。"
+    }
+  ],
+  "transcript": {
+    "status": "manual",
+    "language": "zh-CN",
+    "summary": "样例视频围绕新手如何选择猫粮展开，先建立不要盲买的风险，再按挑食、肠胃敏感、过敏、黑下巴等需求拆解不同猫粮方向，最后提醒先小包装试吃并引导评论互动。",
+    "full_text": "新手买猫粮最怕不是买贵，而是买错。不同猫咪需求不一样，挑食、肠胃敏感、容易过敏、黑下巴，对应的选粮逻辑都不一样。肠胃敏感可以关注养护型，容易过敏看单一肉源，挑食看适口性和冻干包裹，担心油脂和黑下巴可以关注低油或烘焙粮。不要只看网红推荐，也不要一上来囤大袋，先小包装试吃。你家猫是什么情况，评论区告诉我。",
+    "segments": [
+      {
+        "time_range": "0-18s",
+        "text": "新手买猫粮最怕不是买贵，而是买错。"
+      },
+      {
+        "time_range": "18-60s",
+        "text": "不同猫咪需求不一样，挑食、肠胃敏感、容易过敏、黑下巴，对应的选粮逻辑都不一样。"
+      },
+      {
+        "time_range": "60-156s",
+        "text": "肠胃敏感可以关注养护型，容易过敏看单一肉源，挑食看适口性和冻干包裹，担心油脂和黑下巴可以关注低油或烘焙粮。"
+      },
+      {
+        "time_range": "156-204s",
+        "text": "重点看肉源、消化率、油脂感，以及是否适合自家猫体质。"
+      },
+      {
+        "time_range": "204-240s",
+        "text": "不要只看网红推荐，也不要一上来囤大袋，先小包装试吃。你家猫是什么情况，评论区告诉我。"
+      }
+    ]
+  },
+  "packaging_observations": {
+    "subtitle_density": "high",
+    "title_bars": [
+      "开头大字风险标题",
+      "产品卖点卡片",
+      "适合对象标签"
+    ],
+    "stickers": [
+      "warning",
+      "check",
+      "comment"
+    ],
+    "transitions": [
+      "quick_cut",
+      "zoom_in",
+      "card_slide"
+    ],
+    "cover_style": "猫粮包装特写 + 强标题 + 适合人群标签"
+  },
+  "warnings": [
+    "当前为 mock 解析结果，真实视频到位后需要用解析服务替换。"
+  ]
+}

@@ -24,12 +24,12 @@ examples/case_01/
 └── timeline_plan.mock.json
 ```
 
-`sample_analysis.mock.json`、`structure_blueprint.mock.json`、`material_analysis.mock.json`、`gap_report.mock.json` 和 `timeline_plan.mock.json` 属于后续 T03 mock fixtures，本 ticket 不创建。
+`sample_analysis.mock.json`、`structure_blueprint.mock.json`、`material_analysis.mock.json`、`gap_report.mock.json` 和 `timeline_plan.mock.json` 是 T03 创建的 mock fixtures，用于在真实后端 AI 和真实样例视频就绪前串起完整 P0 流程。
 
 ## Current Status
 
 - 真实样例视频还没有进入仓库。
-- T01 只定义 demo case，不实现 API、schema 或 mock fixtures。
+- T01 定义 demo case，T02 定义核心 JSON Schema，T03 提供可校验的 mock fixtures。
 - 当前使用字幕内容和结构假设作为 reference。
 - 不要把大视频文件直接提交到 GitHub，除非团队明确决定。
 
