@@ -21,6 +21,24 @@ export class FFprobeExecutionError extends Error {
   }
 }
 
+export class FFmpegUnavailableError extends Error {
+  statusCode = 503;
+
+  constructor(message = "ffmpeg is not installed or not available in PATH") {
+    super(message);
+    this.name = "FFmpegUnavailableError";
+  }
+}
+
+export class FFmpegExecutionError extends Error {
+  statusCode = 422;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "FFmpegExecutionError";
+  }
+}
+
 export type FFprobeStream = {
   codec_type?: string;
   codec_name?: string;
@@ -68,6 +86,39 @@ export const runFFprobe = async (filePath: string): Promise<FFprobeResult> => {
       "[uploaded video]"
     );
     throw new FFprobeExecutionError(`ffprobe failed to inspect video: ${detail}`);
+  }
+};
+
+export type FFmpegPathReplacement = {
+  path: string;
+  replacement: string;
+};
+
+export const runFFmpeg = async (
+  args: string[],
+  sanitizePaths: FFmpegPathReplacement[] = []
+): Promise<void> => {
+  try {
+    await execFileAsync("ffmpeg", args);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException & {
+      stderr?: string;
+      stdout?: string;
+    };
+
+    if (nodeError.code === "ENOENT") {
+      throw new FFmpegUnavailableError();
+    }
+
+    const rawDetail = nodeError.stderr || nodeError.stdout || nodeError.message;
+    const detail = sanitizePaths.reduce((currentDetail, pathToSanitize) => {
+      return currentDetail.replaceAll(
+        pathToSanitize.path,
+        pathToSanitize.replacement
+      );
+    }, rawDetail);
+
+    throw new FFmpegExecutionError(`ffmpeg failed to process video: ${detail}`);
   }
 };
 
