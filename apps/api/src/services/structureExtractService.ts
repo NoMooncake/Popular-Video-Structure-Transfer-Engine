@@ -601,7 +601,7 @@ const requestDoubaoChatCompletion = async (
       temperature: 0.2,
       max_tokens: 4096
     }),
-    signal: AbortSignal.timeout(60_000)
+    signal: AbortSignal.timeout(120_000)
   });
 
   const body = (await response.json().catch(() => ({}))) as ArkChatCompletionResponse;
