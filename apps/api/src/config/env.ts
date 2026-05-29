@@ -29,6 +29,7 @@ export const env = {
   port: readNumber("PORT", 4000),
   uploadDir: readString("UPLOAD_DIR", "uploads"),
   outputDir: readString("OUTPUT_DIR", "outputs"),
+  maxUploadFileSizeMb: readNumber("MAX_UPLOAD_FILE_SIZE_MB", 200),
   llmApiKey: readOptionalString("LLM_API_KEY"),
   seedanceApiKey: readOptionalString("SEEDANCE_API_KEY"),
   aigcImageApiKey: readOptionalString("AIGC_IMAGE_API_KEY"),
