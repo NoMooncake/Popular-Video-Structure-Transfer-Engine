@@ -5,7 +5,8 @@ export const config = {
   port: env.port,
   storage: {
     uploadDir: env.uploadDir,
-    outputDir: env.outputDir
+    outputDir: env.outputDir,
+    maxUploadFileSizeMb: env.maxUploadFileSizeMb
   },
   providers: {
     hasLlmApiKey: Boolean(env.llmApiKey),
