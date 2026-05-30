@@ -1,6 +1,14 @@
 import dotenv from "dotenv";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const repoRootEnvPath = path.resolve(__dirname, "../../../..", ".env");
+
+dotenv.config({ path: repoRootEnvPath, override: false });
 
 const readNumber = (name: string, fallback: number): number => {
   const rawValue = process.env[name];
@@ -30,6 +38,10 @@ export const env = {
   uploadDir: readString("UPLOAD_DIR", "uploads"),
   outputDir: readString("OUTPUT_DIR", "outputs"),
   maxUploadFileSizeMb: readNumber("MAX_UPLOAD_FILE_SIZE_MB", 200),
+  llmProvider: readString("LLM_PROVIDER", "doubao"),
+  llmModel: readString("LLM_MODEL", "Doubao-Seed-2.0-lite"),
+  llmApiBaseUrl: readString("LLM_API_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
+  llmEndpointId: readOptionalString("LLM_ENDPOINT_ID"),
   llmApiKey: readOptionalString("LLM_API_KEY"),
   seedanceApiKey: readOptionalString("SEEDANCE_API_KEY"),
   aigcImageApiKey: readOptionalString("AIGC_IMAGE_API_KEY"),
