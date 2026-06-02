@@ -23,6 +23,7 @@ const schemaFileByName = {
   gap_report: "gap_report.schema.json",
   material_analysis: "material_analysis.schema.json",
   sample_analysis: "sample_analysis.schema.json",
+  slot_mapping: "slot_mapping.schema.json",
   structure_blueprint: "structure_blueprint.schema.json",
   timeline_plan: "timeline_plan.schema.json"
 } as const;
