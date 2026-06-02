@@ -5,6 +5,7 @@ import { devRoutes } from "./dev.routes.js";
 import { frameRoutes } from "./frame.routes.js";
 import { healthRoutes } from "./health.routes.js";
 import { materialRoutes } from "./material.routes.js";
+import { migrationRoutes } from "./migration.routes.js";
 import { sampleRoutes } from "./sample.routes.js";
 import { structureRoutes } from "./structure.routes.js";
 import { uploadRoutes } from "./upload.routes.js";
@@ -16,6 +17,7 @@ apiRoutes.use("/upload", uploadRoutes);
 apiRoutes.use("/frames", frameRoutes);
 apiRoutes.use("/sample", sampleRoutes);
 apiRoutes.use("/structure", structureRoutes);
+apiRoutes.use("/structure", migrationRoutes);
 apiRoutes.use("/material", materialRoutes);
 
 if (config.nodeEnv !== "production") {
