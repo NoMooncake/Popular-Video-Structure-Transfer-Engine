@@ -34,6 +34,9 @@
     "material_analysis_ref": {
       "type": "string"
     },
+    "slot_mapping_ref": {
+      "type": "string"
+    },
     "summary": {
       "type": "object",
       "additionalProperties": false,
