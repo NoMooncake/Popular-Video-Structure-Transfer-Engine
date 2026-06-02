@@ -174,14 +174,27 @@
             "copy_or_subtitle",
             "packaging",
             "aigc",
-            "material_reuse"
+            "material_reuse",
+            "text_overlay_fill",
+            "packaging_card_fill",
+            "reuse_existing_material",
+            "aigc_prompt_candidate"
           ]
         },
         "description": {
           "type": "string"
         },
+        "reason": {
+          "type": "string"
+        },
+        "timeline_usage": {
+          "type": "string"
+        },
         "prompt": {
           "type": "string"
+        },
+        "requires_aigc": {
+          "type": "boolean"
         },
         "priority": {
           "type": "string",
