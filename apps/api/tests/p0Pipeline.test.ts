@@ -86,18 +86,29 @@ test("POST /api/pipeline/p0 returns every P0 stage result", async () => {
       stage_count: number;
       total_slots: number;
       total_gaps: number;
+      timeline_duration_seconds: number;
       timeline_item_count: number;
     };
     stages: {
       sample_analysis: unknown;
-      structure_blueprint: unknown;
+      structure_blueprint: {
+        source: {
+          type: string;
+          model: string;
+        };
+      };
       material_input: unknown;
       material_analysis: unknown;
       slot_mapping: unknown;
       gap_report: unknown;
       fill_strategies: unknown;
       timeline_plan: {
-        timeline: unknown[];
+        timeline: Array<{
+          time_range: {
+            start_seconds?: number;
+            end_seconds?: number;
+          };
+        }>;
       };
     };
   };
@@ -107,9 +118,22 @@ test("POST /api/pipeline/p0 returns every P0 stage result", async () => {
   assert.equal(body.summary.stage_count, 8);
   assert.ok(body.summary.total_slots > 0);
   assert.ok(body.summary.total_gaps > 0);
+  assert.ok(body.summary.timeline_duration_seconds >= 15);
+  assert.ok(body.summary.timeline_duration_seconds <= 30);
   assert.equal(
     body.summary.timeline_item_count,
     body.stages.timeline_plan.timeline.length
+  );
+  assert.equal(body.stages.structure_blueprint.source.type, "mock");
+  assert.ok(body.stages.structure_blueprint.source.model.includes("fallback"));
+  assert.ok(
+    body.stages.timeline_plan.timeline.every((item) => {
+      const endSeconds = item.time_range.end_seconds;
+      return (
+        typeof endSeconds === "number" &&
+        endSeconds <= body.summary.timeline_duration_seconds
+      );
+    })
   );
 
   assert.equal(validateSchema("sample_analysis", body.stages.sample_analysis).valid, true);
@@ -130,7 +154,7 @@ test("POST /api/pipeline/p0 returns every P0 stage result", async () => {
   );
 });
 
-test("POST /api/pipeline/p0 returns failed stage when a stage fails", async () => {
+test("POST /api/pipeline/p0 returns sample stage when sample input is missing", async () => {
   const response = await postPipeline({
     material_input: {
       target_topic: "猫粮避坑种草",
@@ -149,4 +173,26 @@ test("POST /api/pipeline/p0 returns failed stage when a stage fails", async () =
   assert.equal(body.error.code, "pipeline_stage_failed");
   assert.equal(body.error.stage, "sample_analyze");
   assert.match(body.error.message, /sample_file_id or sample_analysis/u);
+});
+
+test("POST /api/pipeline/p0 returns material_input stage for invalid material", async () => {
+  const response = await postPipeline({
+    sample_analysis: readCaseFixture("sample_analysis.mock.json"),
+    material_input: {
+      target_topic: "猫粮避坑种草"
+    },
+    use_mock: true
+  });
+  const body = (await response.json()) as {
+    error: {
+      code: string;
+      stage: string;
+      message: string;
+    };
+  };
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, "pipeline_stage_failed");
+  assert.equal(body.error.stage, "material_input");
+  assert.match(body.error.message, /selling_points/u);
 });
