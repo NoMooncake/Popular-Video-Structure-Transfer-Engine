@@ -8,6 +8,7 @@ import { generateRoutes } from "./generate.routes.js";
 import { healthRoutes } from "./health.routes.js";
 import { materialRoutes } from "./material.routes.js";
 import { migrationRoutes } from "./migration.routes.js";
+import { pipelineRoutes } from "./pipeline.routes.js";
 import { sampleRoutes } from "./sample.routes.js";
 import { structureRoutes } from "./structure.routes.js";
 import { uploadRoutes } from "./upload.routes.js";
@@ -23,6 +24,7 @@ apiRoutes.use("/structure", migrationRoutes);
 apiRoutes.use("/material", materialRoutes);
 apiRoutes.use("/gap", gapRoutes);
 apiRoutes.use("/generate", generateRoutes);
+apiRoutes.use("/pipeline", pipelineRoutes);
 
 if (config.nodeEnv !== "production") {
   apiRoutes.use("/dev", devRoutes);

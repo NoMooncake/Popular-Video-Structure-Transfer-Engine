@@ -114,7 +114,7 @@ type TimelineItem = {
   transition: string;
 };
 
-type TimelinePlan = {
+export type TimelinePlan = {
   id: string;
   version: string;
   created_at: string;
@@ -262,7 +262,8 @@ const normalizeTimeRange = (
   mapping: SlotMappingItem,
   index: number,
   totalItems: number,
-  targetDuration: number
+  targetDuration: number,
+  sourceDuration: number
 ): TimeRange => {
   const parsedRange = parseTimeRange(mapping.time_range);
   if (
@@ -271,10 +272,15 @@ const normalizeTimeRange = (
     Number.isFinite(parsedRange.end) &&
     parsedRange.end > parsedRange.start
   ) {
+    const scale =
+      sourceDuration > targetDuration ? targetDuration / sourceDuration : 1;
+    const start = Number((parsedRange.start * scale).toFixed(2));
+    const end = Number((parsedRange.end * scale).toFixed(2));
+
     return {
-      label: `${formatSeconds(parsedRange.start)}-${formatSeconds(parsedRange.end)}s`,
-      start_seconds: parsedRange.start,
-      end_seconds: parsedRange.end
+      label: `${formatSeconds(start)}-${formatSeconds(end)}s`,
+      start_seconds: start,
+      end_seconds: end
     };
   }
 
@@ -302,6 +308,20 @@ const getTargetDuration = (mappings: SlotMappingItem[]): number => {
   }
 
   return DEFAULT_DURATION_SECONDS;
+};
+
+const getSourceDuration = (
+  mappings: SlotMappingItem[],
+  targetDuration: number
+): number => {
+  const maxEndSeconds = Math.max(
+    0,
+    ...mappings
+      .map((mapping) => parseTimeRange(mapping.time_range)?.end)
+      .filter((value): value is number => typeof value === "number")
+  );
+
+  return maxEndSeconds > 0 ? maxEndSeconds : targetDuration;
 };
 
 const getGapBySlotId = (gapReport?: GapReport): Map<string, Gap> => {
@@ -448,6 +468,7 @@ const createTimelineItem = (
   index: number,
   totalItems: number,
   targetDuration: number,
+  sourceDuration: number,
   gap?: Gap
 ): TimelineItem => {
   const fillOption = getPrimaryFillOption(gap);
@@ -461,7 +482,13 @@ const createTimelineItem = (
   return {
     item_id: `tl_${String(index + 1).padStart(2, "0")}`,
     slot_id: mapping.slot_id,
-    time_range: normalizeTimeRange(mapping, index, totalItems, targetDuration),
+    time_range: normalizeTimeRange(
+      mapping,
+      index,
+      totalItems,
+      targetDuration,
+      sourceDuration
+    ),
     slot_type: mapping.slot_type,
     content_goal: mapping.adapted_content_goal,
     visual_source: visualSource,
@@ -531,6 +558,7 @@ export const generateTimelinePlan = (
   const fillStrategyReport = getFillStrategyReport(payload);
   const gapsBySlotId = getGapBySlotId(fillStrategyReport ?? gapReport);
   const targetDuration = getTargetDuration(slotMapping.mappings);
+  const sourceDuration = getSourceDuration(slotMapping.mappings, targetDuration);
   const targetTopic =
     slotMapping.target.target_topic ||
     structureBlueprint?.category ||
@@ -542,6 +570,7 @@ export const generateTimelinePlan = (
       index,
       slotMapping.mappings.length,
       targetDuration,
+      sourceDuration,
       gapsBySlotId.get(mapping.slot_id)
     )
   );
