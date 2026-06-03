@@ -14,7 +14,7 @@
 
 body {
   margin: 0;
-  min-width: 1180px;
+  min-width: 1728px;
 }
 
 button,
@@ -126,7 +126,9 @@ button {
 }
 
 .workspace {
-  padding: 28px 48px 48px;
+  background: #2f2f2f;
+  min-height: 100vh;
+  padding: 0;
 }
 
 .workspace-header {
@@ -245,15 +247,13 @@ button {
 }
 
 .prompt-panel {
-  align-items: center;
+  background: transparent;
+  border: 0;
   box-shadow: none;
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  padding: 72px 64px 28px;
 }
 
 .prompt-panel h2 {
+  color: #f2f2f2;
   font-size: 40px;
 }
 
@@ -263,7 +263,6 @@ button {
   border-radius: 8px;
   display: grid;
   grid-template-columns: 1fr 40px;
-  max-width: 1000px;
   min-height: 120px;
   padding: 8px;
   width: 100%;
@@ -290,7 +289,7 @@ button {
 .upload-card-grid {
   display: grid;
   gap: 48px;
-  grid-template-columns: repeat(2, minmax(0, 475px));
+  grid-template-columns: repeat(2, 475px);
   justify-content: center;
   padding: 24px 0;
 }
@@ -885,4 +884,318 @@ button {
   .inspector {
     position: static;
   }
+}
+
+/* Figma-aligned dark workspace */
+:root {
+  --theme: #fe2c55;
+  --ink: #f2f2f2;
+  --paper: #2f2f2f;
+  --paper-deep: #292929;
+  --muted-surface: #5f6366;
+  --light-cell: #d8d8d8;
+  --grid-line: #9c9c9c;
+}
+
+body {
+  background: var(--paper-deep);
+}
+
+.topbar {
+  background: #2f2f2f;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--ink);
+}
+
+.brand-title {
+  color: var(--theme);
+}
+
+.brand p,
+.step-link {
+  color: #d1d1d1;
+}
+
+.avatar {
+  background: linear-gradient(135deg, #ffffff, #9b9b9b);
+  color: #161616;
+}
+
+.step-link.active {
+  background: rgba(254, 44, 85, 0.14);
+  border-color: var(--theme);
+  box-shadow: none;
+  color: #ffffff;
+}
+
+.step-index {
+  background: #4d4d4d;
+  color: #ffffff;
+}
+
+.step-link.active .step-index,
+.primary-button {
+  background: var(--theme);
+  border-color: var(--theme);
+  color: #ffffff;
+}
+
+.workspace {
+  background: #2f2f2f;
+  min-height: 100vh;
+}
+
+.workspace-header h1,
+.work-panel h2,
+.work-panel h3 {
+  color: #ffffff;
+}
+
+.workspace-grid.immersive {
+  display: block;
+  max-width: 1728px;
+}
+
+.workspace-grid.immersive .main-column {
+  display: block;
+}
+
+.figma-frame {
+  background: #2f2f2f;
+  color: #f3f3f3;
+  min-height: 1117px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.input-frame .prompt-panel {
+  left: 353px;
+  position: absolute;
+  top: 226px;
+  width: 1000px;
+}
+
+.input-frame .prompt-panel h2 {
+  margin: 10px 0 24px 10px;
+}
+
+.input-frame .upload-card-grid {
+  gap: 48px;
+  left: 364px;
+  padding: 0;
+  position: absolute;
+  top: 492px;
+}
+
+.input-frame .upload-card {
+  background: #d8d8d8;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: #2f2f2f;
+  height: 533px;
+}
+
+.input-frame .brief-panel {
+  display: none;
+}
+
+.figma-topbar {
+  height: 152px;
+  position: relative;
+}
+
+.figma-brand {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  left: 48px;
+  position: absolute;
+  top: 34px;
+}
+
+.figma-brand span {
+  color: var(--theme);
+  font-size: 30px;
+  line-height: 1;
+}
+
+.figma-brand strong {
+  color: #f2f2f2;
+  font-size: 16px;
+  font-weight: 400;
+}
+
+.figma-brand em {
+  color: #d8d8d8;
+  font-style: normal;
+}
+
+.figma-avatar {
+  align-items: center;
+  background: linear-gradient(135deg, #f6f6f6, #8f8f8f);
+  border-radius: 50%;
+  color: #222;
+  display: flex;
+  font-size: 12px;
+  font-weight: 800;
+  height: 40px;
+  justify-content: center;
+  position: absolute;
+  right: 48px;
+  top: 28px;
+  width: 40px;
+}
+
+.figma-next {
+  background: var(--theme);
+  border: 0;
+  border-radius: 999px;
+  color: #ffffff;
+  height: 48px;
+  position: absolute;
+  right: 48px;
+  top: 118px;
+  width: 96px;
+}
+
+.sample-table-head {
+  display: grid;
+  grid-template-columns: 128px 286px 322px 286px 286px 286px;
+  left: 96px;
+  position: absolute;
+  top: 188px;
+  width: 1500px;
+}
+
+.sample-table-head span {
+  color: #f2f2f2;
+  font-size: 18px;
+  text-align: center;
+}
+
+.sample-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  left: 96px;
+  position: absolute;
+  top: 258px;
+}
+
+.sample-row {
+  display: grid;
+  gap: 30px;
+  grid-template-columns: 104px 262px 293px 262px 234px 262px;
+  height: 240px;
+}
+
+.sample-segment-card,
+.figma-copy-card,
+.figma-media-card {
+  border-radius: 12px;
+}
+
+.sample-segment-card,
+.figma-copy-card {
+  align-items: center;
+  background: #626668;
+  color: #f0f0f0;
+  display: flex;
+  justify-content: center;
+  text-align: center;
+}
+
+.sample-segment-card {
+  width: 104px;
+}
+
+.figma-copy-card {
+  flex-direction: column;
+  font-size: 18px;
+}
+
+.figma-media-card {
+  background: var(--light-cell);
+  height: 224px;
+  margin: 8px;
+}
+
+.migration-table {
+  left: 62px;
+  position: absolute;
+  top: 188px;
+  width: 1604px;
+}
+
+.migration-header {
+  background: #d5d5d5;
+  border-radius: 14px 14px 0 0;
+  color: #2f2f2f;
+  display: grid;
+  font-size: 18px;
+  grid-template-columns: 80px 300px 280px 300px 280px 300px;
+  height: 46px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.migration-header span,
+.migration-row > div {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+
+.migration-row {
+  border-bottom: 1px solid var(--grid-line);
+  color: #f1f1f1;
+  display: grid;
+  grid-template-columns: 80px 300px 280px 300px 280px 300px;
+  height: 240px;
+}
+
+.migration-row > div + div {
+  border-left: 1px solid var(--grid-line);
+}
+
+.migration-cell .figma-media-card {
+  height: 224px;
+  margin: 0;
+  width: 284px;
+}
+
+.migration-copy,
+.migration-status,
+.migration-time {
+  font-size: 18px;
+}
+
+.migration-copy {
+  flex-direction: column;
+  gap: 18px;
+}
+
+.migration-copy strong {
+  font-weight: 400;
+}
+
+.migration-copy span {
+  display: block;
+}
+
+.sample-analysis-frame .figma-next,
+.migration-frame .figma-next {
+  top: 118px;
+}
+
+.canvas-panel,
+.work-panel,
+.inspector,
+.analysis-matrix,
+.prompt-panel,
+.upload-card,
+.video-preview {
+  border-color: #4a4a4a;
 }

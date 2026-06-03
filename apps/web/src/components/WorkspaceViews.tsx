@@ -7,35 +7,56 @@ import {
 } from "../data/workflow";
 import type { CanvasBlock, StepKey } from "../types";
 import { StatusBadge } from "./StatusBadge";
+import { VideoBlockCanvas } from "./VideoBlockCanvas";
 
 type WorkspaceViewsProps = {
   activeStep: StepKey;
+  onSelectBlock: (blockId: string) => void;
+  onStepChange: (step: StepKey) => void;
   selectedBlock: CanvasBlock;
+  selectedBlockId: string;
 };
 
-export const WorkspaceViews = ({ activeStep, selectedBlock }: WorkspaceViewsProps) => {
+export const WorkspaceViews = ({
+  activeStep,
+  onSelectBlock,
+  onStepChange,
+  selectedBlock,
+  selectedBlockId
+}: WorkspaceViewsProps) => {
   if (activeStep === "input") {
-    return <InputView />;
+    return <InputView onNext={() => onStepChange("analysis")} />;
   }
 
   if (activeStep === "analysis") {
-    return <AnalysisView />;
+    return <SampleAnalysisView onNext={() => onStepChange("migration")} />;
+  }
+
+  if (activeStep === "migration") {
+    return <StructureMigrationView onNext={() => onStepChange("gap-fill")} />;
   }
 
   if (activeStep === "gap-fill") {
-    return <GapFillView />;
+    return (
+      <GapFillView
+        onNext={() => onStepChange("gap-detail")}
+        onSelectBlock={onSelectBlock}
+        selectedBlockId={selectedBlockId}
+      />
+    );
   }
 
   if (activeStep === "gap-detail") {
-    return <GapDetailView selectedBlock={selectedBlock} />;
+    return <GapDetailView onNext={() => onStepChange("demo")} selectedBlock={selectedBlock} />;
   }
 
   return <DemoView />;
 };
 
-const InputView = () => {
+const InputView = ({ onNext }: { onNext: () => void }) => {
   return (
-    <div className="input-screen">
+    <div className="figma-frame input-frame">
+      <CanvasTopBar actionLabel="下一步" onNext={onNext} />
       <section className="prompt-panel">
         <h2>今天想做个什么样的视频？</h2>
         <div className="prompt-box">
@@ -43,7 +64,7 @@ const InputView = () => {
             defaultValue="开始一次分镜迁移吧：我想基于几条爆款样例，生成一条新手养猫怎么选猫粮的 20 秒短视频。"
             rows={3}
           />
-          <button aria-label="提交需求" type="button">
+          <button aria-label="提交需求" onClick={onNext} type="button">
             ↑
           </button>
         </div>
@@ -77,22 +98,147 @@ const InputView = () => {
   );
 };
 
-const AnalysisView = () => {
-  return (
-    <div className="view-stack">
-      <section className="work-panel">
-        <div className="panel-heading">
-          <span>样例解析2</span>
-          <strong>{structureBlueprint.slots.length} 个结构槽位</strong>
-        </div>
-        <h2>{structureBlueprint.summary}</h2>
-        <p className="muted">
-          这里把样例拆成 Hook、需求、产品展示、对比证明、决策提醒和 CTA，后续会接真实
-          ASR 与多模态分析。
-        </p>
-      </section>
+const analysisRows = [
+  {
+    time: "0 - 2s",
+    segment: "Hook",
+    shot: "口播镜头",
+    status: "已匹配"
+  },
+  {
+    time: "2 - 5s",
+    segment: "Hook",
+    shot: "口播镜头",
+    status: "待补全，对比图不足"
+  },
+  {
+    time: "5 - 10s",
+    segment: "Hook",
+    shot: "口播镜头",
+    status: "已匹配"
+  },
+  {
+    time: "10 - 15s",
+    segment: "Hook",
+    shot: "口播镜头",
+    status: "已匹配"
+  }
+];
 
-      <AnalysisMatrix />
+const migrationRows = [
+  {
+    time: "0 - 2s",
+    title: "Hook",
+    desc: "口播视频",
+    status: "已匹配"
+  },
+  {
+    time: "2 - 5s",
+    title: "Introduction",
+    desc: "产品展示",
+    status: "未匹配"
+  },
+  {
+    time: "5 - 10s",
+    title: "Usage",
+    desc: "操作演示",
+    status: "已匹配"
+  },
+  {
+    time: "10 - 15s",
+    title: "Call to Action",
+    desc: "购买引导",
+    status: "待确认"
+  }
+];
+
+const CanvasTopBar = ({
+  actionLabel = "下一步",
+  onNext
+}: {
+  actionLabel?: string;
+  onNext?: () => void;
+}) => {
+  return (
+    <div className="figma-topbar">
+      <div className="figma-brand">
+        <span>迁镜</span>
+        <strong>未命名画布</strong>
+        <em>↗</em>
+      </div>
+      <div className="figma-avatar">CY</div>
+      <button className="figma-next" onClick={onNext} type="button">
+        {actionLabel}
+      </button>
+    </div>
+  );
+};
+
+const SampleAnalysisView = ({ onNext }: { onNext: () => void }) => {
+  return (
+    <div className="figma-frame sample-analysis-frame">
+      <CanvasTopBar onNext={onNext} />
+      <div className="sample-table-head">
+        <span>结构段落</span>
+        <span>样例视频</span>
+        <span>分镜描述</span>
+        <span>我的素材</span>
+        <span>素材状态</span>
+        <span>迁移结果</span>
+      </div>
+      <div className="sample-grid">
+        {analysisRows.map((row, index) => (
+          <div className="sample-row" key={`${row.time}-${index}`}>
+            <div className="sample-segment-card">{row.segment}</div>
+            <div className="figma-media-card light" />
+            <div className="figma-copy-card">
+              <span>{row.shot}</span>
+            </div>
+            <div className="figma-media-card light" />
+            <div className="figma-copy-card">
+              <span>{row.status}</span>
+            </div>
+            <div className="figma-media-card light" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const StructureMigrationView = ({ onNext }: { onNext: () => void }) => {
+  return (
+    <div className="figma-frame migration-frame">
+      <CanvasTopBar onNext={onNext} />
+      <section className="migration-table" aria-label="结构迁移矩阵">
+        <div className="migration-header">
+          <span>时长</span>
+          <span>样例视频</span>
+          <span>分镜描述</span>
+          <span>我的素材</span>
+          <span>素材状态</span>
+          <span>迁移结果</span>
+        </div>
+        {migrationRows.map((row, index) => (
+          <div className="migration-row" key={row.time}>
+            <div className="migration-time">{row.time}</div>
+            <div className="migration-cell">
+              <div className="figma-media-card light" />
+            </div>
+            <div className="migration-copy">
+              <strong>{row.title}</strong>
+              <span>{row.desc}</span>
+            </div>
+            <div className="migration-cell">
+              <div className="figma-media-card light" />
+            </div>
+            <div className="migration-status">{row.status}</div>
+            <div className="migration-cell">
+              <div className="figma-media-card light" />
+            </div>
+          </div>
+        ))}
+      </section>
     </div>
   );
 };
@@ -144,43 +290,39 @@ const AnalysisMatrix = () => {
   );
 };
 
-const GapFillView = () => {
+const GapFillView = ({
+  onNext,
+  onSelectBlock,
+  selectedBlockId
+}: {
+  onNext: () => void;
+  onSelectBlock: (blockId: string) => void;
+  selectedBlockId: string;
+}) => {
   return (
-    <div className="view-stack">
-      <section className="work-panel">
-        <div className="panel-heading">
-          <span>缺口补全</span>
-          <strong>{gapReport.summary.overall_status}</strong>
-        </div>
-        <h2>{gapReport.summary.notes}</h2>
-        <div className="status-legend">
-          <StatusBadge status="missing" />
-          <StatusBadge status="partial" />
-          <StatusBadge status="matched" />
-        </div>
-      </section>
-
-      <div className="block-list">
-        {canvasBlocks.map((block) => (
-          <article className="work-panel compact" key={block.id}>
-            <div className="panel-heading">
-              <span>{block.timeRange}</span>
-              <StatusBadge status={block.status} />
-            </div>
-            <h3>{block.slot.slot_type}</h3>
-            <p>{block.gap?.strategy ?? "素材可直接承接该结构槽位。"}</p>
-          </article>
-        ))}
-      </div>
+    <div className="figma-frame gap-fill-frame">
+      <CanvasTopBar actionLabel="生成" onNext={onNext} />
+      <VideoBlockCanvas
+        blocks={canvasBlocks}
+        onSelectBlock={onSelectBlock}
+        selectedBlockId={selectedBlockId}
+      />
     </div>
   );
 };
 
-const GapDetailView = ({ selectedBlock }: { selectedBlock: CanvasBlock }) => {
+const GapDetailView = ({
+  onNext,
+  selectedBlock
+}: {
+  onNext: () => void;
+  selectedBlock: CanvasBlock;
+}) => {
   const gaps = selectedBlock.gap ? [selectedBlock.gap] : gapReport.gaps;
 
   return (
-    <div className="view-stack">
+    <div className="figma-frame gap-detail-frame">
+      <CanvasTopBar actionLabel="生成" onNext={onNext} />
       <section className="work-panel">
         <div className="panel-heading">
           <span>缺口详情</span>

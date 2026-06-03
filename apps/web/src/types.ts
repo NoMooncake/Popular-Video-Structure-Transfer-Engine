@@ -1,6 +1,12 @@
 export type MatchStatus = "missing" | "partial" | "matched";
 
-export type StepKey = "input" | "analysis" | "gap-fill" | "gap-detail" | "demo";
+export type StepKey =
+  | "input"
+  | "analysis"
+  | "migration"
+  | "gap-fill"
+  | "gap-detail"
+  | "demo";
 
 export type UploadedVideoFile = {
   file_id: string;

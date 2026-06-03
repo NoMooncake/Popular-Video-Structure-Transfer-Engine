@@ -67,8 +67,13 @@ export const steps = [
   },
   {
     key: "analysis",
-    label: "样例解析2",
-    description: "关键帧、结构槽位和迁移证据"
+    label: "样例解析",
+    description: "按样例视频拆结构段落"
+  },
+  {
+    key: "migration",
+    label: "结构迁移",
+    description: "映射我的素材和迁移结果"
   },
   {
     key: "gap-fill",
