@@ -124,6 +124,10 @@ test("POST /api/generate/timeline creates a schema-valid frontend timeline", asy
     timeline: Array<{
       slot_id: string;
       slot_type: string;
+      time_range: {
+        start_seconds?: number;
+        end_seconds?: number;
+      };
       visual_source: string;
       subtitle: string;
       voiceover: string;
@@ -153,6 +157,16 @@ test("POST /api/generate/timeline creates a schema-valid frontend timeline", asy
   assert.ok(body.timeline.some((item) => Boolean(item.material_ref)));
   assert.ok(body.timeline.some((item) => Boolean(item.gap_ref)));
   assert.ok(body.timeline.some((item) => Boolean(item.fill_strategy_ref)));
+  assert.ok(
+    body.timeline.every(
+      (item) =>
+        typeof item.time_range.start_seconds === "number" &&
+        typeof item.time_range.end_seconds === "number" &&
+        item.time_range.start_seconds >= 0 &&
+        item.time_range.end_seconds > item.time_range.start_seconds &&
+        item.time_range.end_seconds <= body.target_video.duration_seconds
+    )
+  );
 
   const validationResult = validateSchema("timeline_plan", body);
   assert.equal(
