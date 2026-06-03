@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import {
   canvasBlocks,
   gapReport,
@@ -162,7 +164,7 @@ export const WorkspaceViews = ({
   }
 
   if (activeStep === "analysis") {
-    return <SampleAnalysisView onNext={() => onStepChange("migration")} onStepChange={onStepChange} />;
+    return <FigmaSampleAnalysisView onNext={() => onStepChange("migration")} />;
   }
 
   if (activeStep === "migration") {
@@ -336,6 +338,180 @@ const PlaceholderBlock = ({ label }: { label: string }) => (
     <span>{label}</span>
   </div>
 );
+
+const figmaSampleImages = [
+  "https://www.figma.com/api/mcp/asset/539affc8-2d0c-423d-a2cd-d4c5dd4afa48",
+  "https://www.figma.com/api/mcp/asset/7876cb39-6467-4237-90f3-50df9e43f22f",
+  "https://www.figma.com/api/mcp/asset/cc685639-818d-4944-ae66-4da8004e89a4",
+  "https://www.figma.com/api/mcp/asset/18570412-5901-487f-a65f-76a94db932de"
+];
+
+type SampleAnalysisRow = {
+  duration: string;
+  image: string;
+  shotTitle: string;
+  shotDescription: string;
+  migrationPossibility: string;
+};
+
+const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
+  1: [
+    {
+      duration: "0 - 2s",
+      image: figmaSampleImages[0],
+      shotTitle: "开场吸引",
+      shotDescription: "口红膏体近景旋出，光线扫过金属管身，突出质感",
+      migrationPossibility: "可迁移为粉饼开盖、粉扑轻压、粉质飞散等强特写开场。"
+    },
+    {
+      duration: "2 - 4s",
+      image: figmaSampleImages[1],
+      shotTitle: "产品展示",
+      shotDescription: "模特上唇试色，镜头停留在唇部和产品包装",
+      migrationPossibility: "可迁移为粉饼上脸、局部定妆、镜面反光与包装展示。"
+    },
+    {
+      duration: "4 - 6s",
+      image: figmaSampleImages[2],
+      shotTitle: "情绪氛围",
+      shotDescription: "妆容完成后进入聚会场景，强调自信和社交状态",
+      migrationPossibility: "可迁移为妆后近景、柔焦肌肤、外出补妆场景。"
+    },
+    {
+      duration: "6 - 8s",
+      image: figmaSampleImages[3],
+      shotTitle: "行动引导",
+      shotDescription: "主角拿起产品完成最后展示，画面聚焦品牌和使用结果",
+      migrationPossibility: "可迁移为粉饼遮瑕前后、油光前后、妆面服帖度对比。"
+    }
+  ],
+  2: [
+    {
+      duration: "0 - 2s",
+      image: figmaSampleImages[0],
+      shotTitle: "开场吸引",
+      shotDescription: "冰镇可乐特写，冰块滑落，突出清爽感",
+      migrationPossibility: "用强特写制造产品质感冲击，可迁移为粉饼粉质飞散 / 粉盒打开 / 柔焦肌肤特写。"
+    },
+    {
+      duration: "2 - 4s",
+      image: figmaSampleImages[1],
+      shotTitle: "产品展示",
+      shotDescription: "慢动作倒入冰镇可乐，泡沫溢出杯口，展现诱人口感",
+      migrationPossibility: "用材质流动和细节展示产品质感，可迁移为粉质细腻、粉扑按压、粉盒镜面反光。"
+    },
+    {
+      duration: "4 - 6s",
+      image: figmaSampleImages[2],
+      shotTitle: "情感共鸣",
+      shotDescription: "年轻朋友聚会，欢笑畅饮，传递快乐与友谊",
+      migrationPossibility: "可迁移为粉扑取粉、按压上脸、鼻翼/脸颊局部定妆。"
+    },
+    {
+      duration: "6 - 8s",
+      image: figmaSampleImages[3],
+      shotTitle: "行动引导",
+      shotDescription: "主角快速拿起手机，开始操作，镜头跟随手部动作，强调产品界面清晰",
+      migrationPossibility: "可迁移为粉饼遮瑕前后、油光前后、妆面服帖度对比。"
+    }
+  ],
+  3: [
+    {
+      duration: "0 - 2s",
+      image: figmaSampleImages[0],
+      shotTitle: "开场吸引",
+      shotDescription: "产品被快速推入镜头中心，用高反差背景制造注意力",
+      migrationPossibility: "可迁移为粉盒推近、粉扑落下、定妆前肌肤局部特写。"
+    },
+    {
+      duration: "2 - 4s",
+      image: figmaSampleImages[1],
+      shotTitle: "卖点展开",
+      shotDescription: "用连续细节镜头说明产品质感和核心卖点",
+      migrationPossibility: "可迁移为控油、柔焦、遮瑕三个卖点的连续分镜。"
+    },
+    {
+      duration: "4 - 6s",
+      image: figmaSampleImages[2],
+      shotTitle: "场景验证",
+      shotDescription: "进入真实使用环境，展示产品带来的状态变化",
+      migrationPossibility: "可迁移为通勤、约会、聚会前后的妆面稳定对比。"
+    },
+    {
+      duration: "6 - 8s",
+      image: figmaSampleImages[3],
+      shotTitle: "行动引导",
+      shotDescription: "结尾给出明确选择理由，镜头回到产品和最终效果",
+      migrationPossibility: "可迁移为购买理由总结、色号/肤质选择提示和 CTA。"
+    }
+  ]
+};
+
+const FigmaSampleAnalysisView = ({ onNext }: { onNext: () => void }) => {
+  const [activeSample, setActiveSample] = useState(2);
+  const rows = sampleAnalysisTables[activeSample];
+
+  return (
+    <div className="figma-analysis-page">
+      <header className="figma-analysis-topbar">
+        <div className="figma-analysis-brand">
+          <span>迁镜</span>
+          <strong>口红广告</strong>
+          <button aria-label="编辑项目名称" className="figma-edit-icon" type="button">
+            ✎
+          </button>
+        </div>
+        <div className="figma-analysis-avatar" aria-hidden="true" />
+      </header>
+
+      <button className="figma-migration-button" onClick={onNext} type="button">
+        <span>结构迁移</span>
+        <span aria-hidden="true">›</span>
+      </button>
+
+      <nav className="figma-sample-nav" aria-label="样例视频">
+        {[1, 2, 3].map((sampleNumber) => (
+          <button
+            className={sampleNumber === activeSample ? "active" : ""}
+            key={sampleNumber}
+            onClick={() => setActiveSample(sampleNumber)}
+            type="button"
+          >
+            {sampleNumber}
+          </button>
+        ))}
+      </nav>
+
+      <main className="figma-analysis-table-wrap">
+        <div className="figma-analysis-table" role="table" aria-label="样例解析">
+          <div className="figma-analysis-row figma-analysis-head" role="row">
+            <div role="columnheader">时长</div>
+            <div role="columnheader">样例视频</div>
+            <div role="columnheader">分镜描述</div>
+            <div role="columnheader">迁移可能性</div>
+          </div>
+          {rows.map((row) => (
+            <div className="figma-analysis-row" key={`${activeSample}-${row.duration}`} role="row">
+              <div className="duration-cell" role="cell">
+                {row.duration}
+              </div>
+              <div className="sample-media-cell" role="cell">
+                <img alt="" src={row.image} />
+              </div>
+              <div className="shot-desc-cell" role="cell">
+                <strong>{row.shotTitle}</strong>
+                <span>{row.shotDescription}</span>
+              </div>
+              <div className="migration-possibility-cell" role="cell">
+                {row.migrationPossibility}
+              </div>
+            </div>
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+};
 
 const SampleAnalysisView = ({
   onNext,
