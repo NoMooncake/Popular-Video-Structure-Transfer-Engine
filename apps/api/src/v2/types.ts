@@ -85,7 +85,9 @@ export type V2PipelineResult = {
 };
 
 export type V2ImageCandidateRequest = {
-  prompt_package: JsonObject;
+  prompt?: string;
+  image_prompt?: string;
+  prompt_package?: JsonObject;
   count?: number;
   allow_fallback?: boolean;
   reference_images?: string[];

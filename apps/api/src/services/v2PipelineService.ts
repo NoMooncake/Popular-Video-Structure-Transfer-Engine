@@ -976,8 +976,19 @@ export const runV2Pipeline = async (
 export const generateV2ImageCandidates = async (
   payload: V2ImageCandidateRequest
 ): Promise<JsonObject> => {
-  if (!payload.prompt_package || typeof payload.prompt_package !== "object") {
-    throw new V2PipelineInputError("prompt_package is required");
+  const directPrompt =
+    normalizeOptionalString(payload.prompt) || normalizeOptionalString(payload.image_prompt);
+  const promptPackage =
+    payload.prompt_package && typeof payload.prompt_package === "object"
+      ? payload.prompt_package
+      : directPrompt
+        ? {
+            prompt: directPrompt
+          }
+        : undefined;
+
+  if (!promptPackage) {
+    throw new V2PipelineInputError("prompt or prompt_package is required");
   }
 
   const count = Math.max(1, Math.min(6, Number(payload.count || 3)));
@@ -993,14 +1004,14 @@ export const generateV2ImageCandidates = async (
       ...(await collectReferenceImagesForGeneration(referenceVideoRefs, count))
     ];
 
-    return await requestImageCandidates(payload.prompt_package, count, referenceImages);
+    return await requestImageCandidates(promptPackage, count, referenceImages);
   } catch (error) {
     if (!allowFallback) {
       throw error;
     }
 
     return {
-      ...makeFallbackImageCandidateResponse(payload.prompt_package, count),
+      ...makeFallbackImageCandidateResponse(promptPackage, count),
       fallback_reason: sanitizeFallbackReason(error)
     };
   }
