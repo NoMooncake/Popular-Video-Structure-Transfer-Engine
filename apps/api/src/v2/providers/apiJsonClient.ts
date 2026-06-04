@@ -294,7 +294,9 @@ export const requestMultimodalJson = async (
     response_format: {
       type: "json_object"
     },
-    messages
+    messages,
+    max_completion_tokens: 4096,
+    max_tokens: 4096
   })) as ChatCompletionResponse;
 
   return extractJsonObject(responseBody.choices?.[0]?.message?.content);
