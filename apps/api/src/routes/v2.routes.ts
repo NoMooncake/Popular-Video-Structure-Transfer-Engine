@@ -75,7 +75,7 @@ v2Routes.post("/pipeline/analyze", async (req, res) => {
     res.status(getStatusCode(error)).json({
       error: {
         code: "v2_pipeline_failed",
-        message: getErrorMessage(error, "Failed to run V2 pipeline")
+        message: getErrorMessage(error, "V2 pipeline 执行失败")
       }
     });
   }
@@ -99,7 +99,7 @@ v2Routes.post("/generation/image-candidates", async (req, res) => {
     res.status(getStatusCode(error)).json({
       error: {
         code: "v2_image_candidate_generation_failed",
-        message: getErrorMessage(error, "Failed to generate V2 image candidates")
+        message: getErrorMessage(error, "V2 图片候选生成失败")
       }
     });
   }
@@ -123,7 +123,7 @@ v2Routes.post("/generation/image-to-video", async (req, res) => {
     res.status(getStatusCode(error)).json({
       error: {
         code: "v2_image_to_video_failed",
-        message: getErrorMessage(error, "Failed to run V2 image-to-video")
+        message: getErrorMessage(error, "V2 图生视频执行失败")
       }
     });
   }

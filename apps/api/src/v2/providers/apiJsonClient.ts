@@ -279,7 +279,8 @@ export const requestMultimodalJson = async (
               task,
               payload: sanitizeMediaReferences(payload),
               attached_video_count: mediaParts.length,
-              output_format: "Return only one valid JSON object."
+              output_format:
+                "只返回一个合法 JSON object。字段名可以是英文 snake_case；所有面向用户阅读的字段值、说明、文案、图片生成 prompt、图生视频 prompt 必须使用简体中文。"
             },
             null,
             2

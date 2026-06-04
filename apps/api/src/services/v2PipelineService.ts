@@ -26,14 +26,16 @@ export class V2PipelineInputError extends Error {
 }
 
 const v2SystemPrompt = [
-  "You are the API-first V2 planning engine for a short-video structure transfer product.",
-  "Always return one valid JSON object. Do not include markdown.",
-  "The vertical is commercial advertising short videos, usually around 30 seconds.",
-  "Commercial ad structures usually include: strong hook, pain point or demand scene, product hero reveal, selling-point proof, usage process, effect comparison, and CTA.",
-  "Do not copy reference videos literally. Extract reusable structure, rhythm, visual logic, commercial persuasion logic, and packaging logic.",
-  "When material is missing, produce generation prompts for new user content rather than copying the sample.",
-  "If user materials are sufficient, produce an assembly/editing plan. If materials are insufficient, produce image prompts first and then image-to-video prompts.",
-  "The product flow is: read 2-3 reference videos, analyze user request/materials, synthesize a fillable architecture, then plan assembly or AIGC prompts."
+  "你是一个 API-first V2 短视频结构迁移规划引擎。",
+  "必须只返回一个合法 JSON object，不要包含 markdown。",
+  "所有面向用户阅读的内容必须使用简体中文，包括摘要、分析说明、槽位描述、素材判断、剪辑方案、图片生成 prompt、图生视频 prompt、CTA 文案和备注。",
+  "字段名可以保持 snake_case 英文，但字段值必须中文；只有品牌名、模型名、URL、文件名等专有名词可以保留原文。",
+  "当前垂类是商业广告短视频，目标时长通常约 15-30 秒。",
+  "商业广告结构通常包括：强 Hook、痛点/需求场景、产品亮相、卖点证明、使用过程、效果对比、CTA。",
+  "不要照抄样例视频内容，只提取可复用的结构、节奏、视觉逻辑、商业说服逻辑和包装逻辑。",
+  "当用户素材不足时，生成服务于新内容的中文生成 prompt，不要复制样例视频中的具体人物、场景或品牌内容。",
+  "如果用户素材足够，输出中文剪辑/拼接方案；如果素材不足，先输出中文图片生成 prompt，再输出中文图生视频 prompt。",
+  "产品流程是：阅读 2-3 个样例视频，分析用户需求和素材，综合出可填写结构，再规划素材拼接或 AIGC 补全方案。"
 ].join(" ");
 
 const normalizeOptionalString = (value: unknown): string | undefined => {
@@ -356,33 +358,33 @@ const makeFallbackReferenceAnalysis = (
     },
     architecture_id: `commercial_ad_reference_${String(index).padStart(2, "0")}`,
     video_summary:
-      "Fallback analysis assumes this reference is a short commercial ad and extracts reusable advertising structure rather than literal content.",
+      "降级分析假设该样例是商业广告短视频，只提取可迁移的广告结构，不复制具体内容。",
     target_duration_seconds: targetDuration,
     structure_slots: commercialAdSlots.map((slot, slotIndex) => ({
       slot_id: `ref_${index}_slot_${String(slotIndex + 1).padStart(2, "0")}`,
       slot_type: slot.slot_type,
       time_range: makeSlotDuration(slotIndex, targetDuration),
       role: slot.role,
-      reusable_rule: `Use ${slot.slot_type} to serve this commercial objective: ${slot.role}.`,
+      reusable_rule: `使用 ${slot.slot_type} 服务这个商业广告目标：${slot.role}。`,
       common_visuals: slot.common_visuals,
       common_packaging: slot.common_packaging
     })),
     rhythm_patterns: [
-      "0-3s strong hook",
-      "3-11s pain point and product reveal",
-      "11-22s selling proof and usage process",
-      "22-30s comparison and CTA"
+      "0-3 秒强 Hook",
+      "3-11 秒痛点建立和产品亮相",
+      "11-22 秒卖点证明和使用过程",
+      "22-30 秒效果对比和 CTA"
     ],
     visual_language: [
-      "vertical 9:16 commercial framing",
-      "large readable text overlays",
-      "fast cuts around hook and CTA",
-      "close-up product proof shots"
+      "竖屏 9:16 商业广告构图",
+      "大字号、易读的文字包装",
+      "Hook 和 CTA 段落使用快切",
+      "用产品近景证明卖点"
     ],
     transferable_rules: [
-      "Extract persuasive slot order, not specific sample content.",
-      "Prioritize product visibility and proof.",
-      "Use packaging to compensate when raw footage is weak."
+      "迁移说服顺序，不迁移样例的具体内容。",
+      "优先保证产品可见和卖点可信。",
+      "当原始素材较弱时，用字幕、卡片和包装补足表达。"
     ],
     confidence: 0.45
   };
@@ -458,7 +460,7 @@ const makeFallbackMaterialAnalysis = (
           }
         ],
     risks: [
-      "Fallback 未真实观看素材内容，只基于输入引用和文本做结构判断。",
+      "降级模式未真实观看素材内容，只基于输入引用和文本做结构判断。",
       "真实多模态 provider 接通后应以视觉理解结果覆盖该输出。"
     ]
   };
@@ -547,7 +549,7 @@ const makeFallbackProductionPlan = (
           canAssemble || index < normalized.user_materials.length
             ? "user_material"
             : "generated_image_then_video",
-        editing_instruction: `Use this segment for ${slot.role}.`
+        editing_instruction: `该段用于完成广告目标：${slot.role}。`
       }))
     },
     missing_slots: missingSlots,
@@ -630,7 +632,7 @@ const makeFallbackImageCandidateResponse = (
   return {
     source: {
       type: "mock",
-      reason: "image generation provider unavailable"
+      reason: "图片生成 provider 未配置或调用失败"
     },
     data: Array.from({ length: count }, (_, index) => {
       const promptRecord = asJsonObject(
@@ -646,7 +648,7 @@ const makeFallbackImageCandidateResponse = (
           `image_prompt_${String(index + 1).padStart(2, "0")}`,
         prompt,
         uri: undefined,
-        note: "Mock candidate only. Configure image provider to receive a real image URI."
+        note: "这是 mock 图片候选。配置真实图片生成 provider 后会返回真实图片 URI。"
       };
     })
   };
@@ -659,7 +661,7 @@ const makeFallbackImageToVideoResponse = (
     source: {
       type: "mock",
       provider: config.providers.v2.video.provider,
-      reason: "video generation provider unavailable"
+      reason: "视频生成 provider 未配置或调用失败"
     },
     job_id: `mock_video_job_${Date.now()}`,
     status: "mock_ready",
@@ -670,7 +672,7 @@ const makeFallbackImageToVideoResponse = (
       aspect_ratio: payload.aspect_ratio || "9:16"
     },
     note:
-      "This is a mock image-to-video job response. Configure the real video provider adapter before expecting generated media."
+      "这是 mock 图生视频任务响应。配置真实视频生成 provider 后才会返回真实生成任务或视频结果。"
   };
 };
 
@@ -693,7 +695,7 @@ export const runV2Pipeline = async (
           video: videoRef,
           expected_slots: commercialAdSlots.map((slot) => slot.slot_type),
           instruction:
-            "Read and understand this commercial ad reference video. Return architecture slots, rhythm, visual/packaging style, persuasion logic, content logic, and reusable patterns. Do not copy literal content."
+            "阅读并理解这个商业广告样例视频。请用中文返回广告结构槽位、节奏、视觉/包装风格、说服逻辑、内容逻辑和可迁移模式。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
         },
         allowFallback,
         (reason) =>
@@ -718,7 +720,7 @@ export const runV2Pipeline = async (
       user_materials: normalized.user_materials,
       text_assets: normalized.text_assets,
       instruction:
-        "Analyze what the user wants and what their materials can support for a 30-second commercial ad. Return usable assets, weak assets, missing assets, and material-to-slot suggestions."
+        "分析用户想要什么，以及用户素材能支撑一个商业广告短视频中的哪些槽位。请用中文返回可用素材、弱素材、缺失素材、素材到槽位的建议。所有说明和后续 prompt 必须中文。"
     },
     allowFallback,
     (reason) => makeFallbackMaterialAnalysis(normalized, reason)
@@ -738,7 +740,7 @@ export const runV2Pipeline = async (
       reference_video_analyses: referenceVideoAnalyses,
       user_material_analysis: userMaterialAnalysis,
       instruction:
-        "Combine multiple commercial ad reference architectures into one fillable 30-second architecture for the user's new ad. Return editable slots the user can fill."
+        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
     },
     allowFallback,
     (reason) =>
@@ -763,7 +765,7 @@ export const runV2Pipeline = async (
       fillable_architecture: fillableArchitecture,
       user_material_analysis: userMaterialAnalysis,
       instruction:
-        "Decide whether existing user material is enough for a commercial ad. If enough, return an assembly plan. If not, return image prompt candidates first and image-to-video prompts for a video generation model."
+        "判断现有用户素材是否足够生成商业广告。如果足够，请用中文返回剪辑/拼接方案；如果不足，请先用中文返回缺失素材的图片生成 prompt，再用中文返回图生视频 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。"
     },
     allowFallback,
     (reason) =>
@@ -833,8 +835,8 @@ export const runV2Pipeline = async (
       target_duration_seconds: targetDuration,
       notes:
         fallbackReasons.length > 0
-          ? "V2 completed with fallback outputs. Provider-specific API adapters or credentials should be verified before treating generated media as real."
-          : "V2 API-first pipeline completed. If image_candidates are present, ask the user to approve one before calling image-to-video generation."
+          ? "V2 已使用降级输出完成。请确认真实 provider adapter 和密钥配置后，再将生成媒体视为真实结果。"
+          : "V2 API-first 链路已完成。如果返回 image_candidates，请先让用户确认候选图，再调用图生视频。"
     }
   };
 };
