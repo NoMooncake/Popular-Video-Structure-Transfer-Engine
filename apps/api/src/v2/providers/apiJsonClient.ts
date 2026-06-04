@@ -1,4 +1,5 @@
 import { config } from "../../config/index.js";
+import fs from "node:fs";
 import type { JsonObject } from "../types.js";
 
 type ApiProviderConfig = {
@@ -14,6 +15,20 @@ type ChatMessage = {
   role: "system" | "user";
   content: unknown;
 };
+
+type ChatContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "video_url";
+      video_url: {
+        url: string;
+      };
+      fps: number;
+      media_resolution: "default" | "max";
+    };
 
 type ChatCompletionResponse = {
   choices?: Array<{
@@ -92,6 +107,116 @@ const extractJsonObject = (content: string | JsonObject | undefined): JsonObject
   }
 };
 
+const isVideoReference = (value: string): boolean => {
+  return /\.(mp4|mov|avi|wmv)(?:[?#].*)?$/iu.test(value);
+};
+
+const getMimeType = (value: string): string => {
+  const lowerValue = value.toLowerCase();
+
+  if (lowerValue.endsWith(".mov")) {
+    return "video/quicktime";
+  }
+
+  if (lowerValue.endsWith(".avi")) {
+    return "video/x-msvideo";
+  }
+
+  if (lowerValue.endsWith(".wmv")) {
+    return "video/x-ms-wmv";
+  }
+
+  return "video/mp4";
+};
+
+const toVideoUrl = (value: string): string | undefined => {
+  if (value.startsWith("data:video/")) {
+    return value;
+  }
+
+  if (/^https?:\/\//iu.test(value) && isVideoReference(value)) {
+    return value;
+  }
+
+  if (!value.startsWith("/") || !isVideoReference(value) || !fs.existsSync(value)) {
+    return undefined;
+  }
+
+  const maxRawBytesForBase64Limit = 37 * 1024 * 1024;
+  const stats = fs.statSync(value);
+
+  if (!stats.isFile() || stats.size > maxRawBytesForBase64Limit) {
+    return undefined;
+  }
+
+  const encodedVideo = fs.readFileSync(value).toString("base64");
+  return `data:${getMimeType(value)};base64,${encodedVideo}`;
+};
+
+const collectVideoContentParts = (value: unknown): ChatContentPart[] => {
+  const parts: ChatContentPart[] = [];
+  const visit = (currentValue: unknown): void => {
+    if (Array.isArray(currentValue)) {
+      for (const item of currentValue) {
+        visit(item);
+      }
+      return;
+    }
+
+    if (!currentValue || typeof currentValue !== "object") {
+      return;
+    }
+
+    const record = currentValue as Record<string, unknown>;
+    const uri = typeof record.uri === "string" ? record.uri : undefined;
+    const url = typeof record.url === "string" ? record.url : undefined;
+    const videoUrl = uri ? toVideoUrl(uri) : url ? toVideoUrl(url) : undefined;
+
+    if (videoUrl) {
+      parts.push({
+        type: "video_url",
+        video_url: {
+          url: videoUrl
+        },
+        fps: 2,
+        media_resolution: "default"
+      });
+    }
+
+    for (const nestedValue of Object.values(record)) {
+      visit(nestedValue);
+    }
+  };
+
+  visit(value);
+  return parts;
+};
+
+const sanitizeMediaReferences = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeMediaReferences(item));
+  }
+
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, nestedValue]) => {
+      if (
+        (key === "uri" || key === "url") &&
+        typeof nestedValue === "string" &&
+        (nestedValue.startsWith("data:video/") ||
+          (nestedValue.startsWith("/") && isVideoReference(nestedValue)))
+      ) {
+        return [key, "[attached_video]"];
+      }
+
+      return [key, sanitizeMediaReferences(nestedValue)];
+    })
+  );
+};
+
 const requestJson = async (
   providerConfig: ApiProviderConfig,
   body: JsonObject
@@ -137,6 +262,7 @@ export const requestMultimodalJson = async (
   payload: JsonObject
 ): Promise<JsonObject> => {
   const providerConfig = config.providers.v2.multimodal;
+  const mediaParts = collectVideoContentParts(payload);
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -145,12 +271,14 @@ export const requestMultimodalJson = async (
     {
       role: "user",
       content: [
+        ...mediaParts,
         {
           type: "text",
           text: JSON.stringify(
             {
               task,
-              payload,
+              payload: sanitizeMediaReferences(payload),
+              attached_video_count: mediaParts.length,
               output_format: "Return only one valid JSON object."
             },
             null,
