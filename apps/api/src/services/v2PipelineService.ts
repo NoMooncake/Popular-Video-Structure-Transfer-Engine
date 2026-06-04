@@ -4,6 +4,7 @@ import {
   requestImageToVideo,
   requestMultimodalJson
 } from "../v2/providers/apiJsonClient.js";
+import { collectV2ReferenceFramesFromVideos } from "../v2/referenceFrames.js";
 import type {
   JsonObject,
   V2ImageCandidate,
@@ -311,6 +312,28 @@ const normalizeImageCandidates = (
       provider_response: record
     };
   });
+};
+
+const normalizeReferenceImages = (value: unknown): string[] => {
+  return normalizeStringArray(value).filter((image) =>
+    /^data:image\/|^https?:\/\//iu.test(image)
+  );
+};
+
+const normalizeReferenceVideoUris = (value: unknown): V2VideoRef[] => {
+  return normalizeStringArray(value).map((uri, index) => ({
+    uri,
+    role: "user_material",
+    label: `reference_video_${String(index + 1).padStart(2, "0")}`
+  }));
+};
+
+const collectReferenceImagesForGeneration = async (
+  videoRefs: V2VideoRef[],
+  maxFrames: number
+): Promise<string[]> => {
+  const frames = await collectV2ReferenceFramesFromVideos(videoRefs, maxFrames);
+  return frames.map((frame) => frame.data_url);
 };
 
 const sanitizeFallbackReason = (error: unknown): string => {
@@ -886,8 +909,17 @@ export const runV2Pipeline = async (
       ? await (async () => {
           const count = Number(normalized.options.image_candidate_count || 3);
           try {
+            const referenceImages = await collectReferenceImagesForGeneration(
+              normalized.user_materials,
+              count
+            );
+
             return normalizeImageCandidates(
-              await requestImageCandidates(getPromptPackage(productionPlan), count),
+              await requestImageCandidates(
+                getPromptPackage(productionPlan),
+                count,
+                referenceImages
+              ),
               count
             );
           } catch (error) {
@@ -952,7 +984,16 @@ export const generateV2ImageCandidates = async (
   const allowFallback = payload.allow_fallback !== false;
 
   try {
-    return await requestImageCandidates(payload.prompt_package, count);
+    const referenceVideoRefs = [
+      ...normalizeVideoRefs(payload.reference_videos, [], "user_material"),
+      ...normalizeReferenceVideoUris(payload.reference_video_uris)
+    ];
+    const referenceImages = [
+      ...normalizeReferenceImages(payload.reference_images),
+      ...(await collectReferenceImagesForGeneration(referenceVideoRefs, count))
+    ];
+
+    return await requestImageCandidates(payload.prompt_package, count, referenceImages);
   } catch (error) {
     if (!allowFallback) {
       throw error;

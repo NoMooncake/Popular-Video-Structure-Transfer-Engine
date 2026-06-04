@@ -276,15 +276,15 @@ const extractImagePrompt = (promptPackage: JsonObject): string => {
 };
 
 const withImageCandidateInstruction = (prompt: string, count: number): string => {
-  if (count <= 1) {
-    return prompt;
-  }
-
   return [
     prompt,
     "",
-    `请基于以上同一个广告槽位生成 ${count} 张候选图，供用户选择。`,
-    "三张候选图必须保持同一产品、同一广告意图和同一画幅比例，但在构图、光线、景别、背景细节或视觉冲击点上有明确差异。",
+    count > 1
+      ? `请基于以上同一个广告槽位生成 ${count} 张候选图，供用户选择。`
+      : "请基于以上广告槽位生成 1 张候选图，供用户确认。",
+    "如果请求中包含参考图片，请把这些图片作为用户素材的视觉参考，尽量还原其中的产品、人物主角、包装、场景、构图关系和色调质感。",
+    "如果参考图中出现人物，人物相关画面要尽量保持该人物的年龄感、发型、穿着风格、气质和场景关系；如果参考图中没有人物，非必要画面不要凭空新增人物。",
+    "候选图必须保持同一产品、同一广告意图和同一画幅比例；多张候选图之间要在构图、光线、景别、背景细节或视觉冲击点上有明确差异。",
     "不要改变产品核心设定，不要加入无关品牌，不要把候选图做成重复画面。"
   ].join("\n");
 };
@@ -377,18 +377,42 @@ export const requestMultimodalJson = async (
 
 export const requestImageCandidates = async (
   promptPackage: JsonObject,
-  count: number
+  count: number,
+  referenceImages: string[] = []
 ): Promise<JsonObject> => {
   const providerConfig = config.providers.v2.image;
   const prompt = withImageCandidateInstruction(extractImagePrompt(promptPackage), count);
+  const normalizedReferenceImages = referenceImages.filter((image) =>
+    /^data:image\/|^https?:\/\//iu.test(image)
+  );
+  const referenceImageBody =
+    normalizedReferenceImages.length > 0
+      ? {
+          image:
+            normalizedReferenceImages.length === 1
+              ? normalizedReferenceImages[0]
+              : normalizedReferenceImages
+        }
+      : {};
+  const multiImageBody =
+    count > 1
+      ? {
+          sequential_image_generation: "auto",
+          sequential_image_generation_options: {
+            max_images: count
+          }
+        }
+      : {};
 
   return requestJson(providerConfig, {
     model: providerConfig.model,
     prompt,
     size: "2K",
+    output_format: "png",
     response_format: "url",
-    n: count,
-    watermark: true
+    watermark: true,
+    ...referenceImageBody,
+    ...multiImageBody
   });
 };
 

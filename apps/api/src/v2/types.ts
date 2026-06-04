@@ -88,6 +88,9 @@ export type V2ImageCandidateRequest = {
   prompt_package: JsonObject;
   count?: number;
   allow_fallback?: boolean;
+  reference_images?: string[];
+  reference_video_uris?: string[];
+  reference_videos?: V2VideoRef[];
 };
 
 export type V2ImageToVideoRequest = {
