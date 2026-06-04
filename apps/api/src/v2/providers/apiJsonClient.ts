@@ -275,7 +275,27 @@ const extractImagePrompt = (promptPackage: JsonObject): string => {
   throw new V2ProviderExecutionError("未找到可用于生图的 prompt");
 };
 
-const withImageCandidateInstruction = (prompt: string, count: number): string => {
+const candidateDiversityInstructions = [
+  "候选图 1：标准商品定版。构图更稳，产品主体完整清晰，适合直接做广告主视觉卡片。",
+  "候选图 2：动感冲击版本。镜头角度更有张力，视觉动势、材质高光、动作瞬间或场景能量更强，适合强调产品带来的核心感受。",
+  "候选图 3：高级留白版本。背景更简洁，CTA 文字预留空间更大，光线更干净，适合后续叠加按钮、优惠或口号。",
+  "候选图 4：近景质感版本。镜头更靠近产品或关键使用细节，突出材质、纹理、包装、质地、光泽、触感或工艺感。",
+  "候选图 5：场景氛围版本。保留同一产品主体，但背景加入更明确的使用场景、目标人群或生活方式暗示，仍然不能改变产品设定。",
+  "候选图 6：强包装版本。产品包装、品牌视觉和可识别元素更突出，适合前端卡片里作为更商业化的选择。"
+] as const;
+
+const withImageCandidateInstruction = (
+  prompt: string,
+  count: number,
+  candidateIndex?: number
+): string => {
+  const candidateInstruction =
+    candidateIndex === undefined
+      ? undefined
+      : candidateDiversityInstructions[
+          candidateIndex % candidateDiversityInstructions.length
+        ];
+
   return [
     prompt,
     "",
@@ -283,6 +303,9 @@ const withImageCandidateInstruction = (prompt: string, count: number): string =>
     count > 1
       ? `请基于以上同一个广告槽位生成 ${count} 张候选图，供用户选择。`
       : "请基于以上广告槽位生成 1 张候选图，供用户确认。",
+    candidateInstruction
+      ? `【本次只生成其中 1 张】${candidateInstruction}`
+      : undefined,
     "多张候选图必须围绕同一个具体主题、同一个产品设定、同一个广告槽位和同一个视觉任务生成；只允许在构图、光线、景别、背景细节、镜头角度或视觉冲击点上变化。",
     "不要把 prompt 里的多个示例、多个物体、多个场景分别生成成不同主题的候选图；如果 prompt 中列出多个例子，请选最符合用户素材和产品的一种作为统一主题。",
     "如果请求中包含参考图片，请把这些图片作为用户素材的强参考，而不是普通风格参考；必须优先保持其中的产品、人物主角、包装、场景、构图关系和色调质感。",
@@ -290,7 +313,9 @@ const withImageCandidateInstruction = (prompt: string, count: number): string =>
     "如果参考图片里有人物，即使原 prompt 写了“不要出现人物”或类似限制，也要理解为“不要新增无关人物”，不能删除参考图里的主角人物；人物相关画面要尽量保持年龄感、发型、穿着风格、气质和场景关系。",
     "如果参考图片里没有人物，非必要画面不要凭空新增人物。",
     "不要改变产品核心设定，不要加入无关品牌，不要把候选图做成重复画面。"
-  ].join("\n");
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join("\n");
 };
 
 const requestJson = async (
@@ -385,7 +410,7 @@ export const requestImageCandidates = async (
   referenceImages: string[] = []
 ): Promise<JsonObject> => {
   const providerConfig = config.providers.v2.image;
-  const prompt = withImageCandidateInstruction(extractImagePrompt(promptPackage), count);
+  const basePrompt = extractImagePrompt(promptPackage);
   const normalizedReferenceImages = referenceImages.filter((image) =>
     /^data:image\/|^https?:\/\//iu.test(image)
   );
@@ -398,26 +423,57 @@ export const requestImageCandidates = async (
               : normalizedReferenceImages
         }
       : {};
-  const multiImageBody =
-    count > 1
-      ? {
-          sequential_image_generation: "auto",
-          sequential_image_generation_options: {
-            max_images: count
-          }
-        }
-      : {};
 
-  return requestJson(providerConfig, {
+  const makeRequestBody = (prompt: string): JsonObject => ({
     model: providerConfig.model,
     prompt,
     size: "2K",
     output_format: "png",
     response_format: "url",
     watermark: true,
-    ...referenceImageBody,
-    ...multiImageBody
+    ...referenceImageBody
   });
+
+  if (count <= 1) {
+    return requestJson(
+      providerConfig,
+      makeRequestBody(withImageCandidateInstruction(basePrompt, count))
+    );
+  }
+
+  const responses = await Promise.all(
+    Array.from({ length: count }, (_value, index) =>
+      requestJson(
+        providerConfig,
+        makeRequestBody(withImageCandidateInstruction(basePrompt, count, index))
+      )
+    )
+  );
+  const data = responses.flatMap((response) =>
+    Array.isArray(response.data) ? response.data : [response]
+  );
+  const usage = responses.reduce<JsonObject>((currentUsage, response) => {
+    const responseUsage = asObject(response.usage);
+
+    for (const field of ["generated_images", "output_tokens", "total_tokens"]) {
+      const currentValue = Number(currentUsage[field] || 0);
+      const nextValue = Number(responseUsage[field] || 0);
+
+      if (Number.isFinite(nextValue)) {
+        currentUsage[field] = currentValue + nextValue;
+      }
+    }
+
+    return currentUsage;
+  }, {});
+
+  return {
+    model: normalizeOptionalString(responses[0]?.model) || providerConfig.model,
+    created: responses[0]?.created,
+    candidate_generation_mode: "separate_variant_requests",
+    data,
+    usage
+  };
 };
 
 export const requestImageToVideo = async (
