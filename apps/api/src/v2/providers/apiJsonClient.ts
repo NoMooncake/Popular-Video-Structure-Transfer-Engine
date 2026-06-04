@@ -217,6 +217,78 @@ const sanitizeMediaReferences = (value: unknown): unknown => {
   );
 };
 
+const normalizeOptionalString = (value: unknown): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmedValue = value.trim();
+  return trimmedValue.length > 0 ? trimmedValue : undefined;
+};
+
+const asObject = (value: unknown): JsonObject => {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : {};
+};
+
+const firstObjectFromArray = (value: unknown): JsonObject => {
+  return Array.isArray(value) ? asObject(value[0]) : {};
+};
+
+const extractImagePrompt = (promptPackage: JsonObject): string => {
+  const directPrompt =
+    normalizeOptionalString(promptPackage.prompt) ||
+    normalizeOptionalString(promptPackage.image_prompt);
+
+  if (directPrompt) {
+    return directPrompt;
+  }
+
+  const candidates = [
+    firstObjectFromArray(promptPackage.image_prompt_candidates),
+    firstObjectFromArray(promptPackage.image_prompts),
+    firstObjectFromArray(promptPackage.image_generation_prompts),
+    firstObjectFromArray(asObject(promptPackage.generation_prompt_package).image_prompt_candidates),
+    firstObjectFromArray(
+      asObject(promptPackage.generation_prompts_for_insufficient_slots).image_prompts
+    ),
+    firstObjectFromArray(
+      asObject(promptPackage.missing_material_prompts).image_generation_prompts
+    ),
+    firstObjectFromArray(
+      asObject(promptPackage.aigc_generation_plan).picture_generation_prompts
+    )
+  ];
+
+  for (const candidate of candidates) {
+    const prompt =
+      normalizeOptionalString(candidate.prompt) ||
+      normalizeOptionalString(candidate.image_prompt) ||
+      normalizeOptionalString(candidate["图片生成提示词"]);
+
+    if (prompt) {
+      return prompt;
+    }
+  }
+
+  throw new V2ProviderExecutionError("未找到可用于生图的 prompt");
+};
+
+const withImageCandidateInstruction = (prompt: string, count: number): string => {
+  if (count <= 1) {
+    return prompt;
+  }
+
+  return [
+    prompt,
+    "",
+    `请基于以上同一个广告槽位生成 ${count} 张候选图，供用户选择。`,
+    "三张候选图必须保持同一产品、同一广告意图和同一画幅比例，但在构图、光线、景别、背景细节或视觉冲击点上有明确差异。",
+    "不要改变产品核心设定，不要加入无关品牌，不要把候选图做成重复画面。"
+  ].join("\n");
+};
+
 const requestJson = async (
   providerConfig: ApiProviderConfig,
   body: JsonObject
@@ -308,11 +380,15 @@ export const requestImageCandidates = async (
   count: number
 ): Promise<JsonObject> => {
   const providerConfig = config.providers.v2.image;
+  const prompt = withImageCandidateInstruction(extractImagePrompt(promptPackage), count);
 
   return requestJson(providerConfig, {
     model: providerConfig.model,
-    prompt_package: promptPackage,
-    n: count
+    prompt,
+    size: "2K",
+    response_format: "url",
+    n: count,
+    watermark: true
   });
 };
 
