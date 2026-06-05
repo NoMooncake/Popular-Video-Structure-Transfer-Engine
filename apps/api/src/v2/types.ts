@@ -114,7 +114,12 @@ export type V2ImageToVideoRequest = {
   approved_image_uri: string;
   video_prompt: string;
   duration_seconds?: number;
+  target_duration_seconds?: number;
   aspect_ratio?: string;
+  slot_id?: string;
+  slot_type?: string;
+  slot_description?: string;
+  auto_trim_review?: boolean;
   camera_fixed?: boolean;
   watermark?: boolean;
   allow_fallback?: boolean;

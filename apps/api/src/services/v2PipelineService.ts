@@ -2236,7 +2236,9 @@ export const generateV2ImageToVideo = async (
   const allowFallback = payload.allow_fallback !== false;
 
   try {
-    return await requestImageToVideo(requestPayload);
+    const providerResponse = await requestImageToVideo(requestPayload);
+    saveImageToVideoAutoTrimContext(providerResponse, payload, requestPayload);
+    return providerResponse;
   } catch (error) {
     if (!allowFallback) {
       throw error;
@@ -2253,9 +2255,17 @@ const generatedVideoReviewDir = path.resolve(
   process.cwd(),
   "../../outputs/v2_generated_video_review"
 );
+const generatedVideoTaskContextDir = path.resolve(
+  process.cwd(),
+  "../../outputs/v2_generated_video_tasks"
+);
 
 const ensureGeneratedVideoReviewDir = (): void => {
   fs.mkdirSync(generatedVideoReviewDir, { recursive: true });
+};
+
+const ensureGeneratedVideoTaskContextDir = (): void => {
+  fs.mkdirSync(generatedVideoTaskContextDir, { recursive: true });
 };
 
 const isHttpUrl = (value: string): boolean => /^https?:\/\//iu.test(value);
@@ -2428,6 +2438,154 @@ const trimGeneratedVideo = async (
   return outputPath;
 };
 
+const normalizeTaskId = (value: unknown): string | undefined => {
+  return normalizeOptionalString(value)?.replace(/[^a-zA-Z0-9_-]/gu, "");
+};
+
+const getGeneratedVideoTaskContextPath = (taskId: string): string =>
+  path.join(generatedVideoTaskContextDir, `${taskId}.json`);
+
+const readGeneratedVideoTaskContext = (taskId: string): JsonObject | undefined => {
+  const contextPath = getGeneratedVideoTaskContextPath(taskId);
+  if (!fs.existsSync(contextPath)) {
+    return undefined;
+  }
+
+  return JSON.parse(fs.readFileSync(contextPath, "utf8")) as JsonObject;
+};
+
+const writeGeneratedVideoTaskContext = (
+  taskId: string,
+  context: JsonObject
+): void => {
+  ensureGeneratedVideoTaskContextDir();
+  fs.writeFileSync(
+    getGeneratedVideoTaskContextPath(taskId),
+    `${JSON.stringify(context, null, 2)}\n`
+  );
+};
+
+const getVideoUrlFromTaskResult = (taskResult: JsonObject): string | undefined => {
+  return (
+    normalizeOptionalString(asJsonObject(taskResult.content).video_url) ||
+    normalizeOptionalString(taskResult.video_url) ||
+    normalizeOptionalString(taskResult.url)
+  );
+};
+
+const saveImageToVideoAutoTrimContext = (
+  providerResponse: JsonObject,
+  payload: V2ImageToVideoRequest,
+  requestPayload: JsonObject
+): void => {
+  const taskId = normalizeTaskId(providerResponse.id ?? providerResponse.task_id);
+  if (!taskId || payload.auto_trim_review === false) {
+    return;
+  }
+
+  const targetDurationSeconds = normalizeNumberField(payload.target_duration_seconds);
+  if (!targetDurationSeconds || targetDurationSeconds <= 0) {
+    return;
+  }
+
+  writeGeneratedVideoTaskContext(taskId, {
+    task_id: taskId,
+    status: "pending",
+    auto_trim_review: true,
+    slot_id: payload.slot_id,
+    slot_type: payload.slot_type,
+    slot_description: payload.slot_description,
+    target_duration_seconds: targetDurationSeconds,
+    generation_prompt: payload.video_prompt,
+    approved_image_uri: payload.approved_image_uri,
+    requested_video_duration_seconds: requestPayload.duration_seconds,
+    allow_fallback: payload.allow_fallback !== false,
+    created_at: new Date().toISOString()
+  });
+};
+
+const attachAutoTrimResultToVideoTask = (
+  taskResult: JsonObject,
+  trimResult: JsonObject
+): JsonObject => {
+  const content = asJsonObject(taskResult.content);
+  const trimmedVideoPath = normalizeOptionalString(trimResult.trimmed_video_path);
+  const originalVideoUrl = getVideoUrlFromTaskResult(taskResult);
+
+  return {
+    ...taskResult,
+    content: {
+      ...content,
+      original_video_url: originalVideoUrl,
+      final_video_url: trimmedVideoPath || originalVideoUrl,
+      final_video_path: trimmedVideoPath,
+      trimmed_video_path: trimmedVideoPath,
+      trim_recommendation: trimResult.trim_recommendation
+    },
+    postprocess: {
+      auto_trim_review: "succeeded",
+      trim_result: trimResult
+    }
+  };
+};
+
+const maybeAutoTrimCompletedVideoTask = async (
+  taskId: string,
+  taskResult: JsonObject
+): Promise<JsonObject> => {
+  const context = readGeneratedVideoTaskContext(taskId);
+  if (!context) {
+    return taskResult;
+  }
+
+  const savedTrimResult = asJsonObject(context.trim_result);
+  if (Object.keys(savedTrimResult).length > 0) {
+    return attachAutoTrimResultToVideoTask(taskResult, savedTrimResult);
+  }
+
+  const status = normalizeOptionalString(taskResult.status)?.toLowerCase();
+  if (status !== "succeeded") {
+    return {
+      ...taskResult,
+      postprocess: {
+        auto_trim_review: "pending",
+        target_duration_seconds: context.target_duration_seconds
+      }
+    };
+  }
+
+  const videoUri = getVideoUrlFromTaskResult(taskResult);
+  if (!videoUri) {
+    return {
+      ...taskResult,
+      postprocess: {
+        auto_trim_review: "failed",
+        reason: "provider task succeeded but video_url is missing"
+      }
+    };
+  }
+
+  const trimResult = await reviewAndTrimV2GeneratedVideo({
+    video_uri: videoUri,
+    slot_id: normalizeOptionalString(context.slot_id),
+    slot_type: normalizeOptionalString(context.slot_type),
+    target_duration_seconds: Number(context.target_duration_seconds),
+    generation_prompt: normalizeOptionalString(context.generation_prompt),
+    slot_description: normalizeOptionalString(context.slot_description),
+    trim_video: true,
+    allow_fallback: context.allow_fallback !== false
+  });
+  const nextContext = {
+    ...context,
+    status: "succeeded",
+    trim_result: trimResult,
+    updated_at: new Date().toISOString()
+  };
+  writeGeneratedVideoTaskContext(taskId, nextContext);
+
+  return attachAutoTrimResultToVideoTask(taskResult, trimResult);
+};
+
 export const reviewAndTrimV2GeneratedVideo = async (
   payload: V2GeneratedVideoTrimReviewRequest
 ): Promise<JsonObject> => {
@@ -2514,5 +2672,6 @@ export const getV2VideoGenerationTask = async (
     throw new V2PipelineInputError("task_id is required");
   }
 
-  return requestVideoGenerationTask(normalizedTaskId);
+  const taskResult = await requestVideoGenerationTask(normalizedTaskId);
+  return maybeAutoTrimCompletedVideoTask(normalizedTaskId, taskResult);
 };
