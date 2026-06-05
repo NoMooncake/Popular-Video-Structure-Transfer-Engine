@@ -571,6 +571,63 @@ test(
   }
 );
 
+test(
+  "v2 material coverage reads source material labels from mapping output",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(1.2);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          label: "ice_tea_material_01",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 10,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "strong_hook",
+            slot_duration_seconds: 1
+          }
+        ]
+      },
+      {
+        materials_mapping: {
+          strong_hook: {
+            source_material: ["ice_tea_material_01（前段产品特写）"]
+          }
+        }
+      }
+    );
+
+    assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.assigned_materials)[0]?.material_id,
+      "user_material_01"
+    );
+  }
+);
+
 test("v2 material coverage attaches production plan image prompts", () => {
   const coverage: V2MaterialCoverage = {
     materials_sufficient: false,
@@ -681,6 +738,61 @@ test("v2 material coverage reads payload prompt generators", () => {
   assert.equal(
     asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt,
     "模型 payload 里的 CTA 图片生成 prompt"
+  );
+});
+
+test("v2 material coverage reads payload generation plan section prompts", () => {
+  const coverage: V2MaterialCoverage = {
+    materials_sufficient: false,
+    requires_ai_completion: true,
+    target_duration_seconds: 10,
+    total_known_material_duration_seconds: 4,
+    hard_constraints: {
+      total_duration_coverage_passed: false,
+      notes: []
+    },
+    material_assets: [],
+    slot_coverage: [
+      {
+        slot_id: "slot_03",
+        slot_type: "product_hero",
+        frontend_coverage_status: "material_insufficient",
+        recommended_aigc_prompt: {
+          prompt_ref: "product_hero_fallback",
+          prompt_source: "deterministic_slot_fallback",
+          prompt: "后端兜底产品图 prompt"
+        }
+      }
+    ]
+  };
+
+  const enrichedCoverage = attachProductionPromptsToMaterialCoverage(coverage, {
+    payload: {
+      generation_plan: {
+        items: [
+          {
+            slot_name: "product_hero",
+            prompt: {
+              image_generation: {
+                sections: {
+                  基础设定: "竖屏产品主视觉",
+                  主体产品: "冰红茶瓶装产品"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt_source,
+    "model_or_plan"
+  );
+  assert.match(
+    String(asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt),
+    /【基础设定】竖屏产品主视觉/
   );
 });
 

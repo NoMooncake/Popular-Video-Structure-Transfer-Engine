@@ -764,7 +764,8 @@ const collectCoverageHintsByMaterialRef = (
 
   const slotMaterialMappings = analysisRoots.flatMap((root) => [
     asJsonObject(root.slot_material_mapping),
-    asJsonObject(root.slot_mapping)
+    asJsonObject(root.slot_mapping),
+    asJsonObject(root.materials_mapping)
   ]);
 
   for (const slotMapping of slotMaterialMappings) {
@@ -779,6 +780,10 @@ const collectCoverageHintsByMaterialRef = (
           ...extractMaterialReferences(mapping.material_label),
           ...extractMaterialReferences(mapping.material_ref),
           ...extractMaterialReferences(mapping.material),
+          ...normalizeStringArray(mapping.source_material).flatMap((materialRef) =>
+            extractMaterialReferences(materialRef)
+          ),
+          ...extractMaterialReferences(mapping.source_material),
           ...extractMaterialReferences(mapping.recommendation),
           ...extractMaterialReferences(mapping.suggestion)
         ])
@@ -941,18 +946,48 @@ const getPromptSlotTypes = (promptRecord: JsonObject): string[] => {
   return Array.from(new Set(inferredSlotTypes));
 };
 
+const getPromptTextFromSections = (value: unknown): string | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const sections = asJsonObject(value);
+  const lines = Object.entries(sections)
+    .map(([sectionName, sectionValue]) => {
+      const sectionText = normalizeOptionalString(sectionValue);
+      return sectionText ? `【${sectionName}】${sectionText}` : undefined;
+    })
+    .filter((line): line is string => Boolean(line));
+
+  return lines.length > 0 ? lines.join("\n") : undefined;
+};
+
+const getPromptTextFromRecord = (record: JsonObject): string | undefined => {
+  return (
+    normalizeOptionalString(record.prompt) ||
+    normalizeOptionalString(record.image_prompt) ||
+    normalizeOptionalString(record.prompt_description) ||
+    getPromptTextFromSections(record.sections)
+  );
+};
+
 const collectAigcImagePromptsBySlot = (
   fillableArchitecture: JsonObject
 ): Map<string, JsonObject> => {
   const promptsBySlot = new Map<string, JsonObject>();
   const addPromptRecord = (promptRecord: JsonObject, fallbackSlot?: unknown): void => {
+    const promptText = getPromptTextFromRecord(promptRecord);
     const promptWithSlot =
       fallbackSlot && !getPromptSlotTypes(promptRecord).length
         ? {
             ...promptRecord,
-            slot_type: fallbackSlot
+            slot_type: fallbackSlot,
+            prompt: promptText
           }
-        : promptRecord;
+        : {
+            ...promptRecord,
+            prompt: promptText
+          };
     const slotTypes = getPromptSlotTypes(promptWithSlot);
 
     for (const slotType of slotTypes) {
@@ -971,6 +1006,7 @@ const collectAigcImagePromptsBySlot = (
   const payloadAssemblyGenerationPlan = asJsonObject(
     asJsonObject(payload.assembly).ai_generation_plan
   );
+  const payloadGenerationPlan = asJsonObject(payload.generation_plan);
   const nestedPromptContainers = [
     asJsonObject(fillableArchitecture),
     payload,
@@ -985,7 +1021,8 @@ const collectAigcImagePromptsBySlot = (
     asJsonObject(resultArchitecture.prompt_package),
     asJsonObject(resultArchitecture.prompts_for_missing),
     assemblyGenerationPlan,
-    payloadAssemblyGenerationPlan
+    payloadAssemblyGenerationPlan,
+    payloadGenerationPlan
   ];
 
   for (const container of nestedPromptContainers) {
@@ -1032,6 +1069,34 @@ const collectAigcImagePromptsBySlot = (
 
       for (const promptItem of imagePrompts) {
         addPromptRecord(asJsonObject(promptItem), fallbackSlot);
+      }
+    }
+
+    const generationItems = Array.isArray(container.items) ? container.items : [];
+    for (const item of generationItems) {
+      const generationItem = asJsonObject(item);
+      const fallbackSlot =
+        generationItem.slot_type ??
+        generationItem.slot_id ??
+        generationItem.slot ??
+        generationItem.slot_name ??
+        generationItem.name;
+      const promptObject = asJsonObject(generationItem.prompt);
+      const imageGenerationPrompt =
+        asJsonObject(promptObject.image_generation).sections ||
+        asJsonObject(promptObject.image_generation);
+      const promptText =
+        getPromptTextFromSections(imageGenerationPrompt) ||
+        getPromptTextFromRecord(promptObject);
+
+      if (promptText) {
+        addPromptRecord(
+          {
+            prompt_ref: normalizeSlotType(fallbackSlot) || "image_generation",
+            prompt: promptText
+          },
+          fallbackSlot
+        );
       }
     }
   }
