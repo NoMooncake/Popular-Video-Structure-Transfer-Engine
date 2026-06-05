@@ -447,6 +447,253 @@ test(
 );
 
 test(
+  "v2 material coverage reads final plan slot planning and object prompts",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId01 = createUploadedTestVideo(2);
+    const fileId02 = createUploadedTestVideo(1.2);
+    const fileId03 = createUploadedTestVideo(1.1);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId01,
+          uri: `/api/upload/files/${fileId01}`,
+          label: "ice_tea_material_01",
+          role: "user_material" as const
+        },
+        {
+          file_id: fileId02,
+          uri: `/api/upload/files/${fileId02}`,
+          label: "ice_tea_material_02",
+          role: "user_material" as const
+        },
+        {
+          file_id: fileId03,
+          uri: `/api/upload/files/${fileId03}`,
+          label: "ice_tea_material_03",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "做一个6-8秒的冰红茶宣传视频",
+        product_name: "冰红茶"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 7,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        final_plan: {
+          slot_planning: [
+            {
+              slot_id: 1,
+              slot_name: "strong_hook",
+              slot_label: "冰爽强 Hook",
+              duration_seconds: 2,
+              source_material: ["ice_tea_material_01"],
+              visual_direction: "冰红茶瓶身在冰块中的极致特写。",
+              subtitle_or_vo_direction: "闪现大字：冰爽。"
+            },
+            {
+              slot_id: 2,
+              slot_name: "usage_process",
+              slot_label: "畅饮解渴",
+              duration_seconds: 1.5,
+              source_material: ["ice_tea_material_02"],
+              visual_direction: "年轻男性户外大口豪饮。"
+            },
+            {
+              slot_id: 3,
+              slot_name: "product_hero",
+              slot_label: "夏日氛围",
+              duration_seconds: 1.5,
+              source_material: ["ice_tea_material_03"],
+              visual_direction: "年轻女性户外手持冰红茶。"
+            },
+            {
+              slot_id: 4,
+              slot_name: "cta",
+              slot_label: "购买引导",
+              duration_seconds: 1,
+              source_material: ["ai_generate"],
+              visual_direction: "标准化产品落版。"
+            }
+          ]
+        },
+        aigc_prompts: {
+          cta_image_generation_prompt: {
+            content: {
+              基础设定: "为冰红茶广告生成CTA结尾落版图。",
+              主体产品: "一瓶标准包装的冰红茶饮料。"
+            }
+          }
+        }
+      },
+      {
+        available_materials_analysis: [
+          {
+            material_index: 1,
+            file_name: "ice_tea_material_01",
+            applicable_slot_type: ["product_hero", "selling_point_proof"]
+          },
+          {
+            material_index: 2,
+            file_name: "ice_tea_material_02",
+            applicable_slot_type: ["usage_process", "effect_comparison"]
+          },
+          {
+            material_index: 3,
+            file_name: "ice_tea_material_03",
+            applicable_slot_type: ["usage_process", "cta"]
+          }
+        ],
+        planned_structure: [
+          {
+            slot_label: "冰爽强 Hook",
+            target_duration_seconds: 2,
+            source_material: ["ice_tea_material_01"]
+          }
+        ]
+      }
+    );
+
+    assert.equal(coverage.slot_coverage.length, 4);
+    assert.equal(coverage.slot_coverage[0]?.slot_type, "strong_hook");
+    assert.equal(coverage.slot_coverage[0]?.slot_name, "冰爽强 Hook");
+    assert.equal(coverage.slot_coverage[0]?.visual_goal, "冰红茶瓶身在冰块中的极致特写。");
+    assert.equal(coverage.slot_coverage[0]?.frontend_coverage_label, "完全匹配");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.assigned_materials)[0]?.material_id,
+      "user_material_01"
+    );
+    assert.equal(coverage.slot_coverage[2]?.frontend_coverage_label, "结构完整，但时长不足");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[2]?.assigned_materials)[0]?.material_id,
+      "user_material_03"
+    );
+    assert.equal(coverage.slot_coverage[3]?.frontend_coverage_label, "素材不够");
+    assert.match(
+      String(asRecord(coverage.slot_coverage[3]?.recommended_aigc_prompt).prompt),
+      /为冰红茶广告生成CTA结尾落版图/
+    );
+  }
+);
+
+test(
+  "v2 material coverage reads result ad structure and analysis slot materials",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId01 = createUploadedTestVideo(1.2);
+    const fileId02 = createUploadedTestVideo(1.1);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId01,
+          uri: `/api/upload/files/${fileId01}`,
+          label: "ice_tea_material_01",
+          role: "user_material" as const
+        },
+        {
+          file_id: fileId02,
+          uri: `/api/upload/files/${fileId02}`,
+          label: "ice_tea_material_02",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "做一个7秒冰红茶广告",
+        product_name: "冰红茶"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 7,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        result: {
+          ad_structure: {
+            target_slot_count: 2,
+            slots: [
+              {
+                slot_name: "产品惊艳亮相",
+                slot_type: "product_hero",
+                duration_seconds: 2,
+                visual_direction: "使用用户提供的素材01，突出冰红茶瓶身和冰块质感。",
+                material_to_fill: "使用用户现有素材：ice_tea_material_01。"
+              },
+              {
+                slot_name: "快速使用演示",
+                slot_type: "usage_process",
+                duration_seconds: 3,
+                visual_direction: "使用用户提供的素材02，展示人物户外畅饮。",
+                material_to_fill: "使用用户现有素材：ice_tea_material_02。"
+              }
+            ]
+          }
+        }
+      },
+      {
+        analysis: {
+          slot_analysis: [
+            {
+              slot_type: "product_hero",
+              materials: ["ice_tea_material_01"]
+            },
+            {
+              slot_type: "usage_process",
+              materials: ["ice_tea_material_02"]
+            }
+          ]
+        },
+        plan: {
+          structure: [
+            {
+              slot_name: "product_hero",
+              duration_seconds: 2,
+              materials: ["ice_tea_material_01"]
+            }
+          ]
+        }
+      }
+    );
+
+    assert.equal(coverage.slot_coverage.length, 2);
+    assert.equal(coverage.slot_coverage[0]?.slot_type, "product_hero");
+    assert.equal(coverage.slot_coverage[0]?.slot_name, "产品惊艳亮相");
+    assert.equal(coverage.slot_coverage[0]?.visual_goal, "使用用户提供的素材01，突出冰红茶瓶身和冰块质感。");
+    assert.equal(coverage.slot_coverage[0]?.frontend_coverage_label, "结构完整，但时长不足");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.assigned_materials)[0]?.material_id,
+      "user_material_01"
+    );
+    assert.equal(coverage.slot_coverage[1]?.frontend_coverage_label, "结构完整，但时长不足");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[1]?.assigned_materials)[0]?.material_id,
+      "user_material_02"
+    );
+  }
+);
+
+test(
   "v2 material coverage lets user accept duration-short material as sufficient",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {
