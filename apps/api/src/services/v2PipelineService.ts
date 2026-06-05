@@ -25,6 +25,10 @@ import type {
 const defaultImageCandidateCount = 4;
 const maxImageCandidateCount = 6;
 
+export const normalizeV2TargetDurationSeconds = (value: unknown): number => {
+  return Math.max(5, Math.min(60, Number(value || 30)));
+};
+
 export class V2PipelineInputError extends Error {
   statusCode = 400;
 
@@ -270,9 +274,8 @@ const normalizeRequest = (payload: V2PipelineRequest): Required<V2PipelineReques
       ),
       generate_image_candidates:
         payload.options?.generate_image_candidates === true,
-      target_duration_seconds: Math.max(
-        15,
-        Math.min(60, Number(payload.options?.target_duration_seconds || 30))
+      target_duration_seconds: normalizeV2TargetDurationSeconds(
+        payload.options?.target_duration_seconds
       ),
       accepted_duration_short_slots: normalizeStringArray(
         payload.options?.accepted_duration_short_slots
@@ -680,6 +683,7 @@ const collectCoverageHintsByMaterialRef = (
   const hints = new Map<string, string[]>();
   const nestedMaterialAnalysis = asJsonObject(userMaterialAnalysis.material_analysis);
   const payload = asJsonObject(userMaterialAnalysis.payload);
+  const payloadAnalysisResult = asJsonObject(payload.analysis_result);
   const coverageBySlot = Array.isArray(userMaterialAnalysis.coverage_by_slot_type)
     ? userMaterialAnalysis.coverage_by_slot_type
     : [];
@@ -735,6 +739,28 @@ const collectCoverageHintsByMaterialRef = (
     }
   }
 
+  const slotSuggestions = Array.isArray(payloadAnalysisResult["素材到槽位建议"])
+    ? payloadAnalysisResult["素材到槽位建议"]
+    : [];
+
+  for (const item of slotSuggestions) {
+    const record = asJsonObject(item);
+    const slotType = normalizeSlotType(record.slot ?? record.slot_type);
+    const materialRef = normalizeMaterialReference(
+      record.material_label ?? record.material_ref ?? record.material
+    );
+
+    if (
+      !slotType ||
+      !materialRef ||
+      /需|新建|aigc|ai|generate|生成|缺|补/u.test(materialRef)
+    ) {
+      continue;
+    }
+
+    hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+  }
+
   return hints;
 };
 
@@ -761,6 +787,58 @@ const findMaterialModelRecord = (
   );
 };
 
+const getPromptSlotTypes = (promptRecord: JsonObject): string[] => {
+  const explicitSlotType = normalizeSlotType(
+    promptRecord.slot_type ??
+      promptRecord.slot_id ??
+      promptRecord.slot ??
+      promptRecord.slot_name ??
+      promptRecord.target_slot ??
+      promptRecord.missing_slot
+  );
+  if (explicitSlotType) {
+    return [explicitSlotType];
+  }
+
+  const searchableText = [
+    promptRecord.purpose,
+    promptRecord.intent,
+    promptRecord.prompt_ref,
+    promptRecord.prompt_description,
+    promptRecord.prompt
+  ]
+    .map((value) => normalizeOptionalString(value))
+    .filter((value): value is string => Boolean(value))
+    .join(" ");
+  const inferredSlotTypes: string[] = [];
+
+  if (/strong[_\s-]?hook|强\s*hook|强hook|开头|抓住注意/iu.test(searchableText)) {
+    inferredSlotTypes.push("strong_hook");
+  }
+
+  if (/selling[_\s-]?point|proof|卖点|证明/iu.test(searchableText)) {
+    inferredSlotTypes.push("selling_point_proof");
+  }
+
+  if (/product[_\s-]?hero|产品亮相|产品主视觉|商品主视觉/iu.test(searchableText)) {
+    inferredSlotTypes.push("product_hero");
+  }
+
+  if (/usage[_\s-]?process|饮用|使用过程/iu.test(searchableText)) {
+    inferredSlotTypes.push("usage_process");
+  }
+
+  if (/effect[_\s-]?comparison|效果对比|前后对比/iu.test(searchableText)) {
+    inferredSlotTypes.push("effect_comparison");
+  }
+
+  if (/cta|购买引导|即刻购买|行动引导|结尾/iu.test(searchableText)) {
+    inferredSlotTypes.push("cta");
+  }
+
+  return Array.from(new Set(inferredSlotTypes));
+};
+
 const collectAigcImagePromptsBySlot = (
   fillableArchitecture: JsonObject
 ): Map<string, JsonObject> => {
@@ -769,13 +847,17 @@ const collectAigcImagePromptsBySlot = (
     asJsonObject(fillableArchitecture.result).fillable_architecture
   );
   const nestedPromptContainers = [
+    asJsonObject(fillableArchitecture),
     asJsonObject(fillableArchitecture.aigc_prompts),
     asJsonObject(asJsonObject(fillableArchitecture.fillable_architecture).aigc_prompts),
+    asJsonObject(resultArchitecture),
     asJsonObject(resultArchitecture.aigc_prompts),
     asJsonObject(fillableArchitecture.generation_prompt_package),
     asJsonObject(fillableArchitecture.prompt_package),
+    asJsonObject(fillableArchitecture.prompts_for_missing),
     asJsonObject(resultArchitecture.generation_prompt_package),
-    asJsonObject(resultArchitecture.prompt_package)
+    asJsonObject(resultArchitecture.prompt_package),
+    asJsonObject(resultArchitecture.prompts_for_missing)
   ];
 
   for (const container of nestedPromptContainers) {
@@ -786,17 +868,20 @@ const collectAigcImagePromptsBySlot = (
       ...(Array.isArray(container.image_prompt_candidates)
         ? container.image_prompt_candidates
         : []),
-      ...(Array.isArray(container.image_prompts) ? container.image_prompts : [])
+      ...(Array.isArray(container.image_prompts) ? container.image_prompts : []),
+      ...(Array.isArray(container.aigc_generation_plan)
+        ? container.aigc_generation_plan
+        : [])
     ];
 
     for (const item of promptItems) {
       const promptRecord = asJsonObject(item);
-      const slotType = normalizeSlotType(
-        promptRecord.slot_type ?? promptRecord.slot_id ?? promptRecord.slot
-      );
+      const slotTypes = getPromptSlotTypes(promptRecord);
 
-      if (slotType && !promptsBySlot.has(slotType)) {
-        promptsBySlot.set(slotType, promptRecord);
+      for (const slotType of slotTypes) {
+        if (!promptsBySlot.has(slotType)) {
+          promptsBySlot.set(slotType, promptRecord);
+        }
       }
     }
   }
@@ -830,6 +915,46 @@ const isAcceptedDurationShortSlot = (
   slotType: string
 ): boolean => {
   return acceptedSlots.has(slotId) || acceptedSlots.has(slotType);
+};
+
+const getSlotFallbackPrompt = (
+  normalized: Required<V2PipelineRequest>,
+  slot: JsonObject,
+  slotType: string
+): string => {
+  const productName = normalized.user_request.product_name || "目标产品";
+  const goal = normalized.user_request.goal;
+  const audience = normalized.user_request.target_audience || "目标用户";
+  const visualDirection =
+    normalizeOptionalString(slot.visual_direction) ||
+    normalizeOptionalString(slot.visualDirection) ||
+    normalizeOptionalString(slot.description) ||
+    normalizeOptionalString(slot.purpose) ||
+    "根据该广告槽位补足缺失画面，画面必须服务于当前结构段落。";
+  const textDirection =
+    normalizeOptionalString(slot.text_or_voiceover) ||
+    normalizeOptionalString(slot.text_direction) ||
+    normalizeOptionalString(slot.copy_direction);
+  const packagingSuggestion =
+    normalizeOptionalString(slot.packaging_suggestion) ||
+    normalizeOptionalString(slot.packaging);
+
+  return [
+    `【基础设定】竖屏 9:16 商业广告关键帧，用于 ${slotType} 槽位；产品为${productName}，广告目标是“${goal}”。`,
+    "【候选图要求】生成 4 张候选图供用户选择，四张图必须围绕同一个具体主题、同一产品设定和同一槽位意图，只在构图、光线、景别、镜头角度或背景细节上有差异。",
+    `【主体/产品】主体必须围绕${productName}或与${productName}直接相关的使用/购买场景，面向“${audience}”。`,
+    `【场景环境】${visualDirection}`,
+    "【构图与镜头】竖屏短视频构图，主体清晰，核心商品或动作处于视觉中心或黄金分割点，保留字幕安全区。",
+    "【光线与色彩】光线、色彩和道具必须强化该槽位的商业目的，饮品类画面优先表现清爽、冰感、通透和购买欲。",
+    "【质感与风格】真实商业广告摄影质感，高清、干净、可信，不要廉价促销感。",
+    textDirection
+      ? `【文字/包装元素】可预留文字区域，后期可叠加：${textDirection}`
+      : "【文字/包装元素】预留少量空白区域用于叠加产品名、卖点词或购买引导文案。",
+    packagingSuggestion
+      ? `【包装建议】${packagingSuggestion}`
+      : "【包装建议】保持产品包装、颜色和卖点识别清楚，不要生成无关品牌。",
+    "【负面约束】不要复制样例视频中的品牌、人物、Logo 或具体场景；不要生成错误包装、文字乱码、变形产品或无关人物。"
+  ].join("\n");
 };
 
 export const buildV2DeterministicMaterialCoverage = async (
@@ -914,7 +1039,12 @@ export const buildV2DeterministicMaterialCoverage = async (
   const slotCoverage = slots.map((slot, index) => {
     const slotType =
       normalizeSlotType(
-        slot.slot_type ?? slot.slot ?? slot.slot_id ?? slot.id ?? slot.slot_name
+        slot.slot_type ??
+          slot.slot ??
+          slot.slot_id ??
+          slot.id ??
+          slot.slot_name ??
+          slot.name
       ) ||
       `slot_${String(index + 1).padStart(2, "0")}`;
     const slotId =
@@ -1064,10 +1194,18 @@ export const buildV2DeterministicMaterialCoverage = async (
               normalizeOptionalString(promptRecord?.prompt_ref) ||
               normalizeOptionalString(promptRecord?.slot_id) ||
               slotType,
+            prompt_source: "model_or_plan",
             prompt_description: normalizeOptionalString(promptRecord?.prompt_description),
             prompt
           }
-        : undefined
+        : frontendCoverageStatus !== "fully_matched"
+          ? {
+              prompt_ref: `${slotType}_fallback`,
+              prompt_source: "deterministic_slot_fallback",
+              prompt_description: "模型没有返回该槽位的专属 prompt，后端基于结构槽位说明生成兜底 prompt。",
+              prompt: getSlotFallbackPrompt(normalized, slot, slotType)
+            }
+          : undefined
     };
   });
 
@@ -1131,6 +1269,48 @@ const applyMaterialCoverageToProductionPlan = (
     missing_slots: materialCoverage.slot_coverage.filter(
       (slot) => slot.frontend_coverage_status !== "fully_matched"
     )
+  };
+};
+
+export const attachProductionPromptsToMaterialCoverage = (
+  materialCoverage: V2MaterialCoverage,
+  productionPlan: JsonObject
+): V2MaterialCoverage => {
+  const promptsBySlot = collectAigcImagePromptsBySlot(productionPlan);
+  if (promptsBySlot.size === 0) {
+    return materialCoverage;
+  }
+
+  return {
+    ...materialCoverage,
+    slot_coverage: materialCoverage.slot_coverage.map((slotCoverage) => {
+      if (slotCoverage.recommended_aigc_prompt) {
+        return slotCoverage;
+      }
+
+      const slotType = normalizeSlotType(slotCoverage.slot_type);
+      const promptRecord = slotType ? promptsBySlot.get(slotType) : undefined;
+      const prompt =
+        normalizeOptionalString(promptRecord?.prompt) ||
+        normalizeOptionalString(promptRecord?.image_prompt) ||
+        normalizeOptionalString(promptRecord?.prompt_description);
+
+      if (!prompt || !promptRecord) {
+        return slotCoverage;
+      }
+
+      return {
+        ...slotCoverage,
+        recommended_aigc_prompt: {
+          prompt_ref:
+            normalizeOptionalString(promptRecord.prompt_ref) ||
+            normalizeOptionalString(promptRecord.slot_id) ||
+            slotType,
+          prompt_description: normalizeOptionalString(promptRecord.prompt_description),
+          prompt
+        }
+      };
+    })
   };
 };
 
@@ -1601,7 +1781,7 @@ export const runV2Pipeline = async (
     fallbackReasons.push(fillableArchitectureResult.fallbackReason);
   }
 
-  const materialCoverage = await buildV2DeterministicMaterialCoverage(
+  const baseMaterialCoverage = await buildV2DeterministicMaterialCoverage(
     normalized,
     fillableArchitecture,
     userMaterialAnalysis
@@ -1615,7 +1795,7 @@ export const runV2Pipeline = async (
       user_request: normalized.user_request,
       fillable_architecture: fillableArchitecture,
       user_material_analysis: userMaterialAnalysis,
-      deterministic_material_coverage: materialCoverage,
+      deterministic_material_coverage: baseMaterialCoverage,
       detailed_generation_prompt_requirements: detailedGenerationPromptRequirements,
       instruction:
         "判断现有用户素材是否足够生成商业广告时，必须优先服从 deterministic_material_coverage：只要 materials_sufficient 为 false，就不能输出可直接成片，必须为未覆盖槽位规划 AI 补全或补充素材。如果足够，请用中文返回剪辑/拼接方案；如果不足，请先用中文返回缺失素材的图片生成 prompt，再用中文返回图生视频 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。所有图片生成 prompt 和图生视频 prompt 必须按 detailed_generation_prompt_requirements 中的章节组织，内容要像专业视频提示词一样详细。图片生成 prompt 要明确说明为同一槽位生成 4 张候选图供用户选择，且 4 张图必须是同一个具体主题、同一产品设定、同一场景逻辑下的四种变体，只能在构图、光线、景别、镜头角度或背景细节上有差异。不要用“例如 1/2/3/4”列出多个互斥主体或场景，避免模型把四张候选图生成成四个不同主题。特别注意产品和人物规则：如果用户素材里已有产品、包装、品牌视觉或主角人物，后续生成必须尽量还原它们，不能写“不要出现完整产品”“不要出现人物”等与用户素材冲突的负面约束；这类限制只能表达为“不要出现无关产品/无关人物/无关品牌”。如果用户素材里没有人物且槽位不强制人物出现，则不要凭空生成人物，优先展示产品、道具、场景、手部动作或包装画面；如果必须新增人物，需详细描述符合产品设定和目标人群的人物样貌、穿着、状态和动作。"
@@ -1628,6 +1808,10 @@ export const runV2Pipeline = async (
         userMaterialAnalysis,
         reason
       )
+  );
+  const materialCoverage = attachProductionPromptsToMaterialCoverage(
+    baseMaterialCoverage,
+    productionPlanResult.output
   );
   const productionPlan = applyMaterialCoverageToProductionPlan(
     productionPlanResult.output,

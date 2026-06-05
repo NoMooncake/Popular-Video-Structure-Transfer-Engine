@@ -8,8 +8,12 @@ import { after, before, test } from "node:test";
 
 import { app } from "../src/app.js";
 import { storageConfig } from "../src/config/storage.js";
-import { buildV2DeterministicMaterialCoverage } from "../src/services/v2PipelineService.js";
-import type { V2PipelineRequest } from "../src/v2/types.js";
+import {
+  attachProductionPromptsToMaterialCoverage,
+  buildV2DeterministicMaterialCoverage,
+  normalizeV2TargetDurationSeconds
+} from "../src/services/v2PipelineService.js";
+import type { V2MaterialCoverage, V2PipelineRequest } from "../src/v2/types.js";
 
 let server: Server;
 let baseUrl: string;
@@ -188,6 +192,14 @@ test(
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 5);
     assert.equal(coverage.slot_coverage[1]?.coverage_status, "missing");
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 0);
+    assert.equal(
+      asRecord(coverage.slot_coverage[1]?.recommended_aigc_prompt).prompt_source,
+      "deterministic_slot_fallback"
+    );
+    assert.match(
+      String(asRecord(coverage.slot_coverage[1]?.recommended_aigc_prompt).prompt),
+      /product_hero/
+    );
   }
 );
 
@@ -353,7 +365,7 @@ test(
           fillable_architecture: {
             slots: [
               {
-                slot_name: "strong_hook",
+                name: "strong_hook",
                 slot_duration_seconds: 2
               },
             {
@@ -377,10 +389,15 @@ test(
       },
       {
         payload: {
+          analysis_result: {
+            素材到槽位建议: [
+              {
+                slot: "strong_hook",
+                material_label: "ice_tea_material_01"
+              }
+            ]
+          },
           slot_material_mapping: {
-            strong_hook: {
-              materials: ["ice_tea_material_01"]
-            },
             usage_process: {
               materials: ["ice_tea_material_01"]
             },
@@ -486,6 +503,79 @@ test(
     ]);
   }
 );
+
+test("v2 material coverage attaches production plan image prompts", () => {
+  const coverage: V2MaterialCoverage = {
+    materials_sufficient: false,
+    requires_ai_completion: true,
+    target_duration_seconds: 15,
+    total_known_material_duration_seconds: 4,
+    hard_constraints: {
+      total_duration_coverage_passed: false,
+      notes: []
+    },
+    material_assets: [],
+    slot_coverage: [
+      {
+        slot_id: "slot_01",
+        slot_type: "strong_hook",
+        frontend_coverage_status: "structure_complete_duration_short"
+      },
+      {
+        slot_id: "slot_02",
+        slot_type: "selling_point_proof",
+        frontend_coverage_status: "material_insufficient"
+      },
+      {
+        slot_id: "slot_03",
+        slot_type: "cta",
+        frontend_coverage_status: "material_insufficient"
+      }
+    ]
+  };
+
+  const enrichedCoverage = attachProductionPromptsToMaterialCoverage(coverage, {
+    generation_prompt_package: {
+      image_prompt_candidates: [
+        {
+          prompt_ref: "hook_image",
+          slot_type: "strong_hook",
+          prompt: "生成冰红茶强 Hook 关键帧，四张候选。"
+        },
+      {
+        prompt_ref: "cta_image",
+        target_slot: "cta",
+          prompt: "生成冰红茶 CTA 购买引导图，四张候选。"
+        }
+      ],
+      aigc_generation_plan: [
+        {
+          purpose: "补足强Hook与卖点证明环节的微距视觉元素",
+          prompt: "生成4张冰红茶瓶身与冰块微距特写候选图。"
+        }
+      ]
+    }
+  });
+
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt,
+    "生成冰红茶强 Hook 关键帧，四张候选。"
+  );
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[1]?.recommended_aigc_prompt).prompt,
+    "生成4张冰红茶瓶身与冰块微距特写候选图。"
+  );
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[2]?.recommended_aigc_prompt).prompt_ref,
+    "cta_image"
+  );
+});
+
+test("v2 target duration keeps a 10 second user request", () => {
+  assert.equal(normalizeV2TargetDurationSeconds(10), 10);
+  assert.equal(normalizeV2TargetDurationSeconds(2), 5);
+  assert.equal(normalizeV2TargetDurationSeconds(90), 60);
+});
 
 test("GET /api/v2/status exposes 4 as the default image candidate count", async () => {
   const response = await fetch(`${baseUrl}/api/v2/status`);
