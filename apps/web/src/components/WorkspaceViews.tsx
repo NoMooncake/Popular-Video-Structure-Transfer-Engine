@@ -73,15 +73,6 @@ const slotGoalByType: Record<string, string> = {
   cta: "引导用户在评论区补充自家猫咪情况。"
 };
 
-const migrationRuleByType: Record<string, string> = {
-  risk_or_pain_hook: "把样例的风险前置结构迁移为新主题的购买风险提示。",
-  pain_desire: "把样例的背景铺垫压缩为用户需求分层说明。",
-  product_reveal: "把样例的多产品拆解迁移为短视频中的分类推荐卡片。",
-  proof_comparison: "把样例的解释段落迁移为可视化对比证明。",
-  decision_warning: "把样例的避坑知识迁移为消费决策前的提醒。",
-  cta: "把样例的评论互动结尾迁移为按猫咪情况咨询的 CTA。"
-};
-
 const gapCopyById: Record<
   string,
   {
@@ -126,10 +117,6 @@ const readableSlot = (block: CanvasBlock) => slotLabelByType[block.slot.slot_typ
 
 const readableGoal = (block: CanvasBlock) => {
   return slotGoalByType[block.slot.slot_type] ?? block.slot.content_goal;
-};
-
-const readableRule = (block: CanvasBlock) => {
-  return migrationRuleByType[block.slot.slot_type] ?? block.slot.migration_rule;
 };
 
 const readableGapMissing = (gapId: string, fallback: string) => {
@@ -638,34 +625,35 @@ const StructureMigrationView = ({
             <table className="data-table migration-table">
               <thead>
                 <tr>
+                  <th>迁移结果</th>
                   <th>时长</th>
-                  <th>样例视频</th>
                   <th>分镜描述</th>
                   <th>我的素材</th>
+                  <th>旁白 / 文案</th>
                   <th>素材状态</th>
-                  <th>迁移结果</th>
                 </tr>
               </thead>
               <tbody>
                 {canvasBlocks.map((block, index) => (
                   <tr key={block.id}>
-                    <td>{block.timeRange}</td>
-                    <td>
-                      <PlaceholderBlock label={`样例 ${index + 1}`} />
-                    </td>
                     <td>
                       <strong>{readableSlot(block)}</strong>
-                      <span>{readableRule(block)}</span>
+                      <span>{block.migrationResult}</span>
+                    </td>
+                    <td>{block.timeRange}</td>
+                    <td>
+                      <PlaceholderBlock label={`分镜 ${index + 1}`} />
+                      <span>{readableGoal(block)}</span>
                     </td>
                     <td>
-                      <PlaceholderBlock label={`素材 ${index + 1}`} />
+                      <PlaceholderBlock label={block.materialSummary || `素材 ${index + 1}`} />
+                    </td>
+                    <td>
+                      <span>{block.copy}</span>
                     </td>
                     <td>
                       <StatusBadge status={block.status} />
                       <small>{statusTextByStatus[block.status]}</small>
-                    </td>
-                    <td>
-                      <PlaceholderBlock label={readableSource(block.timeline?.visual_source)} />
                     </td>
                   </tr>
                 ))}

@@ -311,6 +311,15 @@ test(
     assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
     assert.equal(coverage.slot_coverage[0]?.frontend_coverage_status, "fully_matched");
     assert.equal(coverage.slot_coverage[0]?.frontend_coverage_label, "完全匹配");
+    assert.deepEqual(asRecord(coverage.slot_coverage[0]?.frontend_display), {
+      migration_result_title: "强视觉开场",
+      migration_result_description: "根据当前广告结构补足该槽位画面。",
+      duration_text: "3s",
+      shot_description: "待补充分镜描述",
+      material_summary: "ice_tea_material_01 3s",
+      copy: "待生成文案",
+      material_status: "完全匹配"
+    });
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 3);
     assert.equal(
       asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
@@ -330,6 +339,14 @@ test(
     assert.equal(
       coverage.slot_coverage[1]?.frontend_coverage_label,
       "结构完整，但时长不足"
+    );
+    assert.equal(
+      asRecord(coverage.slot_coverage[1]?.frontend_display).material_status,
+      "结构完整，但时长不足"
+    );
+    assert.equal(
+      asRecord(coverage.slot_coverage[1]?.frontend_display).material_summary,
+      "ice_tea_material_01 2s"
     );
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 2);
     assert.equal(
@@ -354,6 +371,10 @@ test(
     assert.equal(coverage.slot_coverage[2]?.coverage_status, "missing");
     assert.equal(coverage.slot_coverage[2]?.frontend_coverage_status, "material_insufficient");
     assert.equal(coverage.slot_coverage[2]?.frontend_coverage_label, "素材不够");
+    assert.equal(
+      asRecord(coverage.slot_coverage[2]?.frontend_display).material_summary,
+      "空"
+    );
     assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
       "generate_direct_video_from_material_frame",
       "upload_image_then_generate_video",

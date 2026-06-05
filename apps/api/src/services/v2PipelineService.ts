@@ -1581,6 +1581,51 @@ const getFrontendCoverageLabel = (frontendCoverageStatus: string): string => {
   return "素材不够";
 };
 
+const formatFrontendSeconds = (seconds: number): string => {
+  if (!Number.isFinite(seconds)) {
+    return "0s";
+  }
+
+  return `${Number(seconds.toFixed(3))}s`;
+};
+
+const formatFrontendMaterialSummary = (
+  matches: JsonObject[],
+  candidateMaterials: JsonObject[]
+): string => {
+  if (matches.length > 0) {
+    return matches
+      .map((match) => {
+        const label =
+          normalizeOptionalString(match.label) ||
+          normalizeOptionalString(match.model_label) ||
+          normalizeOptionalString(match.material_id) ||
+          "已分配素材";
+        const duration = Number(match.matched_material_duration || 0);
+
+        return `${label} ${formatFrontendSeconds(duration)}`;
+      })
+      .join("\n");
+  }
+
+  if (candidateMaterials.length > 0) {
+    return candidateMaterials
+      .map((material) => {
+        const label =
+          normalizeOptionalString(material.label) ||
+          normalizeOptionalString(material.model_label) ||
+          normalizeOptionalString(material.material_id) ||
+          "候选素材";
+        const duration = Number(material.duration_seconds || 0);
+
+        return duration > 0 ? `${label} 候选 ${formatFrontendSeconds(duration)}` : `${label} 候选`;
+      })
+      .join("\n");
+  }
+
+  return "空";
+};
+
 const getSlotFallbackPrompt = (
   normalized: Required<V2PipelineRequest>,
   slot: JsonObject,
@@ -1921,28 +1966,36 @@ export const buildV2DeterministicMaterialCoverage = async (
       duration_seconds: material.duration_seconds,
       frame_sample_timestamps_seconds: material.frame_sample_timestamps_seconds
     }));
+    const slotName =
+      normalizeOptionalString(slot.slot_name) ||
+      normalizeOptionalString(slot.name) ||
+      normalizeOptionalString(slot.purpose);
+    const visualGoal =
+      normalizeOptionalString(slot.visual_goal) ||
+      normalizeOptionalString(slot.visual_direction) ||
+      normalizeOptionalString(slot.visual_requirements) ||
+      normalizeOptionalString(slot.required_visual_type) ||
+      normalizeOptionalString(slot.requirement_summary) ||
+      normalizeOptionalString(slot.brief) ||
+      normalizeOptionalString(slot.description);
+    const copyDirection =
+      normalizeOptionalString(slot.copy_direction) ||
+      normalizeOptionalString(slot.subtitle_or_vo_direction) ||
+      normalizeOptionalString(slot.narration_direction) ||
+      normalizeOptionalString(slot.caption_direction);
+    const frontendCoverageLabel = getFrontendCoverageLabel(frontendCoverageStatus);
+    const frontendMaterialSummary = formatFrontendMaterialSummary(
+      matches,
+      candidateMaterials
+    );
 
     return {
       slot_id:
         slotId,
       slot_type: slotType,
-      slot_name:
-        normalizeOptionalString(slot.slot_name) ||
-        normalizeOptionalString(slot.name) ||
-        normalizeOptionalString(slot.purpose),
-      visual_goal:
-        normalizeOptionalString(slot.visual_goal) ||
-        normalizeOptionalString(slot.visual_direction) ||
-        normalizeOptionalString(slot.visual_requirements) ||
-        normalizeOptionalString(slot.required_visual_type) ||
-        normalizeOptionalString(slot.requirement_summary) ||
-        normalizeOptionalString(slot.brief) ||
-        normalizeOptionalString(slot.description),
-      copy_direction:
-        normalizeOptionalString(slot.copy_direction) ||
-        normalizeOptionalString(slot.subtitle_or_vo_direction) ||
-        normalizeOptionalString(slot.narration_direction) ||
-        normalizeOptionalString(slot.caption_direction),
+      slot_name: slotName,
+      visual_goal: visualGoal,
+      copy_direction: copyDirection,
       packaging_suggestions: normalizeOptionalString(slot.packaging_suggestions),
       source_material_refs: normalizeStringArray(
         slot.materials ?? slot.material_ids ?? slot.source_material ?? slot.source_materials
@@ -1951,7 +2004,17 @@ export const buildV2DeterministicMaterialCoverage = async (
       matched_material_duration: matchedMaterialDuration,
       coverage_status: coverageStatus,
       frontend_coverage_status: frontendCoverageStatus,
-      frontend_coverage_label: getFrontendCoverageLabel(frontendCoverageStatus),
+      frontend_coverage_label: frontendCoverageLabel,
+      frontend_display: {
+        migration_result_title: slotName || slotType,
+        migration_result_description:
+          visualGoal || copyDirection || gapReason || "根据当前广告结构补足该槽位画面。",
+        duration_text: formatFrontendSeconds(requiredDuration),
+        shot_description: visualGoal || "待补充分镜描述",
+        material_summary: frontendMaterialSummary,
+        copy: copyDirection || "待生成文案",
+        material_status: frontendCoverageLabel
+      },
       user_duration_short_decision: durationShortAccepted
         ? "accepted_as_sufficient"
         : coverageStatus === "partial"
