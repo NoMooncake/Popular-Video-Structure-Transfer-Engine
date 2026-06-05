@@ -58,8 +58,8 @@ export const env = {
   v2ImageModel: readOptionalString("V2_IMAGE_MODEL"),
   v2ImageApiKey: readOptionalString("V2_IMAGE_API_KEY") || readOptionalString("ARK_API_KEY"),
   v2VideoProvider: readString("V2_VIDEO_PROVIDER", "seedance"),
-  v2VideoApiBaseUrl: readOptionalString("V2_VIDEO_API_BASE_URL"),
-  v2VideoApiPath: readString("V2_VIDEO_API_PATH", "/videos/generations"),
+  v2VideoApiBaseUrl: readString("V2_VIDEO_API_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
+  v2VideoApiPath: readString("V2_VIDEO_API_PATH", "/contents/generations/tasks"),
   v2VideoModel: readOptionalString("V2_VIDEO_MODEL"),
-  v2VideoApiKey: readOptionalString("V2_VIDEO_API_KEY")
+  v2VideoApiKey: readOptionalString("V2_VIDEO_API_KEY") || readOptionalString("ARK_API_KEY")
 } as const;

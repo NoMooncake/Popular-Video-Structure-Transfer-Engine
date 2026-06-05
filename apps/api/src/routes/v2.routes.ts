@@ -4,6 +4,7 @@ import { config } from "../config/index.js";
 import {
   generateV2ImageCandidates,
   generateV2ImageToVideo,
+  getV2VideoGenerationTask,
   runV2Pipeline,
   V2PipelineInputError
 } from "../services/v2PipelineService.js";
@@ -126,6 +127,30 @@ v2Routes.post("/generation/image-to-video", async (req, res) => {
       error: {
         code: "v2_image_to_video_failed",
         message: getErrorMessage(error, "V2 图生视频执行失败")
+      }
+    });
+  }
+});
+
+v2Routes.get("/generation/video-tasks/:taskId", async (req, res) => {
+  try {
+    const result = await getV2VideoGenerationTask(req.params.taskId);
+    res.json(result);
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_video_task_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_video_task_query_failed",
+        message: getErrorMessage(error, "V2 视频生成任务查询失败")
       }
     });
   }

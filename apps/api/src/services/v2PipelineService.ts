@@ -5,7 +5,8 @@ import { runFFprobe } from "../utils/ffmpeg.js";
 import {
   requestImageCandidates,
   requestImageToVideo,
-  requestMultimodalJson
+  requestMultimodalJson,
+  requestVideoGenerationTask
 } from "../v2/providers/apiJsonClient.js";
 import { collectV2ReferenceFramesFromVideos } from "../v2/referenceFrames.js";
 import type {
@@ -1786,4 +1787,16 @@ export const generateV2ImageToVideo = async (
       fallback_reason: sanitizeFallbackReason(error)
     };
   }
+};
+
+export const getV2VideoGenerationTask = async (
+  taskId: string
+): Promise<JsonObject> => {
+  const normalizedTaskId = normalizeOptionalString(taskId);
+
+  if (!normalizedTaskId) {
+    throw new V2PipelineInputError("task_id is required");
+  }
+
+  return requestVideoGenerationTask(normalizedTaskId);
 };

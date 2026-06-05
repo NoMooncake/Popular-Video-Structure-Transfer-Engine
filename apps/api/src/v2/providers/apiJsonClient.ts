@@ -322,16 +322,25 @@ const requestJson = async (
   providerConfig: ApiProviderConfig,
   body: JsonObject
 ): Promise<JsonObject> => {
+  return requestProviderJson(providerConfig, providerConfig.apiPath, "POST", body);
+};
+
+const requestProviderJson = async (
+  providerConfig: ApiProviderConfig,
+  apiPath: string,
+  method: "GET" | "POST",
+  body?: JsonObject
+): Promise<JsonObject> => {
   assertConfigured(providerConfig);
 
-  const url = joinUrl(providerConfig.apiBaseUrl!, providerConfig.apiPath);
+  const url = joinUrl(providerConfig.apiBaseUrl!, apiPath);
   const response = await fetch(url, {
-    method: "POST",
+    method,
     headers: {
       Authorization: `Bearer ${providerConfig.apiKey}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(body),
+    body: method === "POST" ? JSON.stringify(body || {}) : undefined,
     signal: AbortSignal.timeout(120_000)
   });
   const responseBody = (await response.json().catch(() => ({}))) as
@@ -480,9 +489,57 @@ export const requestImageToVideo = async (
   payload: JsonObject
 ): Promise<JsonObject> => {
   const providerConfig = config.providers.v2.video;
+  const isVolcengineContentTask = /contents\/generations\/tasks/iu.test(
+    providerConfig.apiPath
+  );
+
+  if (isVolcengineContentTask) {
+    const prompt = normalizeOptionalString(payload.prompt);
+    const imageUri =
+      normalizeOptionalString(payload.image_uri) ||
+      normalizeOptionalString(payload.approved_image_uri);
+    const durationSeconds = Number(payload.duration_seconds || 5);
+    const aspectRatio = normalizeOptionalString(payload.aspect_ratio) || "9:16";
+    const content: JsonObject[] = [];
+
+    if (prompt) {
+      content.push({
+        type: "text",
+        text: prompt
+      });
+    }
+
+    if (imageUri) {
+      content.push({
+        type: "image_url",
+        image_url: {
+          url: imageUri
+        }
+      });
+    }
+
+    return requestProviderJson(providerConfig, providerConfig.apiPath, "POST", {
+      model: providerConfig.model,
+      content,
+      duration: Math.max(1, Math.min(30, durationSeconds)),
+      ratio: aspectRatio,
+      resolution: normalizeOptionalString(payload.resolution) || "720p"
+    });
+  }
 
   return requestJson(providerConfig, {
     model: providerConfig.model,
     ...payload
   });
+};
+
+export const requestVideoGenerationTask = async (
+  taskId: string
+): Promise<JsonObject> => {
+  const providerConfig = config.providers.v2.video;
+  const taskPath = `${providerConfig.apiPath.replace(/\/$/u, "")}/${encodeURIComponent(
+    taskId
+  )}`;
+
+  return requestProviderJson(providerConfig, taskPath, "GET");
 };
