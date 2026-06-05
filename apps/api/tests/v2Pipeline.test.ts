@@ -93,6 +93,16 @@ const createUploadedTestVideo = (durationSeconds: number): string => {
   return fileId;
 };
 
+const asRecordArray = (value: unknown): Array<Record<string, unknown>> => {
+  return Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [];
+};
+
+const asRecord = (value: unknown): Record<string, unknown> => {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+};
+
 test(
   "v2 deterministic material coverage blocks short material from covering longer target",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
@@ -178,6 +188,218 @@ test(
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 5);
     assert.equal(coverage.slot_coverage[1]?.coverage_status, "missing");
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 0);
+  }
+);
+
+test(
+  "v2 material coverage converts nested model fit slots into table-ready assignments",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(5);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          label: "ice_tea_material_01",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "生成 10 秒广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 10,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        fillable_architecture: {
+          slots: [
+            {
+              slot_id: "strong_hook",
+              slot_name: "强视觉开场",
+              time_range: "0-3秒"
+            },
+            {
+              slot_id: "product_hero",
+              slot_name: "产品亮相",
+              time_range: "3-6秒"
+            },
+            {
+              slot_id: "cta",
+              slot_name: "行动号召",
+              time_range: "6-10秒"
+            }
+          ]
+        },
+        aigc_prompts: {
+          picture_generation_prompts: [
+            {
+              slot_id: "cta",
+              prompt_description: "生成 CTA 定版图",
+              prompt: "一瓶冰红茶居中，背景清爽，预留点击购买按钮。"
+            }
+          ]
+        }
+      },
+      {
+        material_analysis: {
+          usable_materials: [
+            {
+              source: "01",
+              label: "冰块与产品特写",
+              description: "瓶身在冰块中，清凉感十足。",
+              fit_slots: ["strong_hook", "product_hero"],
+              quality: "优秀"
+            }
+          ],
+          material_to_slot_mapping: {
+            strong_hook: "01素材（冰块特写）",
+            product_hero: "01素材（瓶身特写）",
+            cta: "需新建"
+          }
+        }
+      }
+    );
+
+    assert.equal(coverage.slot_coverage.length, 3);
+    assert.equal(coverage.slot_coverage[0]?.slot_type, "strong_hook");
+    assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
+    assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 3);
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
+      "user_material_01"
+    );
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.assigned_materials)[0]?.material_id,
+      "user_material_01"
+    );
+
+    assert.equal(coverage.slot_coverage[1]?.slot_type, "product_hero");
+    assert.equal(coverage.slot_coverage[1]?.coverage_status, "partial");
+    assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 2);
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[1]?.candidate_materials)[0]?.material_id,
+      "user_material_01"
+    );
+    assert.equal(coverage.slot_coverage[1]?.gap_reason, "已匹配 2s，但该槽位需要 3s。");
+
+    assert.equal(coverage.slot_coverage[2]?.slot_type, "cta");
+    assert.equal(coverage.slot_coverage[2]?.coverage_status, "missing");
+    assert.equal(
+      asRecord(coverage.slot_coverage[2]?.recommended_aigc_prompt).prompt,
+      "一瓶冰红茶居中，背景清爽，预留点击购买按钮。"
+    );
+  }
+);
+
+test(
+  "v2 material coverage reads provider payload slot mapping and result architecture",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(1.2);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          label: "ice_tea_material_01",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 10,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        result: {
+          fillable_architecture: {
+            slots: [
+              {
+                slot_name: "strong_hook",
+                slot_duration_seconds: 2
+              },
+            {
+              slot_name: "usage_process_and_effect",
+              slot_duration_seconds: 2
+            },
+            {
+              slot_name: "cta",
+              slot_duration_seconds: 2
+            }
+            ],
+            aigc_supplement_plan: {
+              missing_slot: "cta",
+              image_generation_prompt: {
+                slot_name: "cta",
+                prompt: "生成冰红茶购买引导定版图。"
+              }
+            }
+          }
+        }
+      },
+      {
+        payload: {
+          slot_material_mapping: {
+            strong_hook: {
+              materials: ["ice_tea_material_01"]
+            },
+            usage_process: {
+              materials: ["ice_tea_material_01"]
+            },
+            cta: {
+              source: "missing",
+              materials: []
+            }
+          }
+        }
+      }
+    );
+
+    assert.equal(coverage.slot_coverage.length, 3);
+    assert.equal(coverage.slot_coverage[0]?.slot_type, "strong_hook");
+    assert.equal(coverage.slot_coverage[0]?.coverage_status, "partial");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
+      "user_material_01"
+    );
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.assigned_materials)[0]?.material_id,
+      "user_material_01"
+    );
+    assert.equal(coverage.slot_coverage[1]?.slot_type, "usage_process");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[1]?.candidate_materials)[0]?.material_id,
+      "user_material_01"
+    );
+    assert.equal(coverage.slot_coverage[2]?.slot_type, "cta");
+    assert.equal(
+      asRecord(coverage.slot_coverage[2]?.recommended_aigc_prompt).prompt,
+      "生成冰红茶购买引导定版图。"
+    );
   }
 );
 

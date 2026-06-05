@@ -428,6 +428,20 @@ const makeSlotDuration = (index: number, totalDuration: number): JsonObject => {
 };
 
 const readSecondsFromTimeRange = (value: unknown): number | undefined => {
+  if (typeof value === "string") {
+    const match = value.match(
+      /(\d+(?:\.\d+)?)\s*(?:-|~|–|—|到|至)\s*(\d+(?:\.\d+)?)\s*(?:秒|s)?/iu
+    );
+
+    if (match) {
+      const startSeconds = Number(match[1]);
+      const endSeconds = Number(match[2]);
+      const durationSeconds = endSeconds - startSeconds;
+
+      return durationSeconds > 0 ? Number(durationSeconds.toFixed(3)) : undefined;
+    }
+  }
+
   const timeRange = asJsonObject(value);
   const startSeconds = Number(timeRange.start_seconds ?? timeRange.startSeconds ?? 0);
   const endSeconds = Number(timeRange.end_seconds ?? timeRange.endSeconds);
@@ -449,6 +463,7 @@ const getRequiredSlotDuration = (
   const explicitDuration = Number(
     slot.required_duration ??
       slot.required_duration_seconds ??
+      slot.slot_duration_seconds ??
       slot.duration_seconds ??
       slot.duration
   );
@@ -460,20 +475,63 @@ const getRequiredSlotDuration = (
   return (
     readSecondsFromTimeRange(slot.time_range) ||
     readSecondsFromTimeRange(slot.timeRange) ||
+    readSecondsFromTimeRange(slot.time) ||
     Number((targetDuration / Math.max(1, slotCount)).toFixed(3))
   );
+};
+
+const slotAliases = new Map<string, string>([
+  ["effect_comparison_or_lifestyle", "effect_comparison"],
+  ["lifestyle", "effect_comparison"],
+  ["lifestyle_scene", "effect_comparison"],
+  ["atmosphere", "effect_comparison"],
+  ["social_scene", "effect_comparison"],
+  ["product_showcase", "product_hero"],
+  ["product_display", "product_hero"],
+  ["usage_process_and_effect", "usage_process"],
+  ["usage_effect", "usage_process"],
+  ["cta_card", "cta"],
+  ["call_to_action", "cta"]
+]);
+
+const normalizeSlotType = (value: unknown): string | undefined => {
+  const rawValue = normalizeOptionalString(value);
+  if (!rawValue) {
+    return undefined;
+  }
+
+  const normalizedValue = rawValue
+    .toLowerCase()
+    .replace(/[\s-]+/gu, "_")
+    .replace(/[^\w_]+/gu, "");
+
+  return slotAliases.get(normalizedValue) || normalizedValue;
 };
 
 const getArchitectureSlots = (
   fillableArchitecture: JsonObject,
   targetDuration: number
 ): JsonObject[] => {
+  const nestedArchitecture = asJsonObject(fillableArchitecture.fillable_architecture);
+  const resultArchitecture = asJsonObject(
+    asJsonObject(fillableArchitecture.result).fillable_architecture
+  );
   const rawSlots =
     (Array.isArray(fillableArchitecture.slots) && fillableArchitecture.slots) ||
     (Array.isArray(fillableArchitecture.structure_slots) &&
       fillableArchitecture.structure_slots) ||
     (Array.isArray(fillableArchitecture.editable_slots) &&
       fillableArchitecture.editable_slots) ||
+    (Array.isArray(nestedArchitecture.slots) && nestedArchitecture.slots) ||
+    (Array.isArray(nestedArchitecture.structure_slots) &&
+      nestedArchitecture.structure_slots) ||
+    (Array.isArray(nestedArchitecture.editable_slots) &&
+      nestedArchitecture.editable_slots) ||
+    (Array.isArray(resultArchitecture.slots) && resultArchitecture.slots) ||
+    (Array.isArray(resultArchitecture.structure_slots) &&
+      resultArchitecture.structure_slots) ||
+    (Array.isArray(resultArchitecture.editable_slots) &&
+      resultArchitecture.editable_slots) ||
     [];
 
   const slots = rawSlots.map((slot) => asJsonObject(slot));
@@ -566,36 +624,105 @@ const getSlotTypeTags = (record: JsonObject): string[] => {
       ...normalizeStringArray(record.usable_for_slots),
       ...normalizeStringArray(record.candidate_slot_types),
       ...normalizeStringArray(record.recommended_slot_types),
-      ...normalizeStringArray(record.slot_types)
-    ])
+      ...normalizeStringArray(record.slot_types),
+      ...normalizeStringArray(record.fit_slots)
+    ]
+      .map((slotType) => normalizeSlotType(slotType))
+      .filter((slotType): slotType is string => Boolean(slotType)))
   );
 };
 
 const collectMaterialModelRecords = (userMaterialAnalysis: JsonObject): JsonObject[] => {
+  const nestedMaterialAnalysis = asJsonObject(userMaterialAnalysis.material_analysis);
+
   return [
     ...(Array.isArray(userMaterialAnalysis.usable_materials)
       ? userMaterialAnalysis.usable_materials
       : []),
     ...(Array.isArray(userMaterialAnalysis.materials)
       ? userMaterialAnalysis.materials
+      : []),
+    ...(Array.isArray(nestedMaterialAnalysis.usable_materials)
+      ? nestedMaterialAnalysis.usable_materials
+      : []),
+    ...(Array.isArray(nestedMaterialAnalysis.materials)
+      ? nestedMaterialAnalysis.materials
       : [])
   ].map((item) => asJsonObject(item));
+};
+
+const normalizeMaterialReference = (value: unknown): string | undefined => {
+  const rawValue = normalizeOptionalString(value);
+  if (!rawValue) {
+    return undefined;
+  }
+
+  const explicitMaterialRef = rawValue.match(/user_material[_\s-]?(\d+)/iu);
+  if (explicitMaterialRef?.[1]) {
+    return `user_material_${explicitMaterialRef[1].padStart(2, "0")}`;
+  }
+
+  const sourceRef = rawValue.match(/(?:素材|source|material)?\s*0?(\d+)/iu);
+  if (sourceRef?.[1]) {
+    return `user_material_${sourceRef[1].padStart(2, "0")}`;
+  }
+
+  return rawValue;
 };
 
 const collectCoverageHintsByMaterialRef = (
   userMaterialAnalysis: JsonObject
 ): Map<string, string[]> => {
   const hints = new Map<string, string[]>();
+  const nestedMaterialAnalysis = asJsonObject(userMaterialAnalysis.material_analysis);
+  const payload = asJsonObject(userMaterialAnalysis.payload);
   const coverageBySlot = Array.isArray(userMaterialAnalysis.coverage_by_slot_type)
     ? userMaterialAnalysis.coverage_by_slot_type
     : [];
 
   for (const item of coverageBySlot) {
     const record = asJsonObject(item);
-    const slotType = normalizeOptionalString(record.slot_type);
-    const materialRefs = normalizeStringArray(record.material_refs);
+    const slotType = normalizeSlotType(record.slot_type);
+    const materialRefs = normalizeStringArray(record.material_refs)
+      .map((materialRef) => normalizeMaterialReference(materialRef))
+      .filter((materialRef): materialRef is string => Boolean(materialRef));
 
     if (!slotType) {
+      continue;
+    }
+
+    for (const materialRef of materialRefs) {
+      hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+    }
+  }
+
+  for (const [rawSlotType, rawMaterialRef] of Object.entries(
+    asJsonObject(nestedMaterialAnalysis.material_to_slot_mapping)
+  )) {
+    const slotType = normalizeSlotType(rawSlotType);
+    const materialRef = normalizeMaterialReference(rawMaterialRef);
+
+    if (
+      !slotType ||
+      !materialRef ||
+      /需|新建|aigc|ai|generate|生成|缺|补/u.test(materialRef)
+    ) {
+      continue;
+    }
+
+    hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+  }
+
+  for (const [rawSlotType, rawMapping] of Object.entries(
+    asJsonObject(payload.slot_material_mapping)
+  )) {
+    const slotType = normalizeSlotType(rawSlotType);
+    const mapping = asJsonObject(rawMapping);
+    const materialRefs = normalizeStringArray(mapping.materials)
+      .map((materialRef) => normalizeMaterialReference(materialRef))
+      .filter((materialRef): materialRef is string => Boolean(materialRef));
+
+    if (!slotType || materialRefs.length === 0) {
       continue;
     }
 
@@ -616,15 +743,81 @@ const findMaterialModelRecord = (
 
   return (
     records.find((record) => {
+      const sourceRef = normalizeMaterialReference(record.source);
+
       return (
         getStringField(record, ["material_id", "id", "asset_id"]) ===
           fallbackMaterialId ||
+        sourceRef === fallbackMaterialId ||
         (fileId && getStringField(record, ["file_id", "fileId"]) === fileId) ||
         (materialRef.uri &&
           getStringField(record, ["uri", "path", "url"]) === materialRef.uri)
       );
     }) || {}
   );
+};
+
+const collectAigcImagePromptsBySlot = (
+  fillableArchitecture: JsonObject
+): Map<string, JsonObject> => {
+  const promptsBySlot = new Map<string, JsonObject>();
+  const resultArchitecture = asJsonObject(
+    asJsonObject(fillableArchitecture.result).fillable_architecture
+  );
+  const nestedPromptContainers = [
+    asJsonObject(fillableArchitecture.aigc_prompts),
+    asJsonObject(asJsonObject(fillableArchitecture.fillable_architecture).aigc_prompts),
+    asJsonObject(resultArchitecture.aigc_prompts),
+    asJsonObject(fillableArchitecture.generation_prompt_package),
+    asJsonObject(fillableArchitecture.prompt_package),
+    asJsonObject(resultArchitecture.generation_prompt_package),
+    asJsonObject(resultArchitecture.prompt_package)
+  ];
+
+  for (const container of nestedPromptContainers) {
+    const promptItems = [
+      ...(Array.isArray(container.picture_generation_prompts)
+        ? container.picture_generation_prompts
+        : []),
+      ...(Array.isArray(container.image_prompt_candidates)
+        ? container.image_prompt_candidates
+        : []),
+      ...(Array.isArray(container.image_prompts) ? container.image_prompts : [])
+    ];
+
+    for (const item of promptItems) {
+      const promptRecord = asJsonObject(item);
+      const slotType = normalizeSlotType(
+        promptRecord.slot_type ?? promptRecord.slot_id ?? promptRecord.slot
+      );
+
+      if (slotType && !promptsBySlot.has(slotType)) {
+        promptsBySlot.set(slotType, promptRecord);
+      }
+    }
+  }
+
+  const supplementPlans = [
+    asJsonObject(fillableArchitecture.aigc_supplement_plan),
+    asJsonObject(asJsonObject(fillableArchitecture.fillable_architecture).aigc_supplement_plan),
+    asJsonObject(resultArchitecture.aigc_supplement_plan)
+  ];
+
+  for (const plan of supplementPlans) {
+    const promptRecord = asJsonObject(plan.image_generation_prompt);
+    const slotType = normalizeSlotType(
+      promptRecord.slot_type ||
+        promptRecord.slot_id ||
+        promptRecord.slot_name ||
+        plan.missing_slot
+    );
+
+    if (slotType && Object.keys(promptRecord).length > 0 && !promptsBySlot.has(slotType)) {
+      promptsBySlot.set(slotType, promptRecord);
+    }
+  }
+
+  return promptsBySlot;
 };
 
 export const buildV2DeterministicMaterialCoverage = async (
@@ -636,6 +829,7 @@ export const buildV2DeterministicMaterialCoverage = async (
   const slots = getArchitectureSlots(fillableArchitecture, targetDuration);
   const modelRecords = collectMaterialModelRecords(userMaterialAnalysis);
   const coverageHintsByMaterialRef = collectCoverageHintsByMaterialRef(userMaterialAnalysis);
+  const aigcPromptsBySlot = collectAigcImagePromptsBySlot(fillableArchitecture);
 
   const materialAssets = await Promise.all(
     normalized.user_materials.map(async (materialRef, index): Promise<JsonObject> => {
@@ -673,7 +867,10 @@ export const buildV2DeterministicMaterialCoverage = async (
         input_ref: materialId,
         file_id: materialRef.file_id || extractFileIdFromUploadUri(materialRef.uri),
         uri: materialRef.uri,
-        label: materialRef.label,
+        label: materialRef.label || getStringField(modelRecord, ["label", "name"]),
+        model_label: getStringField(modelRecord, ["label", "name"]),
+        model_description: getStringField(modelRecord, ["description", "notes", "summary"]),
+        model_quality: getStringField(modelRecord, ["quality", "confidence_label"]),
         local_path_resolved: Boolean(localPath),
         duration_seconds: durationSeconds,
         duration_status: durationSeconds ? "known" : "unknown",
@@ -699,7 +896,10 @@ export const buildV2DeterministicMaterialCoverage = async (
 
   const slotCoverage = slots.map((slot, index) => {
     const slotType =
-      normalizeOptionalString(slot.slot_type) || `slot_${String(index + 1).padStart(2, "0")}`;
+      normalizeSlotType(
+        slot.slot_type ?? slot.slot ?? slot.slot_id ?? slot.id ?? slot.slot_name
+      ) ||
+      `slot_${String(index + 1).padStart(2, "0")}`;
     const requiredDuration = getRequiredSlotDuration(
       slot,
       index,
@@ -709,6 +909,18 @@ export const buildV2DeterministicMaterialCoverage = async (
     let requiredRemaining = requiredDuration;
     const matches: JsonObject[] = [];
     const unknownCandidateRefs: string[] = [];
+    const candidateMaterials = materialAssets
+      .filter((asset) => normalizeStringArray(asset.candidate_slot_types).includes(slotType))
+      .map((asset) => ({
+        material_id: asset.material_id,
+        label: asset.label,
+        model_label: asset.model_label,
+        duration_seconds: asset.duration_seconds,
+        duration_status: asset.duration_status,
+        candidate_slot_types: asset.candidate_slot_types,
+        fit_reason: asset.model_description,
+        quality: asset.model_quality
+      }));
 
     for (const asset of materialAssets) {
       const materialId = String(asset.material_id);
@@ -743,6 +955,8 @@ export const buildV2DeterministicMaterialCoverage = async (
       requiredRemaining = Number((requiredRemaining - allocatedDuration).toFixed(3));
       matches.push({
         material_id: materialId,
+        label: asset.label,
+        model_label: asset.model_label,
         matched_material_duration: allocatedDuration,
         remaining_material_duration_after_match: remainingDurations.get(materialId)
       });
@@ -761,6 +975,19 @@ export const buildV2DeterministicMaterialCoverage = async (
           : unknownCandidateRefs.length > 0
             ? "duration_unknown"
             : "missing";
+    const promptRecord = aigcPromptsBySlot.get(slotType);
+    const prompt =
+      normalizeOptionalString(promptRecord?.prompt) ||
+      normalizeOptionalString(promptRecord?.image_prompt) ||
+      normalizeOptionalString(promptRecord?.prompt_description);
+    const gapReason =
+      coverageStatus === "covered"
+        ? undefined
+        : matchedMaterialDuration > 0
+          ? `已匹配 ${matchedMaterialDuration}s，但该槽位需要 ${requiredDuration}s。`
+          : candidateMaterials.length > 0
+            ? "存在候选素材，但可分配时长不足或已被前序槽位使用。"
+            : "没有可确定匹配到该槽位的用户素材。";
 
     return {
       slot_id:
@@ -768,12 +995,29 @@ export const buildV2DeterministicMaterialCoverage = async (
         normalizeOptionalString(slot.id) ||
         `slot_${String(index + 1).padStart(2, "0")}`,
       slot_type: slotType,
+      slot_name:
+        normalizeOptionalString(slot.slot_name) ||
+        normalizeOptionalString(slot.name) ||
+        normalizeOptionalString(slot.purpose),
       required_duration: requiredDuration,
       matched_material_duration: matchedMaterialDuration,
       coverage_status: coverageStatus,
+      candidate_materials: candidateMaterials,
+      assigned_materials: matches,
       matched_materials: matches,
       unknown_duration_candidate_material_refs: unknownCandidateRefs,
-      needs_ai_completion: coverageStatus !== "covered"
+      needs_ai_completion: coverageStatus !== "covered",
+      gap_reason: gapReason,
+      recommended_aigc_prompt: prompt
+        ? {
+            prompt_ref:
+              normalizeOptionalString(promptRecord?.prompt_ref) ||
+              normalizeOptionalString(promptRecord?.slot_id) ||
+              slotType,
+            prompt_description: normalizeOptionalString(promptRecord?.prompt_description),
+            prompt
+          }
+        : undefined
     };
   });
 
