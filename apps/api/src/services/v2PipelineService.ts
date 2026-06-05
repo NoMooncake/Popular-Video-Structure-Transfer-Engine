@@ -709,9 +709,22 @@ const collectCoverageHintsByMaterialRef = (
   const nestedMaterialAnalysis = asJsonObject(userMaterialAnalysis.material_analysis);
   const payload = asJsonObject(userMaterialAnalysis.payload);
   const payloadAnalysisResult = asJsonObject(payload.analysis_result);
-  const coverageBySlot = Array.isArray(userMaterialAnalysis.coverage_by_slot_type)
-    ? userMaterialAnalysis.coverage_by_slot_type
-    : [];
+  const nestedUserMaterialAnalysis = asJsonObject(userMaterialAnalysis.user_material_analysis);
+  const productionPlan = asJsonObject(userMaterialAnalysis.production_plan);
+  const productionPayload = asJsonObject(productionPlan.payload);
+  const analysisRoots = [
+    userMaterialAnalysis,
+    nestedMaterialAnalysis,
+    nestedUserMaterialAnalysis,
+    payload,
+    payloadAnalysisResult,
+    asJsonObject(payload.user_material_analysis),
+    productionPlan,
+    productionPayload
+  ];
+  const coverageBySlot = analysisRoots.flatMap((root) =>
+    Array.isArray(root.coverage_by_slot_type) ? root.coverage_by_slot_type : []
+  );
 
   for (const item of coverageBySlot) {
     const record = asJsonObject(item);
@@ -729,9 +742,11 @@ const collectCoverageHintsByMaterialRef = (
     }
   }
 
-  for (const [rawSlotType, rawMaterialRef] of Object.entries(
-    asJsonObject(nestedMaterialAnalysis.material_to_slot_mapping)
-  )) {
+  const materialToSlotMappings = analysisRoots.map((root) =>
+    asJsonObject(root.material_to_slot_mapping)
+  );
+  for (const materialToSlotMapping of materialToSlotMappings) {
+    for (const [rawSlotType, rawMaterialRef] of Object.entries(materialToSlotMapping)) {
     const slotType = normalizeSlotType(rawSlotType);
     const materialRef = normalizeMaterialReference(rawMaterialRef);
 
@@ -744,13 +759,13 @@ const collectCoverageHintsByMaterialRef = (
     }
 
     addCoverageHint(hints, materialRef, slotType);
+    }
   }
 
-  const slotMaterialMappings = [
-    asJsonObject(payload.slot_material_mapping),
-    asJsonObject(payload.slot_mapping),
-    asJsonObject(userMaterialAnalysis.slot_mapping)
-  ];
+  const slotMaterialMappings = analysisRoots.flatMap((root) => [
+    asJsonObject(root.slot_material_mapping),
+    asJsonObject(root.slot_mapping)
+  ]);
 
   for (const slotMapping of slotMaterialMappings) {
     for (const [rawSlotType, rawMapping] of Object.entries(slotMapping)) {
@@ -780,26 +795,72 @@ const collectCoverageHintsByMaterialRef = (
     }
   }
 
-  const slotSuggestions = Array.isArray(payloadAnalysisResult["素材到槽位建议"])
-    ? payloadAnalysisResult["素材到槽位建议"]
-    : [];
+  const slotSuggestions = analysisRoots.flatMap((root) => [
+    ...(Array.isArray(root["素材到槽位建议"]) ? root["素材到槽位建议"] : []),
+    ...(Array.isArray(root["槽位映射与建议"]) ? root["槽位映射与建议"] : [])
+  ]);
 
   for (const item of slotSuggestions) {
     const record = asJsonObject(item);
     const slotType = normalizeSlotType(record.slot ?? record.slot_type);
-    const materialRef = normalizeMaterialReference(
-      record.material_label ?? record.material_ref ?? record.material
+    const materialRefs = Array.from(
+      new Set([
+        ...[
+          normalizeMaterialReference(
+            record.material_label ?? record.material_ref ?? record.material
+          )
+        ].filter((materialRef): materialRef is string => Boolean(materialRef)),
+        ...extractMaterialReferences(record.suggestion),
+        ...extractMaterialReferences(record.recommendation),
+        ...extractMaterialReferences(record.description)
+      ])
     );
 
-    if (
-      !slotType ||
-      !materialRef ||
-      /需|新建|aigc|ai|generate|生成|缺|补/u.test(materialRef)
-    ) {
+    if (!slotType || materialRefs.length === 0) {
       continue;
     }
 
-    addCoverageHint(hints, materialRef, slotType);
+    for (const materialRef of materialRefs) {
+      addCoverageHint(hints, materialRef, slotType);
+    }
+  }
+
+  const architectureSlotContainers = analysisRoots.flatMap((root) => [
+    asJsonObject(root.fillable_architecture),
+    asJsonObject(asJsonObject(root.result).fillable_architecture)
+  ]);
+  const architectureSlots = architectureSlotContainers.flatMap((container) =>
+    Array.isArray(container.slots) ? container.slots : []
+  );
+
+  for (const item of architectureSlots) {
+    const record = asJsonObject(item);
+    const slotType = normalizeSlotType(
+      record.slot_type ?? record.slot ?? record.slot_id ?? record.slot_name ?? record.name
+    );
+    const materialRefs = Array.from(
+      new Set([
+        ...normalizeStringArray(record.materials)
+          .map((materialRef) => normalizeMaterialReference(materialRef))
+          .filter((materialRef): materialRef is string => Boolean(materialRef)),
+        ...normalizeStringArray(record.material_ids)
+          .map((materialRef) => normalizeMaterialReference(materialRef))
+          .filter((materialRef): materialRef is string => Boolean(materialRef)),
+        ...extractMaterialReferences(record.material_id),
+        ...extractMaterialReferences(record.material_ref),
+        ...extractMaterialReferences(record.suggestion),
+        ...extractMaterialReferences(record.recommendation),
+        ...extractMaterialReferences(record.description)
+      ])
+    );
+
+    if (!slotType || materialRefs.length === 0) {
+      continue;
+    }
+
+    for (const materialRef of materialRefs) {
+      addCoverageHint(hints, materialRef, slotType);
+    }
   }
 
   return hints;
@@ -903,11 +964,16 @@ const collectAigcImagePromptsBySlot = (
   const resultArchitecture = asJsonObject(
     asJsonObject(fillableArchitecture.result).fillable_architecture
   );
+  const payload = asJsonObject(fillableArchitecture.payload);
   const assemblyGenerationPlan = asJsonObject(
     asJsonObject(fillableArchitecture.assembly).ai_generation_plan
   );
+  const payloadAssemblyGenerationPlan = asJsonObject(
+    asJsonObject(payload.assembly).ai_generation_plan
+  );
   const nestedPromptContainers = [
     asJsonObject(fillableArchitecture),
+    payload,
     asJsonObject(fillableArchitecture.aigc_prompts),
     asJsonObject(asJsonObject(fillableArchitecture.fillable_architecture).aigc_prompts),
     asJsonObject(resultArchitecture),
@@ -918,7 +984,8 @@ const collectAigcImagePromptsBySlot = (
     asJsonObject(resultArchitecture.generation_prompt_package),
     asJsonObject(resultArchitecture.prompt_package),
     asJsonObject(resultArchitecture.prompts_for_missing),
-    assemblyGenerationPlan
+    assemblyGenerationPlan,
+    payloadAssemblyGenerationPlan
   ];
 
   for (const container of nestedPromptContainers) {
@@ -932,6 +999,9 @@ const collectAigcImagePromptsBySlot = (
       ...(Array.isArray(container.image_prompts) ? container.image_prompts : []),
       ...(Array.isArray(container.aigc_generation_plan)
         ? container.aigc_generation_plan
+        : []),
+      ...(Array.isArray(container.prompt_generators)
+        ? container.prompt_generators
         : [])
     ];
 
@@ -1891,8 +1961,16 @@ export const runV2Pipeline = async (
         reason
       )
   );
+  const productionAwareMaterialCoverage = await buildV2DeterministicMaterialCoverage(
+    normalized,
+    fillableArchitecture,
+    {
+      ...userMaterialAnalysis,
+      production_plan: productionPlanResult.output
+    }
+  );
   const materialCoverage = attachProductionPromptsToMaterialCoverage(
-    baseMaterialCoverage,
+    productionAwareMaterialCoverage,
     productionPlanResult.output
   );
   const productionPlan = applyMaterialCoverageToProductionPlan(

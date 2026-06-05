@@ -507,6 +507,70 @@ test(
   }
 );
 
+test(
+  "v2 material coverage reads production plan material hints",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(1.2);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          label: "ice_tea_material_01",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 10,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "product_hero",
+            slot_duration_seconds: 1
+          }
+        ]
+      },
+      {
+        production_plan: {
+          payload: {
+            fillable_architecture: {
+              slots: [
+                {
+                  slot_type: "product_hero",
+                  suggestion: "使用 user_material_01 的冰红茶产品特写。"
+                }
+              ]
+            }
+          }
+        }
+      }
+    );
+
+    assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
+      "user_material_01"
+    );
+  }
+);
+
 test("v2 material coverage attaches production plan image prompts", () => {
   const coverage: V2MaterialCoverage = {
     materials_sufficient: false,
@@ -571,6 +635,52 @@ test("v2 material coverage attaches production plan image prompts", () => {
   assert.equal(
     asRecord(enrichedCoverage.slot_coverage[2]?.recommended_aigc_prompt).prompt_ref,
     "cta_image"
+  );
+});
+
+test("v2 material coverage reads payload prompt generators", () => {
+  const coverage: V2MaterialCoverage = {
+    materials_sufficient: false,
+    requires_ai_completion: true,
+    target_duration_seconds: 10,
+    total_known_material_duration_seconds: 4,
+    hard_constraints: {
+      total_duration_coverage_passed: false,
+      notes: []
+    },
+    material_assets: [],
+    slot_coverage: [
+      {
+        slot_id: "slot_07",
+        slot_type: "cta",
+        frontend_coverage_status: "material_insufficient",
+        recommended_aigc_prompt: {
+          prompt_ref: "cta_fallback",
+          prompt_source: "deterministic_slot_fallback",
+          prompt: "后端兜底 CTA prompt"
+        }
+      }
+    ]
+  };
+
+  const enrichedCoverage = attachProductionPromptsToMaterialCoverage(coverage, {
+    payload: {
+      prompt_generators: [
+        {
+          slot_type: "cta",
+          prompt: "模型 payload 里的 CTA 图片生成 prompt"
+        }
+      ]
+    }
+  });
+
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt_source,
+    "model_or_plan"
+  );
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt,
+    "模型 payload 里的 CTA 图片生成 prompt"
   );
 });
 
