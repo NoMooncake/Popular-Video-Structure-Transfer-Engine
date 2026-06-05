@@ -1,4 +1,7 @@
 import { config } from "../config/index.js";
+import fs from "node:fs";
+import { findUploadedVideoById } from "./uploadService.js";
+import { runFFprobe } from "../utils/ffmpeg.js";
 import {
   requestImageCandidates,
   requestImageToVideo,
@@ -10,12 +13,16 @@ import type {
   V2ImageCandidate,
   V2ImageCandidateRequest,
   V2ImageToVideoRequest,
+  V2MaterialCoverage,
   V2PipelineRequest,
   V2PipelineResult,
   V2TextAsset,
   V2UserRequest,
   V2VideoRef
 } from "../v2/types.js";
+
+const defaultImageCandidateCount = 4;
+const maxImageCandidateCount = 6;
 
 export class V2PipelineInputError extends Error {
   statusCode = 400;
@@ -36,9 +43,9 @@ const v2SystemPrompt = [
   "不要照抄样例视频内容，只提取可复用的结构、节奏、视觉逻辑、商业说服逻辑和包装逻辑。",
   "当用户素材不足时，生成服务于新内容的中文生成 prompt，不要复制样例视频中的具体人物、场景或品牌内容。",
   "如果用户素材足够，输出中文剪辑/拼接方案；如果素材不足，先输出中文图片生成 prompt，再输出中文图生视频 prompt。Prompt 不要只写一句话，必须包含结构化细节。",
-  "缺失素材的图片生成 prompt 默认应说明：为同一个槽位生成 3 张候选图，供用户选择。3 张图应保持同一广告意图和产品设定，但在构图、光线、景别或背景细节上有差异。",
-  "图片生成 prompt 不允许把 3 张候选图设计成 3 个不同主题、不同物体或不同场景；只能围绕一个具体缺失槽位和一个具体视觉主题做三种变体。",
-  "图片生成 prompt 如果需要举例，最多只能给一个主示例；不要写“例如 1/2/3”这类会导致模型分别生成不同主题的枚举。",
+  "缺失素材的图片生成 prompt 默认应说明：为同一个槽位生成 4 张候选图，供用户选择。4 张图应保持同一广告意图和产品设定，但在构图、光线、景别或背景细节上有差异。",
+  "图片生成 prompt 不允许把 4 张候选图设计成 4 个不同主题、不同物体或不同场景；只能围绕一个具体缺失槽位和一个具体视觉主题做四种变体。",
+  "图片生成 prompt 如果需要举例，最多只能给一个主示例；不要写“例如 1/2/3/4”这类会导致模型分别生成不同主题的枚举。",
   "人物生成规则：如果用户素材中已经有人物出现，后续生成人物相关镜头时应尽量还原用户素材中的主角形象、年龄感、穿着风格、发型、气质和场景关系。",
   "人物生成规则：如果用户素材中没有人物，且广告结构没有强制要求人物出镜，应优先展示产品、道具、场景、包装和手部动作，不要无故生成新人物。",
   "产品生成规则：如果用户素材中已经出现明确产品或包装，后续生成必须优先保持该产品/包装，不要写禁止出现该产品的负面约束；只能禁止无关品牌、无关产品或错误包装。",
@@ -76,8 +83,8 @@ const detailedGenerationPromptRequirements = {
   prompt_quality_rules: [
     "每个 prompt 必须具体到镜头、动作、画面元素和商业广告目的。",
     "每个 prompt 必须基于用户输入的素材、需求和对应槽位，不要泛泛描述。",
-    "图片生成 prompt 默认要求生成 3 张候选图供用户选择，并说明三张图之间应在构图、光线、景别或背景细节上形成差异。",
-    "3 张候选图必须是同一主题下的三种变体，不允许分别生成 3 个不同物体、不同场景或不同广告方向。",
+    "图片生成 prompt 默认要求生成 4 张候选图供用户选择，并说明四张图之间应在构图、光线、景别或背景细节上形成差异。",
+    "4 张候选图必须是同一主题下的四种变体，不允许分别生成 4 个不同物体、不同场景或不同广告方向。",
     "不要用“例如：1...2...3...”列出多个候选主体；如果需要示例，只给一个最符合用户素材和产品的主体示例。",
     "如果用户素材里有人物，人物相关生成必须尽量还原该人物主角形象。",
     "如果用户素材里已有产品、包装或品牌视觉，生成必须优先保留该产品/包装/品牌视觉；不要写“不要出现完整产品”等会和参考素材冲突的限制。",
@@ -255,7 +262,10 @@ const normalizeRequest = (payload: V2PipelineRequest): Required<V2PipelineReques
     options: {
       image_candidate_count: Math.max(
         1,
-        Math.min(6, Number(payload.options?.image_candidate_count || 3))
+        Math.min(
+          maxImageCandidateCount,
+          Number(payload.options?.image_candidate_count || defaultImageCandidateCount)
+        )
       ),
       generate_image_candidates:
         payload.options?.generate_image_candidates === true,
@@ -414,6 +424,414 @@ const makeSlotDuration = (index: number, totalDuration: number): JsonObject => {
   return {
     start_seconds: Number((start * scale).toFixed(1)),
     end_seconds: Number((end * scale).toFixed(1))
+  };
+};
+
+const readSecondsFromTimeRange = (value: unknown): number | undefined => {
+  const timeRange = asJsonObject(value);
+  const startSeconds = Number(timeRange.start_seconds ?? timeRange.startSeconds ?? 0);
+  const endSeconds = Number(timeRange.end_seconds ?? timeRange.endSeconds);
+
+  if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds)) {
+    return undefined;
+  }
+
+  const durationSeconds = endSeconds - startSeconds;
+  return durationSeconds > 0 ? Number(durationSeconds.toFixed(3)) : undefined;
+};
+
+const getRequiredSlotDuration = (
+  slot: JsonObject,
+  index: number,
+  slotCount: number,
+  targetDuration: number
+): number => {
+  const explicitDuration = Number(
+    slot.required_duration ??
+      slot.required_duration_seconds ??
+      slot.duration_seconds ??
+      slot.duration
+  );
+
+  if (Number.isFinite(explicitDuration) && explicitDuration > 0) {
+    return Number(explicitDuration.toFixed(3));
+  }
+
+  return (
+    readSecondsFromTimeRange(slot.time_range) ||
+    readSecondsFromTimeRange(slot.timeRange) ||
+    Number((targetDuration / Math.max(1, slotCount)).toFixed(3))
+  );
+};
+
+const getArchitectureSlots = (
+  fillableArchitecture: JsonObject,
+  targetDuration: number
+): JsonObject[] => {
+  const rawSlots =
+    (Array.isArray(fillableArchitecture.slots) && fillableArchitecture.slots) ||
+    (Array.isArray(fillableArchitecture.structure_slots) &&
+      fillableArchitecture.structure_slots) ||
+    (Array.isArray(fillableArchitecture.editable_slots) &&
+      fillableArchitecture.editable_slots) ||
+    [];
+
+  const slots = rawSlots.map((slot) => asJsonObject(slot));
+  if (slots.length > 0) {
+    return slots;
+  }
+
+  return commercialAdSlots.map((slot, index) => ({
+    slot_id: `slot_${String(index + 1).padStart(2, "0")}`,
+    slot_type: slot.slot_type,
+    time_range: makeSlotDuration(index, targetDuration),
+    role: slot.role
+  }));
+};
+
+const extractFileIdFromUploadUri = (uri: string | undefined): string | undefined => {
+  if (!uri) {
+    return undefined;
+  }
+
+  const match = uri.match(/\/api\/upload\/files\/([^/?#]+)/u);
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+};
+
+const resolveLocalVideoPath = (videoRef: V2VideoRef): string | undefined => {
+  if (videoRef.uri?.startsWith("file://")) {
+    const filePath = videoRef.uri.slice("file://".length);
+    return fs.existsSync(filePath) ? filePath : undefined;
+  }
+
+  if (videoRef.uri?.startsWith("/") && fs.existsSync(videoRef.uri)) {
+    return videoRef.uri;
+  }
+
+  const fileId = videoRef.file_id || extractFileIdFromUploadUri(videoRef.uri);
+  return fileId ? findUploadedVideoById(fileId) : undefined;
+};
+
+const readLocalVideoDurationSeconds = async (
+  filePath: string | undefined
+): Promise<number | undefined> => {
+  if (!filePath) {
+    return undefined;
+  }
+
+  try {
+    const probeResult = await runFFprobe(filePath);
+    const videoStream = probeResult.streams?.find(
+      (stream) => stream.codec_type === "video"
+    );
+    const durationSeconds =
+      Number(videoStream?.duration) || Number(probeResult.format?.duration);
+
+    return Number.isFinite(durationSeconds) && durationSeconds > 0
+      ? Number(durationSeconds.toFixed(3))
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const getFrameSampleTimestamps = (durationSeconds: number | undefined): number[] => {
+  if (!durationSeconds || durationSeconds <= 0) {
+    return [];
+  }
+
+  if (durationSeconds <= 1) {
+    return [0];
+  }
+
+  return [0.15, 0.5, 0.85].map((position) =>
+    Number(Math.min(durationSeconds - 0.001, durationSeconds * position).toFixed(3))
+  );
+};
+
+const getStringField = (record: JsonObject, keys: string[]): string | undefined => {
+  for (const key of keys) {
+    const value = normalizeOptionalString(record[key]);
+    if (value) {
+      return value;
+    }
+  }
+
+  return undefined;
+};
+
+const getSlotTypeTags = (record: JsonObject): string[] => {
+  return Array.from(
+    new Set([
+      ...normalizeStringArray(record.usable_for_slots),
+      ...normalizeStringArray(record.candidate_slot_types),
+      ...normalizeStringArray(record.recommended_slot_types),
+      ...normalizeStringArray(record.slot_types)
+    ])
+  );
+};
+
+const collectMaterialModelRecords = (userMaterialAnalysis: JsonObject): JsonObject[] => {
+  return [
+    ...(Array.isArray(userMaterialAnalysis.usable_materials)
+      ? userMaterialAnalysis.usable_materials
+      : []),
+    ...(Array.isArray(userMaterialAnalysis.materials)
+      ? userMaterialAnalysis.materials
+      : [])
+  ].map((item) => asJsonObject(item));
+};
+
+const collectCoverageHintsByMaterialRef = (
+  userMaterialAnalysis: JsonObject
+): Map<string, string[]> => {
+  const hints = new Map<string, string[]>();
+  const coverageBySlot = Array.isArray(userMaterialAnalysis.coverage_by_slot_type)
+    ? userMaterialAnalysis.coverage_by_slot_type
+    : [];
+
+  for (const item of coverageBySlot) {
+    const record = asJsonObject(item);
+    const slotType = normalizeOptionalString(record.slot_type);
+    const materialRefs = normalizeStringArray(record.material_refs);
+
+    if (!slotType) {
+      continue;
+    }
+
+    for (const materialRef of materialRefs) {
+      hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+    }
+  }
+
+  return hints;
+};
+
+const findMaterialModelRecord = (
+  records: JsonObject[],
+  materialRef: V2VideoRef,
+  fallbackMaterialId: string
+): JsonObject => {
+  const fileId = materialRef.file_id || extractFileIdFromUploadUri(materialRef.uri);
+
+  return (
+    records.find((record) => {
+      return (
+        getStringField(record, ["material_id", "id", "asset_id"]) ===
+          fallbackMaterialId ||
+        (fileId && getStringField(record, ["file_id", "fileId"]) === fileId) ||
+        (materialRef.uri &&
+          getStringField(record, ["uri", "path", "url"]) === materialRef.uri)
+      );
+    }) || {}
+  );
+};
+
+export const buildV2DeterministicMaterialCoverage = async (
+  normalized: Required<V2PipelineRequest>,
+  fillableArchitecture: JsonObject,
+  userMaterialAnalysis: JsonObject
+): Promise<V2MaterialCoverage> => {
+  const targetDuration = Number(normalized.options.target_duration_seconds || 30);
+  const slots = getArchitectureSlots(fillableArchitecture, targetDuration);
+  const modelRecords = collectMaterialModelRecords(userMaterialAnalysis);
+  const coverageHintsByMaterialRef = collectCoverageHintsByMaterialRef(userMaterialAnalysis);
+
+  const materialAssets = await Promise.all(
+    normalized.user_materials.map(async (materialRef, index): Promise<JsonObject> => {
+      const materialId = `user_material_${String(index + 1).padStart(2, "0")}`;
+      const modelRecord = findMaterialModelRecord(modelRecords, materialRef, materialId);
+      const localPath = resolveLocalVideoPath(materialRef);
+      const durationSeconds = await readLocalVideoDurationSeconds(localPath);
+      const modelMaterialId =
+        getStringField(modelRecord, ["material_id", "id", "asset_id"]) || materialId;
+      const slotTags = Array.from(
+        new Set([
+          ...getSlotTypeTags(modelRecord),
+          ...(coverageHintsByMaterialRef.get(modelMaterialId) || []),
+          ...(coverageHintsByMaterialRef.get(materialId) || [])
+        ])
+      );
+      const contentLabels = Array.from(
+        new Set([
+          ...slotTags,
+          ...normalizeStringArray(modelRecord.visual_tags),
+          ...normalizeStringArray(modelRecord.content_tags),
+          ...[
+            getStringField(modelRecord, [
+              "inferred_type",
+              "visual_type",
+              "material_type",
+              "type"
+            ])
+          ].filter((value): value is string => Boolean(value))
+        ])
+      );
+
+      return {
+        material_id: modelMaterialId,
+        input_ref: materialId,
+        file_id: materialRef.file_id || extractFileIdFromUploadUri(materialRef.uri),
+        uri: materialRef.uri,
+        label: materialRef.label,
+        local_path_resolved: Boolean(localPath),
+        duration_seconds: durationSeconds,
+        duration_status: durationSeconds ? "known" : "unknown",
+        usable_duration_seconds: durationSeconds || 0,
+        frame_sample_timestamps_seconds: getFrameSampleTimestamps(durationSeconds),
+        candidate_slot_types: slotTags,
+        content_labels: contentLabels,
+        frame_sampling_status: localPath
+          ? durationSeconds
+            ? "duration_probed_frames_available_for_provider"
+            : "duration_probe_failed"
+          : "local_file_unresolved"
+      };
+    })
+  );
+
+  const remainingDurations = new Map(
+    materialAssets.map((asset) => [
+      String(asset.material_id),
+      Number(asset.usable_duration_seconds || 0)
+    ])
+  );
+
+  const slotCoverage = slots.map((slot, index) => {
+    const slotType =
+      normalizeOptionalString(slot.slot_type) || `slot_${String(index + 1).padStart(2, "0")}`;
+    const requiredDuration = getRequiredSlotDuration(
+      slot,
+      index,
+      slots.length,
+      targetDuration
+    );
+    let requiredRemaining = requiredDuration;
+    const matches: JsonObject[] = [];
+    const unknownCandidateRefs: string[] = [];
+
+    for (const asset of materialAssets) {
+      const materialId = String(asset.material_id);
+      const candidateSlotTypes = normalizeStringArray(asset.candidate_slot_types);
+      const isCandidate = candidateSlotTypes.includes(slotType);
+
+      if (!isCandidate) {
+        continue;
+      }
+
+      if (asset.duration_status !== "known") {
+        unknownCandidateRefs.push(materialId);
+        continue;
+      }
+
+      if (requiredRemaining <= 0) {
+        continue;
+      }
+
+      const remainingDuration = remainingDurations.get(materialId) || 0;
+      if (remainingDuration <= 0) {
+        continue;
+      }
+
+      const allocatedDuration = Number(
+        Math.min(requiredRemaining, remainingDuration).toFixed(3)
+      );
+      remainingDurations.set(
+        materialId,
+        Number((remainingDuration - allocatedDuration).toFixed(3))
+      );
+      requiredRemaining = Number((requiredRemaining - allocatedDuration).toFixed(3));
+      matches.push({
+        material_id: materialId,
+        matched_material_duration: allocatedDuration,
+        remaining_material_duration_after_match: remainingDurations.get(materialId)
+      });
+    }
+
+    const matchedMaterialDuration = Number(
+      matches
+        .reduce((total, match) => total + Number(match.matched_material_duration || 0), 0)
+        .toFixed(3)
+    );
+    const coverageStatus =
+      matchedMaterialDuration >= requiredDuration
+        ? "covered"
+        : matchedMaterialDuration > 0
+          ? "partial"
+          : unknownCandidateRefs.length > 0
+            ? "duration_unknown"
+            : "missing";
+
+    return {
+      slot_id:
+        normalizeOptionalString(slot.slot_id) ||
+        normalizeOptionalString(slot.id) ||
+        `slot_${String(index + 1).padStart(2, "0")}`,
+      slot_type: slotType,
+      required_duration: requiredDuration,
+      matched_material_duration: matchedMaterialDuration,
+      coverage_status: coverageStatus,
+      matched_materials: matches,
+      unknown_duration_candidate_material_refs: unknownCandidateRefs,
+      needs_ai_completion: coverageStatus !== "covered"
+    };
+  });
+
+  const totalKnownMaterialDuration = Number(
+    materialAssets
+      .reduce((total, asset) => total + Number(asset.usable_duration_seconds || 0), 0)
+      .toFixed(3)
+  );
+  const totalDurationCoveragePassed = totalKnownMaterialDuration >= targetDuration;
+  const allSlotsCovered = slotCoverage.every(
+    (coverage) => coverage.coverage_status === "covered"
+  );
+  const materialsSufficient = totalDurationCoveragePassed && allSlotsCovered;
+  const notes = [
+    totalDurationCoveragePassed
+      ? `已知视频素材总时长 ${totalKnownMaterialDuration}s 覆盖目标成片 ${targetDuration}s。`
+      : `已知视频素材总时长 ${totalKnownMaterialDuration}s 小于目标成片 ${targetDuration}s，不能判定素材充足。`,
+    allSlotsCovered
+      ? "所有结构槽位都有足量已知时长素材覆盖。"
+      : "至少一个结构槽位缺少足量已知时长素材，需要 AI 补全或补充素材。"
+  ];
+
+  return {
+    materials_sufficient: materialsSufficient,
+    requires_ai_completion: !materialsSufficient,
+    target_duration_seconds: targetDuration,
+    total_known_material_duration_seconds: totalKnownMaterialDuration,
+    hard_constraints: {
+      total_duration_coverage_passed: totalDurationCoveragePassed,
+      notes
+    },
+    material_assets: materialAssets,
+    slot_coverage: slotCoverage
+  };
+};
+
+const applyMaterialCoverageToProductionPlan = (
+  productionPlan: JsonObject,
+  materialCoverage: V2MaterialCoverage
+): JsonObject => {
+  const canGenerateVideoDirectly =
+    getCanGenerateVideoDirectly(productionPlan) &&
+    materialCoverage.materials_sufficient;
+  const needsUserImageApproval =
+    !materialCoverage.materials_sufficient ||
+    getNeedsUserImageApproval(productionPlan);
+
+  return {
+    ...productionPlan,
+    materials_sufficient: materialCoverage.materials_sufficient,
+    requires_ai_completion: materialCoverage.requires_ai_completion,
+    can_generate_video_directly: canGenerateVideoDirectly,
+    needs_user_image_approval: needsUserImageApproval,
+    deterministic_material_coverage: materialCoverage,
+    material_coverage_notes: materialCoverage.hard_constraints.notes,
+    missing_slots: materialCoverage.slot_coverage.filter(
+      (slot) => slot.coverage_status !== "covered"
+    )
   };
 };
 
@@ -640,7 +1058,7 @@ const makeFallbackProductionPlan = (
           slot_type: "strong_hook",
           prompt: [
             `【基础设定】竖屏 9:16 商业广告开头关键帧，服务于“${goal}”。`,
-            "【候选图要求】请为该槽位生成 3 张候选图供用户选择，三张图必须围绕同一个具体痛点主题和同一产品设定，只在构图、光线、景别或背景细节上有差异。",
+            "【候选图要求】请为该槽位生成 4 张候选图供用户选择，四张图必须围绕同一个具体痛点主题和同一产品设定，只在构图、光线、景别或背景细节上有差异。",
             `【主体/产品】面向“${audience}”，画面需要暗示${productName}即将作为解决方案出现，但不要直接复制样例广告品牌或场景。`,
             "【场景环境】选择一个最符合用户素材和产品的真实生活痛点场景，例如炎热疲惫后的冰爽需求；不要同时列出多个互斥场景。如果用户素材里没有人物，优先用环境、物品、手部动作或局部状态表达痛点。",
             "【构图与镜头】中近景或特写构图，主体位于视觉中心，背景保留少量环境信息，方便后续叠加大字标题；如需人物出镜，人物形象应匹配目标人群和产品定位。",
@@ -656,7 +1074,7 @@ const makeFallbackProductionPlan = (
           slot_type: "product_hero",
           prompt: [
             `【基础设定】竖屏 9:16 商品主视觉图，用于 15-30 秒商业广告中的产品亮相槽位。`,
-            "【候选图要求】请为该槽位生成 3 张候选图供用户选择，三张图必须保持同一产品、同一包装和同一广告意图，只在产品角度、光线、背景和景别上有差异。",
+            "【候选图要求】请为该槽位生成 4 张候选图供用户选择，四张图必须保持同一产品、同一包装和同一广告意图，只在产品角度、光线、背景和景别上有差异。",
             `【主体/产品】画面中心是${productName}，产品包装清晰可辨，核心卖点区域留有可读空间。`,
             "【场景环境】使用干净、商业化的棚拍或极简环境，可结合冰块、水珠、光效、材质、道具强化产品属性。",
             "【构图与镜头】产品居中或略偏中心，近景/特写镜头，背景虚化或简化，确保产品是第一视觉焦点。",
@@ -672,7 +1090,7 @@ const makeFallbackProductionPlan = (
           slot_type: "effect_comparison",
           prompt: [
             "【基础设定】竖屏 9:16 效果对比广告图，用于商业广告中的证明槽位。",
-            "【候选图要求】请为该槽位生成 3 张候选图供用户选择，三张图必须保持同一对比逻辑、同一主体和同一产品设定，只在分屏形式、构图和光线氛围上有差异。",
+            "【候选图要求】请为该槽位生成 4 张候选图供用户选择，四张图必须保持同一对比逻辑、同一主体和同一产品设定，只在分屏形式、构图和光线氛围上有差异。",
             `【主体/产品】围绕${productName}带来的改善结果进行表达，产品可出现在改善后的画面中。`,
             "【场景环境】使用左右分屏、前后对比或同一人物状态变化，清楚表达使用前后的差异。",
             "【构图与镜头】左侧/前段表现问题状态，右侧/后段表现改善状态，中间用清晰分割线或转场视觉连接。",
@@ -884,6 +1302,12 @@ export const runV2Pipeline = async (
     fallbackReasons.push(fillableArchitectureResult.fallbackReason);
   }
 
+  const materialCoverage = await buildV2DeterministicMaterialCoverage(
+    normalized,
+    fillableArchitecture,
+    userMaterialAnalysis
+  );
+
   const productionPlanResult = await callMultimodalWithFallback(
     "plan_assembly_or_generation",
     {
@@ -892,9 +1316,10 @@ export const runV2Pipeline = async (
       user_request: normalized.user_request,
       fillable_architecture: fillableArchitecture,
       user_material_analysis: userMaterialAnalysis,
+      deterministic_material_coverage: materialCoverage,
       detailed_generation_prompt_requirements: detailedGenerationPromptRequirements,
       instruction:
-        "判断现有用户素材是否足够生成商业广告。如果足够，请用中文返回剪辑/拼接方案；如果不足，请先用中文返回缺失素材的图片生成 prompt，再用中文返回图生视频 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。所有图片生成 prompt 和图生视频 prompt 必须按 detailed_generation_prompt_requirements 中的章节组织，内容要像专业视频提示词一样详细。图片生成 prompt 要明确说明为同一槽位生成 3 张候选图供用户选择，且 3 张图必须是同一个具体主题、同一产品设定、同一场景逻辑下的三种变体，只能在构图、光线、景别、镜头角度或背景细节上有差异。不要用“例如 1/2/3”列出多个互斥主体或场景，避免模型把三张候选图生成成三个不同主题。特别注意产品和人物规则：如果用户素材里已有产品、包装、品牌视觉或主角人物，后续生成必须尽量还原它们，不能写“不要出现完整产品”“不要出现人物”等与用户素材冲突的负面约束；这类限制只能表达为“不要出现无关产品/无关人物/无关品牌”。如果用户素材里没有人物且槽位不强制人物出现，则不要凭空生成人物，优先展示产品、道具、场景、手部动作或包装画面；如果必须新增人物，需详细描述符合产品设定和目标人群的人物样貌、穿着、状态和动作。"
+        "判断现有用户素材是否足够生成商业广告时，必须优先服从 deterministic_material_coverage：只要 materials_sufficient 为 false，就不能输出可直接成片，必须为未覆盖槽位规划 AI 补全或补充素材。如果足够，请用中文返回剪辑/拼接方案；如果不足，请先用中文返回缺失素材的图片生成 prompt，再用中文返回图生视频 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。所有图片生成 prompt 和图生视频 prompt 必须按 detailed_generation_prompt_requirements 中的章节组织，内容要像专业视频提示词一样详细。图片生成 prompt 要明确说明为同一槽位生成 4 张候选图供用户选择，且 4 张图必须是同一个具体主题、同一产品设定、同一场景逻辑下的四种变体，只能在构图、光线、景别、镜头角度或背景细节上有差异。不要用“例如 1/2/3/4”列出多个互斥主体或场景，避免模型把四张候选图生成成四个不同主题。特别注意产品和人物规则：如果用户素材里已有产品、包装、品牌视觉或主角人物，后续生成必须尽量还原它们，不能写“不要出现完整产品”“不要出现人物”等与用户素材冲突的负面约束；这类限制只能表达为“不要出现无关产品/无关人物/无关品牌”。如果用户素材里没有人物且槽位不强制人物出现，则不要凭空生成人物，优先展示产品、道具、场景、手部动作或包装画面；如果必须新增人物，需详细描述符合产品设定和目标人群的人物样貌、穿着、状态和动作。"
     },
     allowFallback,
     (reason) =>
@@ -905,7 +1330,10 @@ export const runV2Pipeline = async (
         reason
       )
   );
-  const productionPlan = productionPlanResult.output;
+  const productionPlan = applyMaterialCoverageToProductionPlan(
+    productionPlanResult.output,
+    materialCoverage
+  );
   if (productionPlanResult.fallbackReason) {
     fallbackReasons.push(productionPlanResult.fallbackReason);
   }
@@ -913,7 +1341,9 @@ export const runV2Pipeline = async (
   const imageCandidates =
     normalized.options.generate_image_candidates === true
       ? await (async () => {
-          const count = Number(normalized.options.image_candidate_count || 3);
+          const count = Number(
+            normalized.options.image_candidate_count || defaultImageCandidateCount
+          );
           try {
             const referenceImages = await collectReferenceImagesForGeneration(
               normalized.user_materials,
@@ -963,6 +1393,7 @@ export const runV2Pipeline = async (
       reference_video_analyses: referenceVideoAnalyses,
       user_material_analysis: userMaterialAnalysis,
       fillable_architecture: fillableArchitecture,
+      material_coverage: materialCoverage,
       production_plan: productionPlan,
       image_candidates: imageCandidates
     },
@@ -997,7 +1428,10 @@ export const generateV2ImageCandidates = async (
     throw new V2PipelineInputError("prompt or prompt_package is required");
   }
 
-  const count = Math.max(1, Math.min(6, Number(payload.count || 3)));
+  const count = Math.max(
+    1,
+    Math.min(maxImageCandidateCount, Number(payload.count || defaultImageCandidateCount))
+  );
   const allowFallback = payload.allow_fallback !== false;
 
   try {

@@ -28,6 +28,8 @@ v2Routes.get("/status", (_req, res) => {
     version: "2.0.0",
     vertical: "commercial_advertising",
     target_duration_seconds_default: 30,
+    image_candidate_count_default: 4,
+    image_candidate_count_max: 6,
     mode: "api_first_with_fallback",
     providers: {
       multimodal: {

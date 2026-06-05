@@ -51,6 +51,19 @@ export type V2ImageCandidate = {
   provider_response: JsonObject;
 };
 
+export type V2MaterialCoverage = {
+  materials_sufficient: boolean;
+  requires_ai_completion: boolean;
+  target_duration_seconds: number;
+  total_known_material_duration_seconds: number;
+  hard_constraints: {
+    total_duration_coverage_passed: boolean;
+    notes: string[];
+  };
+  material_assets: JsonObject[];
+  slot_coverage: JsonObject[];
+};
+
 export type V2PipelineResult = {
   id: string;
   version: "2.0.0";
@@ -72,6 +85,7 @@ export type V2PipelineResult = {
     reference_video_analyses: JsonObject[];
     user_material_analysis: JsonObject;
     fillable_architecture: JsonObject;
+    material_coverage: V2MaterialCoverage;
     production_plan: JsonObject;
     image_candidates?: V2ImageCandidate[];
   };
