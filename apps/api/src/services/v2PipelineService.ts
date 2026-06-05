@@ -677,6 +677,31 @@ const normalizeMaterialReference = (value: unknown): string | undefined => {
   return rawValue;
 };
 
+const extractMaterialReferences = (value: unknown): string[] => {
+  const rawValue = normalizeOptionalString(value);
+  if (!rawValue) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      Array.from(
+        rawValue.matchAll(
+          /(?:user_material|素材|source|material|ice_tea_material)[_\s-]?0?(\d+)/giu
+        )
+      ).map((match) => `user_material_${match[1].padStart(2, "0")}`)
+    )
+  );
+};
+
+const addCoverageHint = (
+  hints: Map<string, string[]>,
+  materialRef: string,
+  slotType: string
+): void => {
+  hints.set(materialRef, Array.from(new Set([...(hints.get(materialRef) || []), slotType])));
+};
+
 const collectCoverageHintsByMaterialRef = (
   userMaterialAnalysis: JsonObject
 ): Map<string, string[]> => {
@@ -700,7 +725,7 @@ const collectCoverageHintsByMaterialRef = (
     }
 
     for (const materialRef of materialRefs) {
-      hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+      addCoverageHint(hints, materialRef, slotType);
     }
   }
 
@@ -718,16 +743,31 @@ const collectCoverageHintsByMaterialRef = (
       continue;
     }
 
-    hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+    addCoverageHint(hints, materialRef, slotType);
   }
 
-  for (const [rawSlotType, rawMapping] of Object.entries(
-    asJsonObject(payload.slot_material_mapping)
-  )) {
+  const slotMaterialMappings = [
+    asJsonObject(payload.slot_material_mapping),
+    asJsonObject(payload.slot_mapping),
+    asJsonObject(userMaterialAnalysis.slot_mapping)
+  ];
+
+  for (const slotMapping of slotMaterialMappings) {
+    for (const [rawSlotType, rawMapping] of Object.entries(slotMapping)) {
     const slotType = normalizeSlotType(rawSlotType);
     const mapping = asJsonObject(rawMapping);
-    const materialRefs = normalizeStringArray(mapping.materials)
-      .map((materialRef) => normalizeMaterialReference(materialRef))
+      const materialRefs = Array.from(
+        new Set([
+          ...normalizeStringArray(mapping.materials)
+            .map((materialRef) => normalizeMaterialReference(materialRef))
+            .filter((materialRef): materialRef is string => Boolean(materialRef)),
+          ...extractMaterialReferences(mapping.material_label),
+          ...extractMaterialReferences(mapping.material_ref),
+          ...extractMaterialReferences(mapping.material),
+          ...extractMaterialReferences(mapping.recommendation),
+          ...extractMaterialReferences(mapping.suggestion)
+        ])
+      )
       .filter((materialRef): materialRef is string => Boolean(materialRef));
 
     if (!slotType || materialRefs.length === 0) {
@@ -735,7 +775,8 @@ const collectCoverageHintsByMaterialRef = (
     }
 
     for (const materialRef of materialRefs) {
-      hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+        addCoverageHint(hints, materialRef, slotType);
+      }
     }
   }
 
@@ -758,7 +799,7 @@ const collectCoverageHintsByMaterialRef = (
       continue;
     }
 
-    hints.set(materialRef, [...(hints.get(materialRef) || []), slotType]);
+    addCoverageHint(hints, materialRef, slotType);
   }
 
   return hints;
@@ -824,7 +865,7 @@ const getPromptSlotTypes = (promptRecord: JsonObject): string[] => {
     inferredSlotTypes.push("product_hero");
   }
 
-  if (/usage[_\s-]?process|饮用|使用过程/iu.test(searchableText)) {
+  if (/usage[_\s-]?process|使用过程|饮用过程|畅饮|仰头痛饮|开盖.*饮/iu.test(searchableText)) {
     inferredSlotTypes.push("usage_process");
   }
 
@@ -843,8 +884,27 @@ const collectAigcImagePromptsBySlot = (
   fillableArchitecture: JsonObject
 ): Map<string, JsonObject> => {
   const promptsBySlot = new Map<string, JsonObject>();
+  const addPromptRecord = (promptRecord: JsonObject, fallbackSlot?: unknown): void => {
+    const promptWithSlot =
+      fallbackSlot && !getPromptSlotTypes(promptRecord).length
+        ? {
+            ...promptRecord,
+            slot_type: fallbackSlot
+          }
+        : promptRecord;
+    const slotTypes = getPromptSlotTypes(promptWithSlot);
+
+    for (const slotType of slotTypes) {
+      if (!promptsBySlot.has(slotType)) {
+        promptsBySlot.set(slotType, promptWithSlot);
+      }
+    }
+  };
   const resultArchitecture = asJsonObject(
     asJsonObject(fillableArchitecture.result).fillable_architecture
+  );
+  const assemblyGenerationPlan = asJsonObject(
+    asJsonObject(fillableArchitecture.assembly).ai_generation_plan
   );
   const nestedPromptContainers = [
     asJsonObject(fillableArchitecture),
@@ -857,7 +917,8 @@ const collectAigcImagePromptsBySlot = (
     asJsonObject(fillableArchitecture.prompts_for_missing),
     asJsonObject(resultArchitecture.generation_prompt_package),
     asJsonObject(resultArchitecture.prompt_package),
-    asJsonObject(resultArchitecture.prompts_for_missing)
+    asJsonObject(resultArchitecture.prompts_for_missing),
+    assemblyGenerationPlan
   ];
 
   for (const container of nestedPromptContainers) {
@@ -875,13 +936,32 @@ const collectAigcImagePromptsBySlot = (
     ];
 
     for (const item of promptItems) {
-      const promptRecord = asJsonObject(item);
-      const slotTypes = getPromptSlotTypes(promptRecord);
+      addPromptRecord(asJsonObject(item));
+    }
 
-      for (const slotType of slotTypes) {
-        if (!promptsBySlot.has(slotType)) {
-          promptsBySlot.set(slotType, promptRecord);
-        }
+    const generativeSlots = Array.isArray(container.generative_slots)
+      ? container.generative_slots
+      : [];
+    for (const item of generativeSlots) {
+      const slotRecord = asJsonObject(item);
+      const fallbackSlot =
+        slotRecord.slot_type ??
+        slotRecord.slot_id ??
+        slotRecord.slot ??
+        slotRecord.slot_name ??
+        slotRecord.target_slot;
+      const imagePrompts = [
+        ...(Array.isArray(slotRecord.image_prompts) ? slotRecord.image_prompts : []),
+        ...(Array.isArray(slotRecord.image_prompt_candidates)
+          ? slotRecord.image_prompt_candidates
+          : []),
+        ...(Array.isArray(slotRecord.picture_generation_prompts)
+          ? slotRecord.picture_generation_prompts
+          : [])
+      ];
+
+      for (const promptItem of imagePrompts) {
+        addPromptRecord(asJsonObject(promptItem), fallbackSlot);
       }
     }
   }
@@ -1284,7 +1364,8 @@ export const attachProductionPromptsToMaterialCoverage = (
   return {
     ...materialCoverage,
     slot_coverage: materialCoverage.slot_coverage.map((slotCoverage) => {
-      if (slotCoverage.recommended_aigc_prompt) {
+      const existingPrompt = asJsonObject(slotCoverage.recommended_aigc_prompt);
+      if (existingPrompt.prompt_source === "model_or_plan") {
         return slotCoverage;
       }
 
@@ -1306,6 +1387,7 @@ export const attachProductionPromptsToMaterialCoverage = (
             normalizeOptionalString(promptRecord.prompt_ref) ||
             normalizeOptionalString(promptRecord.slot_id) ||
             slotType,
+          prompt_source: "model_or_plan",
           prompt_description: normalizeOptionalString(promptRecord.prompt_description),
           prompt
         }

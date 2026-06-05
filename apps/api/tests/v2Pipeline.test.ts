@@ -398,12 +398,15 @@ test(
             ]
           },
           slot_material_mapping: {
-            usage_process: {
-              materials: ["ice_tea_material_01"]
-            },
             cta: {
               source: "missing",
               materials: []
+            }
+          },
+          slot_mapping: {
+            usage_process: {
+              status: "可用素材",
+              recommendation: "素材01提供了极佳的产品特写，也可作为使用过程辅助镜头。"
             }
           }
         }
@@ -542,9 +545,9 @@ test("v2 material coverage attaches production plan image prompts", () => {
           slot_type: "strong_hook",
           prompt: "生成冰红茶强 Hook 关键帧，四张候选。"
         },
-      {
-        prompt_ref: "cta_image",
-        target_slot: "cta",
+        {
+          prompt_ref: "cta_image",
+          target_slot: "cta",
           prompt: "生成冰红茶 CTA 购买引导图，四张候选。"
         }
       ],
@@ -568,6 +571,121 @@ test("v2 material coverage attaches production plan image prompts", () => {
   assert.equal(
     asRecord(enrichedCoverage.slot_coverage[2]?.recommended_aigc_prompt).prompt_ref,
     "cta_image"
+  );
+});
+
+test("v2 material coverage replaces fallback prompts with production prompts", () => {
+  const coverage: V2MaterialCoverage = {
+    materials_sufficient: false,
+    requires_ai_completion: true,
+    target_duration_seconds: 10,
+    total_known_material_duration_seconds: 4,
+    hard_constraints: {
+      total_duration_coverage_passed: false,
+      notes: []
+    },
+    material_assets: [],
+    slot_coverage: [
+      {
+        slot_id: "slot_07",
+        slot_type: "cta",
+        frontend_coverage_status: "material_insufficient",
+        recommended_aigc_prompt: {
+          prompt_ref: "cta_fallback",
+          prompt_source: "deterministic_slot_fallback",
+          prompt: "后端兜底 CTA prompt"
+        }
+      }
+    ]
+  };
+
+  const enrichedCoverage = attachProductionPromptsToMaterialCoverage(coverage, {
+    assembly: {
+      ai_generation_plan: {
+        generative_slots: [
+          {
+            slot_type: "cta",
+            image_prompts: [
+              {
+                prompt: "模型生成的冰红茶 CTA 结尾卡 prompt"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt_source,
+    "model_or_plan"
+  );
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt,
+    "模型生成的冰红茶 CTA 结尾卡 prompt"
+  );
+});
+
+test("v2 material coverage does not infer usage process from generic drinking goal", () => {
+  const coverage: V2MaterialCoverage = {
+    materials_sufficient: false,
+    requires_ai_completion: true,
+    target_duration_seconds: 10,
+    total_known_material_duration_seconds: 4,
+    hard_constraints: {
+      total_duration_coverage_passed: false,
+      notes: []
+    },
+    material_assets: [],
+    slot_coverage: [
+      {
+        slot_id: "slot_05",
+        slot_type: "usage_process",
+        frontend_coverage_status: "material_insufficient",
+        recommended_aigc_prompt: {
+          prompt_ref: "usage_process_fallback",
+          prompt_source: "deterministic_slot_fallback",
+          prompt: "后端兜底使用过程 prompt"
+        }
+      },
+      {
+        slot_id: "slot_07",
+        slot_type: "cta",
+        frontend_coverage_status: "material_insufficient",
+        recommended_aigc_prompt: {
+          prompt_ref: "cta_fallback",
+          prompt_source: "deterministic_slot_fallback",
+          prompt: "后端兜底 CTA prompt"
+        }
+      }
+    ]
+  };
+
+  const enrichedCoverage = attachProductionPromptsToMaterialCoverage(coverage, {
+    assembly: {
+      ai_generation_plan: {
+        generative_slots: [
+          {
+            slot_type: "cta",
+            image_prompts: [
+              {
+                prompt:
+                  "【基础设定】用于 CTA 槽位。目标是突出清爽、解渴、夏天饮用场景和购买欲。"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  });
+
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt_source,
+    "deterministic_slot_fallback"
+  );
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[1]?.recommended_aigc_prompt).prompt_source,
+    "model_or_plan"
   );
 });
 
