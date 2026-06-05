@@ -12,6 +12,7 @@ import {
   assembleV2FinalVideo,
   attachProductionPromptsToMaterialCoverage,
   buildV2DeterministicMaterialCoverage,
+  getAdaptiveSlotPlanningRules,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
 import { extractJsonObject } from "../src/v2/providers/apiJsonClient.js";
@@ -290,6 +291,7 @@ test(
     assert.equal(coverage.slot_coverage[0]?.slot_type, "strong_hook");
     assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
     assert.equal(coverage.slot_coverage[0]?.frontend_coverage_status, "fully_matched");
+    assert.equal(coverage.slot_coverage[0]?.frontend_coverage_label, "完全匹配");
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 3);
     assert.equal(
       asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
@@ -306,6 +308,10 @@ test(
       coverage.slot_coverage[1]?.frontend_coverage_status,
       "structure_complete_duration_short"
     );
+    assert.equal(
+      coverage.slot_coverage[1]?.frontend_coverage_label,
+      "结构完整，但时长不足"
+    );
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 2);
     assert.equal(
       asRecordArray(coverage.slot_coverage[1]?.candidate_materials)[0]?.material_id,
@@ -321,6 +327,7 @@ test(
     assert.equal(coverage.slot_coverage[2]?.slot_type, "cta");
     assert.equal(coverage.slot_coverage[2]?.coverage_status, "missing");
     assert.equal(coverage.slot_coverage[2]?.frontend_coverage_status, "material_insufficient");
+    assert.equal(coverage.slot_coverage[2]?.frontend_coverage_label, "素材不够");
     assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
       "generate_ai_for_missing_material"
     ]);
@@ -1082,6 +1089,13 @@ test("v2 target duration keeps a 10 second user request", () => {
   assert.equal(normalizeV2TargetDurationSeconds(10), 10);
   assert.equal(normalizeV2TargetDurationSeconds(2), 5);
   assert.equal(normalizeV2TargetDurationSeconds(90), 60);
+});
+
+test("v2 adaptive slot planning asks short videos to merge modules", () => {
+  assert.equal(getAdaptiveSlotPlanningRules(7).target_slot_count_range, "3-5");
+  assert.match(String(getAdaptiveSlotPlanningRules(7).rule), /不能机械拆成7个模块/);
+  assert.equal(getAdaptiveSlotPlanningRules(12).target_slot_count_range, "4-6");
+  assert.equal(getAdaptiveSlotPlanningRules(20).target_slot_count_range, "6-7");
 });
 
 test("v2 provider JSON extraction repairs common model JSON issues", () => {

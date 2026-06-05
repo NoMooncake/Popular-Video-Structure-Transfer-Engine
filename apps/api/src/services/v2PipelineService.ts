@@ -421,6 +421,46 @@ const commercialAdSlots = [
   }
 ] as const;
 
+export const getAdaptiveSlotPlanningRules = (targetDuration: number): JsonObject => {
+  if (targetDuration <= 8) {
+    return {
+      target_slot_count_range: "3-5",
+      rule:
+        "6-8秒短广告不能机械拆成7个模块。必须合并或舍弃非必要模块，优先保证每个模块表达完整、镜头可读、逻辑顺畅。",
+      recommended_structures: [
+        "strong_hook + product_hero/selling_point_proof + usage/effect + cta",
+        "strong_hook/product_hero + usage_process + effect_comparison/cta",
+        "product_hero + selling_point_proof + usage_process + cta"
+      ],
+      minimum_slot_duration_seconds: 0.8,
+      cta_minimum_duration_seconds: 0.5
+    };
+  }
+
+  if (targetDuration <= 15) {
+    return {
+      target_slot_count_range: "4-6",
+      rule:
+        "8-15秒广告可以保留核心商业链路，但仍应按素材和叙事需要合并相邻模块，避免每段过短或重复表达。",
+      recommended_structures: [
+        "strong_hook + pain/product + selling_point + usage/effect + cta",
+        "strong_hook + product_hero + selling_point_proof + usage_process + effect_comparison/cta"
+      ],
+      minimum_slot_duration_seconds: 1
+    };
+  }
+
+  return {
+    target_slot_count_range: "6-7",
+    rule:
+      "15秒以上可以展开完整商业广告结构，但仍需根据素材和叙事质量调整时长，不要为了填满模板而重复镜头。",
+    recommended_structures: [
+      "strong_hook + pain_point_scene + product_hero + selling_point_proof + usage_process + effect_comparison + cta"
+    ],
+    minimum_slot_duration_seconds: 1.5
+  };
+};
+
 const makeSlotDuration = (index: number, totalDuration: number): JsonObject => {
   const defaultRanges = [
     [0, 3],
@@ -1210,6 +1250,18 @@ const isAcceptedDurationShortSlot = (
   return acceptedSlots.has(slotId) || acceptedSlots.has(slotType);
 };
 
+const getFrontendCoverageLabel = (frontendCoverageStatus: string): string => {
+  if (frontendCoverageStatus === "fully_matched") {
+    return "完全匹配";
+  }
+
+  if (frontendCoverageStatus === "structure_complete_duration_short") {
+    return "结构完整，但时长不足";
+  }
+
+  return "素材不够";
+};
+
 const getSlotFallbackPrompt = (
   normalized: Required<V2PipelineRequest>,
   slot: JsonObject,
@@ -1479,6 +1531,7 @@ export const buildV2DeterministicMaterialCoverage = async (
       matched_material_duration: matchedMaterialDuration,
       coverage_status: coverageStatus,
       frontend_coverage_status: frontendCoverageStatus,
+      frontend_coverage_label: getFrontendCoverageLabel(frontendCoverageStatus),
       user_duration_short_decision: durationShortAccepted
         ? "accepted_as_sufficient"
         : coverageStatus === "partial"
@@ -2013,6 +2066,7 @@ export const runV2Pipeline = async (
 ): Promise<V2PipelineResult> => {
   const normalized = normalizeRequest(payload);
   const targetDuration = Number(normalized.options.target_duration_seconds || 30);
+  const adaptiveSlotPlanningRules = getAdaptiveSlotPlanningRules(targetDuration);
   const allowFallback = normalized.options.allow_fallback !== false;
   const fallbackReasons: string[] = [];
 
@@ -2025,9 +2079,10 @@ export const runV2Pipeline = async (
           target_duration_seconds: targetDuration,
           reference_index: index + 1,
           video: videoRef,
-          expected_slots: commercialAdSlots.map((slot) => slot.slot_type),
+          reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
+          adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
           instruction:
-            "阅读并理解这个商业广告样例视频。请用中文返回广告结构槽位、节奏、视觉/包装风格、说服逻辑、内容逻辑和可迁移模式。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
+            "阅读并理解这个商业广告样例视频。请用中文返回广告结构槽位、节奏、视觉/包装风格、说服逻辑、内容逻辑和可迁移模式。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
         },
         allowFallback,
         (reason) =>
@@ -2047,12 +2102,13 @@ export const runV2Pipeline = async (
     {
       vertical: "commercial_advertising",
       target_duration_seconds: targetDuration,
-      expected_slots: commercialAdSlots.map((slot) => slot.slot_type),
+      reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
+      adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
       user_request: normalized.user_request,
       user_materials: normalized.user_materials,
       text_assets: normalized.text_assets,
       instruction:
-        "分析用户想要什么，以及用户素材能支撑一个商业广告短视频中的哪些槽位。请用中文返回可用素材、弱素材、缺失素材、素材到槽位的建议。所有说明和后续 prompt 必须中文。"
+        "分析用户想要什么，以及用户素材能支撑一个商业广告短视频中的哪些槽位。reusable_slot_type_reference 只是槽位类型参考；请根据目标时长和素材质量判断哪些槽位应该合并、保留或舍弃。请用中文返回可用素材、弱素材、缺失素材、素材到槽位的建议。所有说明和后续 prompt 必须中文。"
     },
     allowFallback,
     (reason) => makeFallbackMaterialAnalysis(normalized, reason)
@@ -2067,12 +2123,13 @@ export const runV2Pipeline = async (
     {
       vertical: "commercial_advertising",
       target_duration_seconds: targetDuration,
-      expected_slots: commercialAdSlots.map((slot) => slot.slot_type),
+      reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
+      adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
       user_request: normalized.user_request,
       reference_video_analyses: referenceVideoAnalyses,
       user_material_analysis: userMaterialAnalysis,
       instruction:
-        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
+        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
     },
     allowFallback,
     (reason) =>
@@ -2100,6 +2157,7 @@ export const runV2Pipeline = async (
       vertical: "commercial_advertising",
       target_duration_seconds: targetDuration,
       user_request: normalized.user_request,
+      adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
       fillable_architecture: fillableArchitecture,
       user_material_analysis: userMaterialAnalysis,
       deterministic_material_coverage: baseMaterialCoverage,
