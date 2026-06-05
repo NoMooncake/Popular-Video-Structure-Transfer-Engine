@@ -34,6 +34,7 @@ export type V2PipelineRequest = {
     generate_image_candidates?: boolean;
     target_duration_seconds?: number;
     allow_fallback?: boolean;
+    accepted_duration_short_slots?: string[];
   };
 };
 

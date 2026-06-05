@@ -273,6 +273,9 @@ const normalizeRequest = (payload: V2PipelineRequest): Required<V2PipelineReques
         15,
         Math.min(60, Number(payload.options?.target_duration_seconds || 30))
       ),
+      accepted_duration_short_slots: normalizeStringArray(
+        payload.options?.accepted_duration_short_slots
+      ),
       allow_fallback: payload.options?.allow_fallback !== false
     }
   };
@@ -820,6 +823,14 @@ const collectAigcImagePromptsBySlot = (
   return promptsBySlot;
 };
 
+const isAcceptedDurationShortSlot = (
+  acceptedSlots: Set<string>,
+  slotId: string,
+  slotType: string
+): boolean => {
+  return acceptedSlots.has(slotId) || acceptedSlots.has(slotType);
+};
+
 export const buildV2DeterministicMaterialCoverage = async (
   normalized: Required<V2PipelineRequest>,
   fillableArchitecture: JsonObject,
@@ -830,6 +841,11 @@ export const buildV2DeterministicMaterialCoverage = async (
   const modelRecords = collectMaterialModelRecords(userMaterialAnalysis);
   const coverageHintsByMaterialRef = collectCoverageHintsByMaterialRef(userMaterialAnalysis);
   const aigcPromptsBySlot = collectAigcImagePromptsBySlot(fillableArchitecture);
+  const acceptedDurationShortSlots = new Set(
+    normalizeStringArray(normalized.options.accepted_duration_short_slots).map(
+      (slot) => normalizeSlotType(slot) || slot
+    )
+  );
 
   const materialAssets = await Promise.all(
     normalized.user_materials.map(async (materialRef, index): Promise<JsonObject> => {
@@ -899,6 +915,10 @@ export const buildV2DeterministicMaterialCoverage = async (
       normalizeSlotType(
         slot.slot_type ?? slot.slot ?? slot.slot_id ?? slot.id ?? slot.slot_name
       ) ||
+      `slot_${String(index + 1).padStart(2, "0")}`;
+    const slotId =
+      normalizeOptionalString(slot.slot_id) ||
+      normalizeOptionalString(slot.id) ||
       `slot_${String(index + 1).padStart(2, "0")}`;
     const requiredDuration = getRequiredSlotDuration(
       slot,
@@ -975,6 +995,28 @@ export const buildV2DeterministicMaterialCoverage = async (
           : unknownCandidateRefs.length > 0
             ? "duration_unknown"
             : "missing";
+    const durationShortAccepted =
+      coverageStatus === "partial" &&
+      isAcceptedDurationShortSlot(acceptedDurationShortSlots, slotId, slotType);
+    const frontendCoverageStatus =
+      coverageStatus === "covered" || durationShortAccepted
+        ? "fully_matched"
+        : coverageStatus === "partial"
+          ? "structure_complete_duration_short"
+          : "material_insufficient";
+    const missingDuration = Number(
+      Math.max(0, requiredDuration - matchedMaterialDuration).toFixed(3)
+    );
+    const aiCompletionRequiredDuration =
+      frontendCoverageStatus === "fully_matched" ? 0 : missingDuration || requiredDuration;
+    const availableUserActions =
+      frontendCoverageStatus === "structure_complete_duration_short"
+        ? ["accept_current_material_as_sufficient", "generate_ai_for_missing_duration"]
+        : frontendCoverageStatus === "material_insufficient"
+          ? ["generate_ai_for_missing_material"]
+          : durationShortAccepted
+            ? ["reopen_ai_completion"]
+            : [];
     const promptRecord = aigcPromptsBySlot.get(slotType);
     const prompt =
       normalizeOptionalString(promptRecord?.prompt) ||
@@ -991,9 +1033,7 @@ export const buildV2DeterministicMaterialCoverage = async (
 
     return {
       slot_id:
-        normalizeOptionalString(slot.slot_id) ||
-        normalizeOptionalString(slot.id) ||
-        `slot_${String(index + 1).padStart(2, "0")}`,
+        slotId,
       slot_type: slotType,
       slot_name:
         normalizeOptionalString(slot.slot_name) ||
@@ -1002,11 +1042,20 @@ export const buildV2DeterministicMaterialCoverage = async (
       required_duration: requiredDuration,
       matched_material_duration: matchedMaterialDuration,
       coverage_status: coverageStatus,
+      frontend_coverage_status: frontendCoverageStatus,
+      user_duration_short_decision: durationShortAccepted
+        ? "accepted_as_sufficient"
+        : coverageStatus === "partial"
+          ? "pending"
+          : "not_applicable",
+      missing_duration: missingDuration,
+      ai_completion_required_duration: aiCompletionRequiredDuration,
+      available_user_actions: availableUserActions,
       candidate_materials: candidateMaterials,
       assigned_materials: matches,
       matched_materials: matches,
       unknown_duration_candidate_material_refs: unknownCandidateRefs,
-      needs_ai_completion: coverageStatus !== "covered",
+      needs_ai_completion: frontendCoverageStatus !== "fully_matched",
       gap_reason: gapReason,
       recommended_aigc_prompt: prompt
         ? {
@@ -1030,14 +1079,19 @@ export const buildV2DeterministicMaterialCoverage = async (
   const allSlotsCovered = slotCoverage.every(
     (coverage) => coverage.coverage_status === "covered"
   );
-  const materialsSufficient = totalDurationCoveragePassed && allSlotsCovered;
+  const allSlotsFrontendMatched = slotCoverage.every(
+    (coverage) => coverage.frontend_coverage_status === "fully_matched"
+  );
+  const materialsSufficient = allSlotsFrontendMatched;
   const notes = [
     totalDurationCoveragePassed
       ? `已知视频素材总时长 ${totalKnownMaterialDuration}s 覆盖目标成片 ${targetDuration}s。`
       : `已知视频素材总时长 ${totalKnownMaterialDuration}s 小于目标成片 ${targetDuration}s，不能判定素材充足。`,
     allSlotsCovered
       ? "所有结构槽位都有足量已知时长素材覆盖。"
-      : "至少一个结构槽位缺少足量已知时长素材，需要 AI 补全或补充素材。"
+      : allSlotsFrontendMatched
+        ? "存在时长不足槽位，但用户已接受当前素材为足够表达。"
+        : "至少一个结构槽位缺少足量已知时长素材，需要 AI 补全或补充素材。"
   ];
 
   return {
@@ -1074,7 +1128,7 @@ const applyMaterialCoverageToProductionPlan = (
     deterministic_material_coverage: materialCoverage,
     material_coverage_notes: materialCoverage.hard_constraints.notes,
     missing_slots: materialCoverage.slot_coverage.filter(
-      (slot) => slot.coverage_status !== "covered"
+      (slot) => slot.frontend_coverage_status !== "fully_matched"
     )
   };
 };

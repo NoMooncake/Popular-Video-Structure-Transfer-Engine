@@ -275,6 +275,7 @@ test(
     assert.equal(coverage.slot_coverage.length, 3);
     assert.equal(coverage.slot_coverage[0]?.slot_type, "strong_hook");
     assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
+    assert.equal(coverage.slot_coverage[0]?.frontend_coverage_status, "fully_matched");
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 3);
     assert.equal(
       asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
@@ -287,15 +288,28 @@ test(
 
     assert.equal(coverage.slot_coverage[1]?.slot_type, "product_hero");
     assert.equal(coverage.slot_coverage[1]?.coverage_status, "partial");
+    assert.equal(
+      coverage.slot_coverage[1]?.frontend_coverage_status,
+      "structure_complete_duration_short"
+    );
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 2);
     assert.equal(
       asRecordArray(coverage.slot_coverage[1]?.candidate_materials)[0]?.material_id,
       "user_material_01"
     );
     assert.equal(coverage.slot_coverage[1]?.gap_reason, "已匹配 2s，但该槽位需要 3s。");
+    assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
+      "accept_current_material_as_sufficient",
+      "generate_ai_for_missing_duration"
+    ]);
+    assert.equal(coverage.slot_coverage[1]?.ai_completion_required_duration, 1);
 
     assert.equal(coverage.slot_coverage[2]?.slot_type, "cta");
     assert.equal(coverage.slot_coverage[2]?.coverage_status, "missing");
+    assert.equal(coverage.slot_coverage[2]?.frontend_coverage_status, "material_insufficient");
+    assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
+      "generate_ai_for_missing_material"
+    ]);
     assert.equal(
       asRecord(coverage.slot_coverage[2]?.recommended_aigc_prompt).prompt,
       "一瓶冰红茶居中，背景清爽，预留点击购买按钮。"
@@ -400,6 +414,76 @@ test(
       asRecord(coverage.slot_coverage[2]?.recommended_aigc_prompt).prompt,
       "生成冰红茶购买引导定版图。"
     );
+  }
+);
+
+test(
+  "v2 material coverage lets user accept duration-short material as sufficient",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(1.2);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 10,
+        accepted_duration_short_slots: ["strong_hook"],
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        result: {
+          fillable_architecture: {
+            slots: [
+              {
+                slot_name: "strong_hook",
+                slot_duration_seconds: 2
+              }
+            ]
+          }
+        }
+      },
+      {
+        payload: {
+          slot_material_mapping: {
+            strong_hook: {
+              materials: ["user_material_01"]
+            }
+          }
+        }
+      }
+    );
+
+    assert.equal(coverage.materials_sufficient, true);
+    assert.equal(coverage.requires_ai_completion, false);
+    assert.equal(coverage.slot_coverage[0]?.coverage_status, "partial");
+    assert.equal(coverage.slot_coverage[0]?.frontend_coverage_status, "fully_matched");
+    assert.equal(
+      coverage.slot_coverage[0]?.user_duration_short_decision,
+      "accepted_as_sufficient"
+    );
+    assert.equal(coverage.slot_coverage[0]?.needs_ai_completion, false);
+    assert.equal(coverage.slot_coverage[0]?.ai_completion_required_duration, 0);
+    assert.deepEqual(coverage.slot_coverage[0]?.available_user_actions, [
+      "reopen_ai_completion"
+    ]);
   }
 );
 
