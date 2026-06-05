@@ -1056,3 +1056,17 @@ test("POST /api/v2/generation/video-trim-review rejects missing video URI", asyn
   assert.equal(body.error.code, "invalid_v2_video_trim_review_input");
   assert.match(body.error.message, /video_uri is required/);
 });
+
+test("GET /api/v2/generation/trimmed-videos rejects unknown generated video", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/v2/generation/trimmed-videos/missing.mp4`
+  );
+  const body = (await response.json()) as {
+    error: {
+      code: string;
+    };
+  };
+
+  assert.equal(response.status, 404);
+  assert.equal(body.error.code, "trimmed_video_not_found");
+});

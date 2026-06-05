@@ -2445,6 +2445,28 @@ const normalizeTaskId = (value: unknown): string | undefined => {
 const getGeneratedVideoTaskContextPath = (taskId: string): string =>
   path.join(generatedVideoTaskContextDir, `${taskId}.json`);
 
+export const findV2GeneratedVideoReviewFile = (
+  filename: string
+): string | undefined => {
+  const safeFilename = path.basename(filename);
+  if (!safeFilename || !safeFilename.endsWith(".mp4")) {
+    return undefined;
+  }
+
+  const videoPath = path.join(generatedVideoReviewDir, safeFilename);
+  return fs.existsSync(videoPath) ? videoPath : undefined;
+};
+
+const getGeneratedVideoPublicUrl = (videoPath?: string): string | undefined => {
+  if (!videoPath || path.dirname(videoPath) !== generatedVideoReviewDir) {
+    return undefined;
+  }
+
+  return `/api/v2/generation/trimmed-videos/${encodeURIComponent(
+    path.basename(videoPath)
+  )}`;
+};
+
 const readGeneratedVideoTaskContext = (taskId: string): JsonObject | undefined => {
   const contextPath = getGeneratedVideoTaskContextPath(taskId);
   if (!fs.existsSync(contextPath)) {
@@ -2510,6 +2532,7 @@ const attachAutoTrimResultToVideoTask = (
 ): JsonObject => {
   const content = asJsonObject(taskResult.content);
   const trimmedVideoPath = normalizeOptionalString(trimResult.trimmed_video_path);
+  const trimmedVideoUrl = getGeneratedVideoPublicUrl(trimmedVideoPath);
   const originalVideoUrl = getVideoUrlFromTaskResult(taskResult);
 
   return {
@@ -2517,9 +2540,10 @@ const attachAutoTrimResultToVideoTask = (
     content: {
       ...content,
       original_video_url: originalVideoUrl,
-      final_video_url: trimmedVideoPath || originalVideoUrl,
+      final_video_url: trimmedVideoUrl || trimmedVideoPath || originalVideoUrl,
       final_video_path: trimmedVideoPath,
       trimmed_video_path: trimmedVideoPath,
+      trimmed_video_url: trimmedVideoUrl,
       trim_recommendation: trimResult.trim_recommendation
     },
     postprocess: {

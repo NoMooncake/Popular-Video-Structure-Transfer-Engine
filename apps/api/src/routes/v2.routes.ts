@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { config } from "../config/index.js";
 import {
+  findV2GeneratedVideoReviewFile,
   generateV2ImageCandidates,
   generateV2ImageToVideo,
   getV2VideoGenerationTask,
@@ -155,6 +156,22 @@ v2Routes.post("/generation/video-trim-review", async (req, res) => {
       }
     });
   }
+});
+
+v2Routes.get("/generation/trimmed-videos/:filename", (req, res) => {
+  const videoPath = findV2GeneratedVideoReviewFile(req.params.filename);
+
+  if (!videoPath) {
+    res.status(404).json({
+      error: {
+        code: "trimmed_video_not_found",
+        message: "Trimmed generated video not found"
+      }
+    });
+    return;
+  }
+
+  res.sendFile(videoPath);
 });
 
 v2Routes.get("/generation/video-tasks/:taskId", async (req, res) => {
