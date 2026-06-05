@@ -1034,3 +1034,25 @@ test("GET /api/v2/status exposes 4 as the default image candidate count", async 
   assert.equal(body.image_candidate_count_default, 4);
   assert.equal(body.image_candidate_count_max, 6);
 });
+
+test("POST /api/v2/generation/video-trim-review rejects missing video URI", async () => {
+  const response = await fetch(`${baseUrl}/api/v2/generation/video-trim-review`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      target_duration_seconds: 2
+    })
+  });
+  const body = (await response.json()) as {
+    error: {
+      code: string;
+      message: string;
+    };
+  };
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, "invalid_v2_video_trim_review_input");
+  assert.match(body.error.message, /video_uri is required/);
+});

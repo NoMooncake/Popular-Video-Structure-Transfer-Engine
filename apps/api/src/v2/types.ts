@@ -115,5 +115,18 @@ export type V2ImageToVideoRequest = {
   video_prompt: string;
   duration_seconds?: number;
   aspect_ratio?: string;
+  camera_fixed?: boolean;
+  watermark?: boolean;
+  allow_fallback?: boolean;
+};
+
+export type V2GeneratedVideoTrimReviewRequest = {
+  video_uri: string;
+  slot_id?: string;
+  slot_type?: string;
+  target_duration_seconds: number;
+  generation_prompt?: string;
+  slot_description?: string;
+  trim_video?: boolean;
   allow_fallback?: boolean;
 };

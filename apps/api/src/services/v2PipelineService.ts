@@ -1,7 +1,9 @@
 import { config } from "../config/index.js";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import { findUploadedVideoById } from "./uploadService.js";
-import { runFFprobe } from "../utils/ffmpeg.js";
+import { runFFmpeg, runFFprobe } from "../utils/ffmpeg.js";
 import {
   requestImageCandidates,
   requestImageToVideo,
@@ -11,6 +13,7 @@ import {
 import { collectV2ReferenceFramesFromVideos } from "../v2/referenceFrames.js";
 import type {
   JsonObject,
+  V2GeneratedVideoTrimReviewRequest,
   V2ImageCandidate,
   V2ImageCandidateRequest,
   V2ImageToVideoRequest,
@@ -2226,7 +2229,9 @@ export const generateV2ImageToVideo = async (
     image_uri: payload.approved_image_uri,
     prompt: payload.video_prompt,
     duration_seconds: payload.duration_seconds || 5,
-    aspect_ratio: payload.aspect_ratio || "9:16"
+    aspect_ratio: payload.aspect_ratio || "9:16",
+    camera_fixed: payload.camera_fixed,
+    watermark: payload.watermark
   };
   const allowFallback = payload.allow_fallback !== false;
 
@@ -2242,6 +2247,262 @@ export const generateV2ImageToVideo = async (
       fallback_reason: sanitizeFallbackReason(error)
     };
   }
+};
+
+const generatedVideoReviewDir = path.resolve(
+  process.cwd(),
+  "../../outputs/v2_generated_video_review"
+);
+
+const ensureGeneratedVideoReviewDir = (): void => {
+  fs.mkdirSync(generatedVideoReviewDir, { recursive: true });
+};
+
+const isHttpUrl = (value: string): boolean => /^https?:\/\//iu.test(value);
+
+const normalizeNumberField = (value: unknown): number | undefined => {
+  const parsedValue = Number(value);
+  return Number.isFinite(parsedValue) ? parsedValue : undefined;
+};
+
+const getGeneratedVideoDurationSeconds = async (videoPath: string): Promise<number> => {
+  const probeResult = await runFFprobe(videoPath);
+  const videoStream = probeResult.streams?.find(
+    (stream) => stream.codec_type === "video"
+  );
+  const duration = Number(videoStream?.duration || probeResult.format?.duration);
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new V2PipelineInputError("generated video duration is missing or invalid");
+  }
+
+  return Number(duration.toFixed(3));
+};
+
+const materializeGeneratedVideo = async (videoUri: string): Promise<string> => {
+  if (videoUri.startsWith("/") && fs.existsSync(videoUri)) {
+    return videoUri;
+  }
+
+  if (!isHttpUrl(videoUri)) {
+    throw new V2PipelineInputError("video_uri must be an existing local path or HTTP URL");
+  }
+
+  ensureGeneratedVideoReviewDir();
+  const videoPath = path.join(
+    generatedVideoReviewDir,
+    `generated_video_${crypto.randomUUID()}.mp4`
+  );
+  const response = await fetch(videoUri);
+
+  if (!response.ok) {
+    throw new V2PipelineInputError(`failed to download generated video: ${response.status}`);
+  }
+
+  fs.writeFileSync(videoPath, Buffer.from(await response.arrayBuffer()));
+  return videoPath;
+};
+
+const getTrimTime = (analysis: JsonObject, fields: string[]): number | undefined => {
+  for (const field of fields) {
+    const directValue = normalizeNumberField(analysis[field]);
+    if (directValue !== undefined) {
+      return directValue;
+    }
+
+    const nestedValue = normalizeNumberField(
+      asJsonObject(analysis.recommended_segment)[field] ??
+        asJsonObject(analysis.trim_recommendation)[field] ??
+        asJsonObject(analysis.recommended_trim)[field]
+    );
+    if (nestedValue !== undefined) {
+      return nestedValue;
+    }
+  }
+
+  return undefined;
+};
+
+const makeFallbackGeneratedVideoTrimAnalysis = (
+  targetDurationSeconds: number,
+  videoDurationSeconds: number,
+  reason?: string
+): JsonObject => {
+  const endSeconds = Number(
+    Math.min(targetDurationSeconds, videoDurationSeconds).toFixed(3)
+  );
+
+  return {
+    source: {
+      type: "deterministic_fallback",
+      reason: reason || "视频理解模型不可用，使用从开头截取的保守策略。"
+    },
+    recommended_start_seconds: 0,
+    recommended_end_seconds: endSeconds,
+    recommended_duration_seconds: endSeconds,
+    confidence: 0.3,
+    quality_status: "needs_manual_review",
+    reason:
+      "未能完成视频理解评审，默认选择开头连续片段。建议人工检查后再进入最终剪辑。"
+  };
+};
+
+const normalizeTrimRecommendation = (
+  rawAnalysis: JsonObject,
+  targetDurationSeconds: number,
+  videoDurationSeconds: number
+): JsonObject => {
+  const boundedTargetDuration = Math.max(
+    0.1,
+    Math.min(targetDurationSeconds, videoDurationSeconds)
+  );
+  const rawStart =
+    getTrimTime(rawAnalysis, [
+      "recommended_start_seconds",
+      "start_seconds",
+      "trim_start_seconds",
+      "start_time_seconds"
+    ]) ?? 0;
+  const maxStart = Math.max(0, videoDurationSeconds - boundedTargetDuration);
+  const startSeconds = Number(Math.max(0, Math.min(rawStart, maxStart)).toFixed(3));
+  const rawEnd =
+    getTrimTime(rawAnalysis, [
+      "recommended_end_seconds",
+      "end_seconds",
+      "trim_end_seconds",
+      "end_time_seconds"
+    ]) ?? startSeconds + boundedTargetDuration;
+  const minimumEnd = startSeconds + boundedTargetDuration;
+  const endSeconds = Number(
+    Math.min(
+      videoDurationSeconds,
+      Math.max(minimumEnd, rawEnd)
+    ).toFixed(3)
+  );
+  const normalizedDuration = Number((endSeconds - startSeconds).toFixed(3));
+
+  return {
+    ...rawAnalysis,
+    recommended_start_seconds: startSeconds,
+    recommended_end_seconds: endSeconds,
+    recommended_duration_seconds: normalizedDuration,
+    target_duration_seconds: targetDurationSeconds,
+    source_video_duration_seconds: videoDurationSeconds,
+    trim_normalized_by_backend: true
+  };
+};
+
+const trimGeneratedVideo = async (
+  sourceVideoPath: string,
+  startSeconds: number,
+  durationSeconds: number
+): Promise<string> => {
+  ensureGeneratedVideoReviewDir();
+  const outputPath = path.join(
+    generatedVideoReviewDir,
+    `trimmed_segment_${crypto.randomUUID()}.mp4`
+  );
+  await runFFmpeg(
+    [
+      "-y",
+      "-ss",
+      String(startSeconds),
+      "-i",
+      sourceVideoPath,
+      "-t",
+      String(durationSeconds),
+      "-c:v",
+      "libx264",
+      "-c:a",
+      "aac",
+      "-movflags",
+      "+faststart",
+      outputPath
+    ],
+    [
+      { path: sourceVideoPath, replacement: "[generated video]" },
+      { path: outputPath, replacement: "[trimmed video]" }
+    ]
+  );
+
+  return outputPath;
+};
+
+export const reviewAndTrimV2GeneratedVideo = async (
+  payload: V2GeneratedVideoTrimReviewRequest
+): Promise<JsonObject> => {
+  const videoUri = normalizeOptionalString(payload.video_uri);
+  if (!videoUri) {
+    throw new V2PipelineInputError("video_uri is required");
+  }
+
+  const targetDurationSeconds = Number(payload.target_duration_seconds);
+  if (!Number.isFinite(targetDurationSeconds) || targetDurationSeconds <= 0) {
+    throw new V2PipelineInputError("target_duration_seconds must be greater than 0");
+  }
+
+  const allowFallback = payload.allow_fallback !== false;
+  const localVideoPath = await materializeGeneratedVideo(videoUri);
+  const videoDurationSeconds = await getGeneratedVideoDurationSeconds(localVideoPath);
+  const slotType = normalizeSlotType(payload.slot_type) || "generated_video_slot";
+  const slotId = normalizeOptionalString(payload.slot_id) || slotType;
+  const analysisPayload = {
+    video: {
+      uri: localVideoPath,
+      source_uri: isHttpUrl(videoUri) ? videoUri : undefined
+    },
+    slot_id: slotId,
+    slot_type: slotType,
+    target_duration_seconds: targetDurationSeconds,
+    source_video_duration_seconds: videoDurationSeconds,
+    generation_prompt: payload.generation_prompt,
+    slot_description: payload.slot_description,
+    instruction:
+      "阅读这段图生视频，判断它是否适合对应广告槽位，并从中挑选最适合剪进成片的一段。必须返回 JSON：recommended_start_seconds、recommended_end_seconds、recommended_duration_seconds、quality_status、confidence、reason、visual_summary、editing_notes。起止时间必须在视频真实时长内，推荐片段应优先覆盖产品/卖点动作最清楚、画面最稳定、最适合该槽位的一段。"
+  };
+
+  let rawAnalysis: JsonObject;
+  try {
+    rawAnalysis = await requestMultimodalJson(
+      "review_generated_video_for_trim",
+      v2SystemPrompt,
+      analysisPayload
+    );
+  } catch (error) {
+    if (!allowFallback) {
+      throw error;
+    }
+
+    rawAnalysis = makeFallbackGeneratedVideoTrimAnalysis(
+      targetDurationSeconds,
+      videoDurationSeconds,
+      sanitizeFallbackReason(error)
+    );
+  }
+
+  const trimRecommendation = normalizeTrimRecommendation(
+    rawAnalysis,
+    targetDurationSeconds,
+    videoDurationSeconds
+  );
+  const shouldTrim = payload.trim_video === true;
+  const trimmedVideoPath = shouldTrim
+    ? await trimGeneratedVideo(
+        localVideoPath,
+        Number(trimRecommendation.recommended_start_seconds),
+        Number(trimRecommendation.recommended_duration_seconds)
+      )
+    : undefined;
+
+  return {
+    slot_id: slotId,
+    slot_type: slotType,
+    video_uri: videoUri,
+    local_video_path: localVideoPath,
+    trim_recommendation: trimRecommendation,
+    trimmed_video_path: trimmedVideoPath,
+    trim_video_requested: shouldTrim
+  };
 };
 
 export const getV2VideoGenerationTask = async (
