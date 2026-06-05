@@ -135,3 +135,20 @@ export type V2GeneratedVideoTrimReviewRequest = {
   trim_video?: boolean;
   allow_fallback?: boolean;
 };
+
+export type V2FinalAssemblySlot = {
+  slot_id?: string;
+  slot_type?: string;
+  video_uri: string;
+  duration_seconds: number;
+  start_seconds?: number;
+};
+
+export type V2FinalAssemblyRequest = {
+  slots: V2FinalAssemblySlot[];
+  target_duration_seconds?: number;
+  resolution?: string;
+  fps?: number;
+  background_color?: string;
+  allow_loop_short_clips?: boolean;
+};

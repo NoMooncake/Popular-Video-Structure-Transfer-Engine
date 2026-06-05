@@ -9,6 +9,7 @@ import { after, before, test } from "node:test";
 import { app } from "../src/app.js";
 import { storageConfig } from "../src/config/storage.js";
 import {
+  assembleV2FinalVideo,
   attachProductionPromptsToMaterialCoverage,
   buildV2DeterministicMaterialCoverage,
   normalizeV2TargetDurationSeconds
@@ -1057,6 +1058,42 @@ test("POST /api/v2/generation/video-trim-review rejects missing video URI", asyn
   assert.match(body.error.message, /video_uri is required/);
 });
 
+test(
+  "v2 final assembly concatenates slot videos with ffmpeg",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const firstFileId = createUploadedTestVideo(0.5);
+    const secondFileId = createUploadedTestVideo(0.5);
+
+    const result = await assembleV2FinalVideo({
+      target_duration_seconds: 1,
+      resolution: "360x640",
+      fps: 24,
+      slots: [
+        {
+          slot_id: "slot_01",
+          slot_type: "strong_hook",
+          video_uri: `/api/upload/files/${firstFileId}`,
+          duration_seconds: 0.5
+        },
+        {
+          slot_id: "slot_02",
+          slot_type: "product_hero",
+          video_uri: `/api/upload/files/${secondFileId}`,
+          duration_seconds: 0.5
+        }
+      ]
+    });
+
+    assert.match(String(result.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
+    assert.equal(result.planned_duration_seconds, 1);
+    assert.ok(
+      Math.abs(Number(result.final_duration_seconds) - 1) < 0.15,
+      `expected final duration close to 1s, got ${result.final_duration_seconds}`
+    );
+  }
+);
+
 test("GET /api/v2/generation/trimmed-videos rejects unknown generated video", async () => {
   const response = await fetch(
     `${baseUrl}/api/v2/generation/trimmed-videos/missing.mp4`
@@ -1069,4 +1106,18 @@ test("GET /api/v2/generation/trimmed-videos rejects unknown generated video", as
 
   assert.equal(response.status, 404);
   assert.equal(body.error.code, "trimmed_video_not_found");
+});
+
+test("GET /api/v2/assembly/final-videos rejects unknown final video", async () => {
+  const response = await fetch(
+    `${baseUrl}/api/v2/assembly/final-videos/missing.mp4`
+  );
+  const body = (await response.json()) as {
+    error: {
+      code: string;
+    };
+  };
+
+  assert.equal(response.status, 404);
+  assert.equal(body.error.code, "final_video_not_found");
 });

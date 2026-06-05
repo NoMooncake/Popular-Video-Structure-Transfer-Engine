@@ -2,6 +2,8 @@ import { Router } from "express";
 
 import { config } from "../config/index.js";
 import {
+  assembleV2FinalVideo,
+  findV2FinalAssemblyVideoFile,
   findV2GeneratedVideoReviewFile,
   generateV2ImageCandidates,
   generateV2ImageToVideo,
@@ -84,6 +86,46 @@ v2Routes.post("/pipeline/analyze", async (req, res) => {
       }
     });
   }
+});
+
+v2Routes.post("/assembly/final-video", async (req, res) => {
+  try {
+    const result = await assembleV2FinalVideo(req.body ?? {});
+    res.json(result);
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_final_assembly_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_final_assembly_failed",
+        message: getErrorMessage(error, "V2 最终成片合成失败")
+      }
+    });
+  }
+});
+
+v2Routes.get("/assembly/final-videos/:filename", (req, res) => {
+  const videoPath = findV2FinalAssemblyVideoFile(req.params.filename);
+
+  if (!videoPath) {
+    res.status(404).json({
+      error: {
+        code: "final_video_not_found",
+        message: "Final assembled video not found"
+      }
+    });
+    return;
+  }
+
+  res.sendFile(videoPath);
 });
 
 v2Routes.post("/generation/image-candidates", async (req, res) => {

@@ -13,6 +13,7 @@ import {
 import { collectV2ReferenceFramesFromVideos } from "../v2/referenceFrames.js";
 import type {
   JsonObject,
+  V2FinalAssemblyRequest,
   V2GeneratedVideoTrimReviewRequest,
   V2ImageCandidate,
   V2ImageCandidateRequest,
@@ -2259,6 +2260,7 @@ const generatedVideoTaskContextDir = path.resolve(
   process.cwd(),
   "../../outputs/v2_generated_video_tasks"
 );
+const finalAssemblyDir = path.resolve(process.cwd(), "../../outputs/v2_final_assembly");
 
 const ensureGeneratedVideoReviewDir = (): void => {
   fs.mkdirSync(generatedVideoReviewDir, { recursive: true });
@@ -2266,6 +2268,10 @@ const ensureGeneratedVideoReviewDir = (): void => {
 
 const ensureGeneratedVideoTaskContextDir = (): void => {
   fs.mkdirSync(generatedVideoTaskContextDir, { recursive: true });
+};
+
+const ensureFinalAssemblyDir = (): void => {
+  fs.mkdirSync(finalAssemblyDir, { recursive: true });
 };
 
 const isHttpUrl = (value: string): boolean => /^https?:\/\//iu.test(value);
@@ -2307,6 +2313,55 @@ const materializeGeneratedVideo = async (videoUri: string): Promise<string> => {
 
   if (!response.ok) {
     throw new V2PipelineInputError(`failed to download generated video: ${response.status}`);
+  }
+
+  fs.writeFileSync(videoPath, Buffer.from(await response.arrayBuffer()));
+  return videoPath;
+};
+
+const materializeAssemblyVideo = async (
+  videoUri: string,
+  workDir: string,
+  index: number
+): Promise<string> => {
+  if (videoUri.startsWith("/") && fs.existsSync(videoUri)) {
+    return videoUri;
+  }
+
+  const trimmedVideoRoutePrefix = "/api/v2/generation/trimmed-videos/";
+  if (videoUri.startsWith(trimmedVideoRoutePrefix)) {
+    const filename = decodeURIComponent(videoUri.slice(trimmedVideoRoutePrefix.length));
+    const videoPath = findV2GeneratedVideoReviewFile(filename);
+    if (videoPath) {
+      return videoPath;
+    }
+  }
+
+  const uploadedVideoRoutePrefix = "/api/upload/files/";
+  if (videoUri.startsWith(uploadedVideoRoutePrefix)) {
+    const fileId = videoUri.slice(uploadedVideoRoutePrefix.length);
+    const videoPath = findUploadedVideoById(fileId);
+    if (videoPath) {
+      return videoPath;
+    }
+  }
+
+  if (!isHttpUrl(videoUri)) {
+    throw new V2PipelineInputError(
+      `slot video_uri must be an existing local path, HTTP URL, or known API media URL: slot ${index + 1}`
+    );
+  }
+
+  const videoPath = path.join(
+    workDir,
+    `source_${String(index + 1).padStart(2, "0")}.mp4`
+  );
+  const response = await fetch(videoUri);
+
+  if (!response.ok) {
+    throw new V2PipelineInputError(
+      `failed to download slot ${index + 1} video: ${response.status}`
+    );
   }
 
   fs.writeFileSync(videoPath, Buffer.from(await response.arrayBuffer()));
@@ -2457,6 +2512,18 @@ export const findV2GeneratedVideoReviewFile = (
   return fs.existsSync(videoPath) ? videoPath : undefined;
 };
 
+export const findV2FinalAssemblyVideoFile = (
+  filename: string
+): string | undefined => {
+  const safeFilename = path.basename(filename);
+  if (!safeFilename || !safeFilename.endsWith(".mp4")) {
+    return undefined;
+  }
+
+  const videoPath = path.join(finalAssemblyDir, safeFilename);
+  return fs.existsSync(videoPath) ? videoPath : undefined;
+};
+
 const getGeneratedVideoPublicUrl = (videoPath?: string): string | undefined => {
   if (!videoPath || path.dirname(videoPath) !== generatedVideoReviewDir) {
     return undefined;
@@ -2465,6 +2532,14 @@ const getGeneratedVideoPublicUrl = (videoPath?: string): string | undefined => {
   return `/api/v2/generation/trimmed-videos/${encodeURIComponent(
     path.basename(videoPath)
   )}`;
+};
+
+const getFinalAssemblyPublicUrl = (videoPath?: string): string | undefined => {
+  if (!videoPath || path.dirname(videoPath) !== finalAssemblyDir) {
+    return undefined;
+  }
+
+  return `/api/v2/assembly/final-videos/${encodeURIComponent(path.basename(videoPath))}`;
 };
 
 const readGeneratedVideoTaskContext = (taskId: string): JsonObject | undefined => {
@@ -2684,6 +2759,215 @@ export const reviewAndTrimV2GeneratedVideo = async (
     trim_recommendation: trimRecommendation,
     trimmed_video_path: trimmedVideoPath,
     trim_video_requested: shouldTrim
+  };
+};
+
+const parseAssemblyResolution = (
+  value: unknown
+): { width: number; height: number; label: string } => {
+  const resolution = normalizeOptionalString(value) || "720x1280";
+  const match = resolution.match(/^(\d{3,4})x(\d{3,4})$/u);
+
+  if (!match) {
+    throw new V2PipelineInputError("resolution must use WIDTHxHEIGHT format");
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < 360 ||
+    height < 360 ||
+    width > 3840 ||
+    height > 3840
+  ) {
+    throw new V2PipelineInputError("resolution is outside supported bounds");
+  }
+
+  return {
+    width,
+    height,
+    label: `${width}x${height}`
+  };
+};
+
+const normalizeAssemblyFps = (value: unknown): number => {
+  const fps = Number(value || 24);
+  if (!Number.isFinite(fps) || fps < 1 || fps > 60) {
+    throw new V2PipelineInputError("fps must be between 1 and 60");
+  }
+
+  return Number(fps.toFixed(3));
+};
+
+const normalizeAssemblyBackgroundColor = (value: unknown): string => {
+  const backgroundColor = normalizeOptionalString(value) || "black";
+  if (!/^(?:#[0-9a-f]{6}|[a-z]+)$/iu.test(backgroundColor)) {
+    throw new V2PipelineInputError("background_color must be a color name or #RRGGBB");
+  }
+
+  return backgroundColor;
+};
+
+const escapeConcatPath = (filePath: string): string =>
+  filePath.replace(/'/gu, "'\\''");
+
+export const assembleV2FinalVideo = async (
+  payload: V2FinalAssemblyRequest
+): Promise<JsonObject> => {
+  if (!Array.isArray(payload.slots) || payload.slots.length === 0) {
+    throw new V2PipelineInputError("slots is required");
+  }
+
+  const resolution = parseAssemblyResolution(payload.resolution);
+  const fps = normalizeAssemblyFps(payload.fps);
+  const backgroundColor = normalizeAssemblyBackgroundColor(payload.background_color);
+  const allowLoopShortClips = payload.allow_loop_short_clips !== false;
+  const normalizedSlots = payload.slots.map((slot, index) => {
+    const videoUri = normalizeOptionalString(slot.video_uri);
+    const durationSeconds = Number(slot.duration_seconds);
+    const startSeconds = Number(slot.start_seconds || 0);
+
+    if (!videoUri) {
+      throw new V2PipelineInputError(`slots[${index}].video_uri is required`);
+    }
+
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      throw new V2PipelineInputError(
+        `slots[${index}].duration_seconds must be greater than 0`
+      );
+    }
+
+    if (!Number.isFinite(startSeconds) || startSeconds < 0) {
+      throw new V2PipelineInputError(
+        `slots[${index}].start_seconds must be greater than or equal to 0`
+      );
+    }
+
+    return {
+      slot_id:
+        normalizeOptionalString(slot.slot_id) ||
+        `slot_${String(index + 1).padStart(2, "0")}`,
+      slot_type: normalizeSlotType(slot.slot_type) || "unknown",
+      video_uri: videoUri,
+      duration_seconds: Number(durationSeconds.toFixed(3)),
+      start_seconds: Number(startSeconds.toFixed(3))
+    };
+  });
+
+  const totalDurationSeconds = Number(
+    normalizedSlots
+      .reduce((total, slot) => total + slot.duration_seconds, 0)
+      .toFixed(3)
+  );
+  const targetDurationSeconds = normalizeNumberField(payload.target_duration_seconds);
+  if (
+    targetDurationSeconds !== undefined &&
+    Math.abs(totalDurationSeconds - targetDurationSeconds) > 0.05
+  ) {
+    throw new V2PipelineInputError(
+      `slot durations ${totalDurationSeconds}s do not match target_duration_seconds ${targetDurationSeconds}s`
+    );
+  }
+
+  ensureFinalAssemblyDir();
+  const assemblyId = crypto.randomUUID();
+  const workDir = path.join(finalAssemblyDir, `work_${assemblyId}`);
+  fs.mkdirSync(workDir, { recursive: true });
+
+  const segmentFiles: string[] = [];
+  const segmentResults: JsonObject[] = [];
+  const videoFilter = [
+    `scale=${resolution.width}:${resolution.height}:force_original_aspect_ratio=decrease`,
+    `pad=${resolution.width}:${resolution.height}:(ow-iw)/2:(oh-ih)/2:${backgroundColor}`,
+    "setsar=1",
+    `fps=${fps}`,
+    "format=yuv420p"
+  ].join(",");
+
+  for (const [index, slot] of normalizedSlots.entries()) {
+    const sourceVideoPath = await materializeAssemblyVideo(slot.video_uri, workDir, index);
+    const segmentPath = path.join(
+      workDir,
+      `segment_${String(index + 1).padStart(2, "0")}.mp4`
+    );
+    const ffmpegArgs = [
+      "-y",
+      ...(allowLoopShortClips ? ["-stream_loop", "-1"] : []),
+      "-i",
+      sourceVideoPath,
+      "-ss",
+      String(slot.start_seconds),
+      "-t",
+      String(slot.duration_seconds),
+      "-vf",
+      videoFilter,
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "18",
+      "-r",
+      String(fps),
+      segmentPath
+    ];
+
+    await runFFmpeg(ffmpegArgs, [
+      { path: sourceVideoPath, replacement: "[source video]" },
+      { path: segmentPath, replacement: "[assembly segment]" }
+    ]);
+
+    segmentFiles.push(segmentPath);
+    segmentResults.push({
+      ...slot,
+      source_video_path: sourceVideoPath,
+      normalized_segment_path: segmentPath
+    });
+  }
+
+  const concatListPath = path.join(workDir, "concat.txt");
+  fs.writeFileSync(
+    concatListPath,
+    segmentFiles.map((filePath) => `file '${escapeConcatPath(filePath)}'`).join("\n")
+  );
+
+  const finalVideoPath = path.join(finalAssemblyDir, `final_video_${assemblyId}.mp4`);
+  await runFFmpeg(
+    [
+      "-y",
+      "-f",
+      "concat",
+      "-safe",
+      "0",
+      "-i",
+      concatListPath,
+      "-c",
+      "copy",
+      "-movflags",
+      "+faststart",
+      finalVideoPath
+    ],
+    [
+      { path: concatListPath, replacement: "[concat list]" },
+      { path: finalVideoPath, replacement: "[final video]" }
+    ]
+  );
+
+  const finalDurationSeconds = await getGeneratedVideoDurationSeconds(finalVideoPath);
+
+  return {
+    assembly_id: assemblyId,
+    final_video_url: getFinalAssemblyPublicUrl(finalVideoPath),
+    final_video_path: finalVideoPath,
+    target_duration_seconds: targetDurationSeconds,
+    planned_duration_seconds: totalDurationSeconds,
+    final_duration_seconds: finalDurationSeconds,
+    resolution: resolution.label,
+    fps,
+    slots: segmentResults
   };
 };
 
