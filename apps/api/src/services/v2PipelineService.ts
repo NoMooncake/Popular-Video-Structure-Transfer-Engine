@@ -225,7 +225,9 @@ const normalizeUserRequest = (value: unknown): V2UserRequest => {
     target_audience: normalizeOptionalString(
       record.target_audience ?? record.targetAudience
     ),
-    product_name: normalizeOptionalString(record.product_name ?? record.productName),
+    product_name: normalizeOptionalString(
+      record.product_name ?? record.productName ?? record.product
+    ),
     style_preferences: normalizeStringArray(
       record.style_preferences ?? record.stylePreferences
     ),
@@ -707,6 +709,7 @@ const collectCoverageHintsByMaterialRef = (
 ): Map<string, string[]> => {
   const hints = new Map<string, string[]>();
   const nestedMaterialAnalysis = asJsonObject(userMaterialAnalysis.material_analysis);
+  const analysisResult = asJsonObject(userMaterialAnalysis.analysis_result);
   const payload = asJsonObject(userMaterialAnalysis.payload);
   const payloadAnalysisResult = asJsonObject(payload.analysis_result);
   const nestedUserMaterialAnalysis = asJsonObject(userMaterialAnalysis.user_material_analysis);
@@ -714,6 +717,7 @@ const collectCoverageHintsByMaterialRef = (
   const productionPayload = asJsonObject(productionPlan.payload);
   const analysisRoots = [
     userMaterialAnalysis,
+    analysisResult,
     nestedMaterialAnalysis,
     nestedUserMaterialAnalysis,
     payload,
@@ -747,18 +751,18 @@ const collectCoverageHintsByMaterialRef = (
   );
   for (const materialToSlotMapping of materialToSlotMappings) {
     for (const [rawSlotType, rawMaterialRef] of Object.entries(materialToSlotMapping)) {
-    const slotType = normalizeSlotType(rawSlotType);
-    const materialRef = normalizeMaterialReference(rawMaterialRef);
+      const slotType = normalizeSlotType(rawSlotType);
+      const materialRef = normalizeMaterialReference(rawMaterialRef);
 
-    if (
-      !slotType ||
-      !materialRef ||
-      /需|新建|aigc|ai|generate|生成|缺|补/u.test(materialRef)
-    ) {
-      continue;
-    }
+      if (
+        !slotType ||
+        !materialRef ||
+        /需|新建|aigc|ai|generate|生成|缺|补/u.test(materialRef)
+      ) {
+        continue;
+      }
 
-    addCoverageHint(hints, materialRef, slotType);
+      addCoverageHint(hints, materialRef, slotType);
     }
   }
 
@@ -770,8 +774,8 @@ const collectCoverageHintsByMaterialRef = (
 
   for (const slotMapping of slotMaterialMappings) {
     for (const [rawSlotType, rawMapping] of Object.entries(slotMapping)) {
-    const slotType = normalizeSlotType(rawSlotType);
-    const mapping = asJsonObject(rawMapping);
+      const slotType = normalizeSlotType(rawSlotType);
+      const mapping = asJsonObject(rawMapping);
       const materialRefs = Array.from(
         new Set([
           ...normalizeStringArray(mapping.materials)
@@ -788,19 +792,20 @@ const collectCoverageHintsByMaterialRef = (
           ...extractMaterialReferences(mapping.suggestion)
         ])
       )
-      .filter((materialRef): materialRef is string => Boolean(materialRef));
+        .filter((materialRef): materialRef is string => Boolean(materialRef));
 
-    if (!slotType || materialRefs.length === 0) {
-      continue;
-    }
+      if (!slotType || materialRefs.length === 0) {
+        continue;
+      }
 
-    for (const materialRef of materialRefs) {
+      for (const materialRef of materialRefs) {
         addCoverageHint(hints, materialRef, slotType);
       }
     }
   }
 
   const slotSuggestions = analysisRoots.flatMap((root) => [
+    ...(Array.isArray(root.material_to_slot_mapping) ? root.material_to_slot_mapping : []),
     ...(Array.isArray(root["素材到槽位建议"]) ? root["素材到槽位建议"] : []),
     ...(Array.isArray(root["槽位映射与建议"]) ? root["槽位映射与建议"] : [])
   ]);
@@ -827,6 +832,35 @@ const collectCoverageHintsByMaterialRef = (
 
     for (const materialRef of materialRefs) {
       addCoverageHint(hints, materialRef, slotType);
+    }
+  }
+
+  const availableMaterials = analysisRoots.flatMap((root) =>
+    Array.isArray(root.available_materials) ? root.available_materials : []
+  );
+  for (const item of availableMaterials) {
+    const record = asJsonObject(item);
+    const materialRefs = Array.from(
+      new Set([
+        ...extractMaterialReferences(record.label),
+        ...extractMaterialReferences(record.material_label),
+        ...extractMaterialReferences(record.material_ref),
+        ...extractMaterialReferences(record.material),
+        ...extractMaterialReferences(record.source)
+      ])
+    );
+    const slotTypes = normalizeStringArray(record.slots_supported)
+      .map((slotType) => normalizeSlotType(slotType))
+      .filter((slotType): slotType is string => Boolean(slotType));
+
+    if (materialRefs.length === 0 || slotTypes.length === 0) {
+      continue;
+    }
+
+    for (const materialRef of materialRefs) {
+      for (const slotType of slotTypes) {
+        addCoverageHint(hints, materialRef, slotType);
+      }
     }
   }
 
@@ -1010,6 +1044,8 @@ const collectAigcImagePromptsBySlot = (
   const nestedPromptContainers = [
     asJsonObject(fillableArchitecture),
     payload,
+    asJsonObject(fillableArchitecture.missing_material_prompts),
+    asJsonObject(payload.missing_material_prompts),
     asJsonObject(fillableArchitecture.aigc_prompts),
     asJsonObject(asJsonObject(fillableArchitecture.fillable_architecture).aigc_prompts),
     asJsonObject(resultArchitecture),
@@ -1143,12 +1179,20 @@ const getSlotFallbackPrompt = (
   const visualDirection =
     normalizeOptionalString(slot.visual_direction) ||
     normalizeOptionalString(slot.visualDirection) ||
+    normalizeOptionalString(slot.scene_description) ||
+    normalizeOptionalString(slot.sceneDescription) ||
     normalizeOptionalString(slot.description) ||
     normalizeOptionalString(slot.purpose) ||
     "根据该广告槽位补足缺失画面，画面必须服务于当前结构段落。";
+  const shotDirection =
+    normalizeOptionalString(slot.shot_type) ||
+    normalizeOptionalString(slot.shotType) ||
+    normalizeOptionalString(slot.camera_movement) ||
+    normalizeOptionalString(slot.cameraMovement);
   const textDirection =
     normalizeOptionalString(slot.text_or_voiceover) ||
     normalizeOptionalString(slot.text_direction) ||
+    normalizeOptionalString(slot.subtitle_direction) ||
     normalizeOptionalString(slot.copy_direction);
   const packagingSuggestion =
     normalizeOptionalString(slot.packaging_suggestion) ||
@@ -1159,7 +1203,9 @@ const getSlotFallbackPrompt = (
     "【候选图要求】生成 4 张候选图供用户选择，四张图必须围绕同一个具体主题、同一产品设定和同一槽位意图，只在构图、光线、景别、镜头角度或背景细节上有差异。",
     `【主体/产品】主体必须围绕${productName}或与${productName}直接相关的使用/购买场景，面向“${audience}”。`,
     `【场景环境】${visualDirection}`,
-    "【构图与镜头】竖屏短视频构图，主体清晰，核心商品或动作处于视觉中心或黄金分割点，保留字幕安全区。",
+    shotDirection
+      ? `【构图与镜头】${shotDirection}；竖屏短视频构图，主体清晰，核心商品或动作处于视觉中心或黄金分割点，保留字幕安全区。`
+      : "【构图与镜头】竖屏短视频构图，主体清晰，核心商品或动作处于视觉中心或黄金分割点，保留字幕安全区。",
     "【光线与色彩】光线、色彩和道具必须强化该槽位的商业目的，饮品类画面优先表现清爽、冰感、通透和购买欲。",
     "【质感与风格】真实商业广告摄影质感，高清、干净、可信，不要廉价促销感。",
     textDirection

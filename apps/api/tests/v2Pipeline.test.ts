@@ -628,6 +628,66 @@ test(
   }
 );
 
+test(
+  "v2 material coverage reads available materials supported slots",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(1.2);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          label: "ice_tea_material_01",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 10,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        slots: [
+          {
+            slot_id: "slot_03",
+            slot_type: "product_hero",
+            slot_duration_seconds: 1
+          }
+        ]
+      },
+      {
+        analysis_result: {
+          available_materials: [
+            {
+              label: "ice_tea_material_01",
+              slots_supported: ["product_hero", "usage_process"]
+            }
+          ]
+        }
+      }
+    );
+
+    assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
+      "user_material_01"
+    );
+  }
+);
+
 test("v2 material coverage attaches production plan image prompts", () => {
   const coverage: V2MaterialCoverage = {
     materials_sufficient: false,
@@ -793,6 +853,52 @@ test("v2 material coverage reads payload generation plan section prompts", () =>
   assert.match(
     String(asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt),
     /【基础设定】竖屏产品主视觉/
+  );
+});
+
+test("v2 material coverage reads missing material image prompts", () => {
+  const coverage: V2MaterialCoverage = {
+    materials_sufficient: false,
+    requires_ai_completion: true,
+    target_duration_seconds: 10,
+    total_known_material_duration_seconds: 4,
+    hard_constraints: {
+      total_duration_coverage_passed: false,
+      notes: []
+    },
+    material_assets: [],
+    slot_coverage: [
+      {
+        slot_id: "slot_01",
+        slot_type: "strong_hook",
+        frontend_coverage_status: "material_insufficient",
+        recommended_aigc_prompt: {
+          prompt_ref: "strong_hook_fallback",
+          prompt_source: "deterministic_slot_fallback",
+          prompt: "后端兜底 hook prompt"
+        }
+      }
+    ]
+  };
+
+  const enrichedCoverage = attachProductionPromptsToMaterialCoverage(coverage, {
+    missing_material_prompts: {
+      image_prompts: [
+        {
+          slot: "strong_hook",
+          prompt: "模型 missing_material_prompts 里的冰块撞击开场 prompt"
+        }
+      ]
+    }
+  });
+
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt_source,
+    "model_or_plan"
+  );
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_aigc_prompt).prompt,
+    "模型 missing_material_prompts 里的冰块撞击开场 prompt"
   );
 });
 
