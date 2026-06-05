@@ -318,6 +318,43 @@ const withImageCandidateInstruction = (
     .join("\n");
 };
 
+const withVolcengineVideoPromptOptions = (
+  prompt: string,
+  durationSeconds: number,
+  cameraFixed: boolean,
+  watermark: boolean
+): string => {
+  const boundedDuration = Math.max(1, Math.min(30, Math.round(durationSeconds)));
+  const hasDurationFlag = /--duration\s+\d+/iu.test(prompt);
+  const hasCameraFixedFlag = /--camerafixed\s+(?:true|false)/iu.test(prompt);
+  const hasWatermarkFlag = /--watermark\s+(?:true|false)/iu.test(prompt);
+  const optionParts = [
+    hasDurationFlag ? undefined : `--duration ${boundedDuration}`,
+    hasCameraFixedFlag ? undefined : `--camerafixed ${cameraFixed ? "true" : "false"}`,
+    hasWatermarkFlag ? undefined : `--watermark ${watermark ? "true" : "false"}`
+  ].filter((part): part is string => Boolean(part));
+
+  return optionParts.length > 0 ? `${prompt}  ${optionParts.join(" ")}` : prompt;
+};
+
+const normalizeBoolean = (value: unknown, fallback: boolean): boolean => {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    if (/^(true|1|yes)$/iu.test(value)) {
+      return true;
+    }
+
+    if (/^(false|0|no)$/iu.test(value)) {
+      return false;
+    }
+  }
+
+  return fallback;
+};
+
 const requestJson = async (
   providerConfig: ApiProviderConfig,
   body: JsonObject
@@ -499,13 +536,19 @@ export const requestImageToVideo = async (
       normalizeOptionalString(payload.image_uri) ||
       normalizeOptionalString(payload.approved_image_uri);
     const durationSeconds = Number(payload.duration_seconds || 5);
-    const aspectRatio = normalizeOptionalString(payload.aspect_ratio) || "9:16";
+    const cameraFixed = normalizeBoolean(payload.camera_fixed ?? payload.camerafixed, false);
+    const watermark = normalizeBoolean(payload.watermark, true);
     const content: JsonObject[] = [];
 
     if (prompt) {
       content.push({
         type: "text",
-        text: prompt
+        text: withVolcengineVideoPromptOptions(
+          prompt,
+          Number.isFinite(durationSeconds) ? durationSeconds : 5,
+          cameraFixed,
+          watermark
+        )
       });
     }
 
@@ -520,10 +563,7 @@ export const requestImageToVideo = async (
 
     return requestProviderJson(providerConfig, providerConfig.apiPath, "POST", {
       model: providerConfig.model,
-      content,
-      duration: Math.max(1, Math.min(30, durationSeconds)),
-      ratio: aspectRatio,
-      resolution: normalizeOptionalString(payload.resolution) || "720p"
+      content
     });
   }
 
