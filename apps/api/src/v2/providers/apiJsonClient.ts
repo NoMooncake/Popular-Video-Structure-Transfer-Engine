@@ -1,5 +1,7 @@
 import { config } from "../../config/index.js";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 import type { JsonObject } from "../types.js";
 
 type ApiProviderConfig = {
@@ -59,6 +61,12 @@ export class V2ProviderExecutionError extends Error {
   }
 }
 
+const jsonDiagnosticDir = path.resolve(
+  process.cwd(),
+  "../../outputs/v2_provider_json_diagnostics"
+);
+const multimodalJsonMaxTokens = 12000;
+
 const sanitizeProviderMessage = (message: string): string => {
   return message
     .replace(/Bearer\s+[A-Za-z0-9._-]+/gu, "Bearer [redacted]")
@@ -82,7 +90,200 @@ const assertConfigured = (providerConfig: ApiProviderConfig): void => {
   }
 };
 
-const extractJsonObject = (content: string | JsonObject | undefined): JsonObject => {
+const toJsonObject = (value: unknown): JsonObject | undefined => {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  if (Array.isArray(value)) {
+    return {
+      items: value
+    };
+  }
+
+  return value as JsonObject;
+};
+
+const stripJsonFence = (content: string): string => {
+  const fencedJson = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/iu);
+  return (fencedJson?.[1] || content).trim();
+};
+
+const collectBalancedJsonCandidates = (content: string): string[] => {
+  const candidates: string[] = [];
+  const stack: string[] = [];
+  let startIndex = -1;
+  let inString = false;
+  let quoteChar = "";
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+
+      if (char === quoteChar) {
+        inString = false;
+        quoteChar = "";
+      }
+      continue;
+    }
+
+    if (char === "\"" || char === "'") {
+      inString = true;
+      quoteChar = char;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      if (stack.length === 0) {
+        startIndex = index;
+      }
+      stack.push(char);
+      continue;
+    }
+
+    if (char !== "}" && char !== "]") {
+      continue;
+    }
+
+    const opener = stack.at(-1);
+    const matches =
+      (opener === "{" && char === "}") || (opener === "[" && char === "]");
+    if (!matches) {
+      stack.length = 0;
+      startIndex = -1;
+      continue;
+    }
+
+    stack.pop();
+    if (stack.length === 0 && startIndex >= 0) {
+      candidates.push(content.slice(startIndex, index + 1));
+      startIndex = -1;
+    }
+  }
+
+  return candidates.sort((a, b) => b.length - a.length);
+};
+
+const escapeControlCharactersInsideStrings = (value: string): string => {
+  let inString = false;
+  let escaped = false;
+  let result = "";
+
+  for (const char of value) {
+    if (!inString) {
+      if (char === "\"") {
+        inString = true;
+      }
+      result += char;
+      continue;
+    }
+
+    if (escaped) {
+      escaped = false;
+      result += char;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      result += char;
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = false;
+      result += char;
+      continue;
+    }
+
+    if (char === "\n") {
+      result += "\\n";
+      continue;
+    }
+
+    if (char === "\r") {
+      result += "\\r";
+      continue;
+    }
+
+    if (char === "\t") {
+      result += "\\t";
+      continue;
+    }
+
+    result += char;
+  }
+
+  return result;
+};
+
+const normalizeJsonLikeText = (value: string): string => {
+  return escapeControlCharactersInsideStrings(
+    value
+      .replace(/^\uFEFF/u, "")
+      .replace(/,\s*([}\]])/gu, "$1")
+      .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_-]*)\s*:/gu, '$1"$2":')
+      .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/gu, (_match, innerValue: string) =>
+        JSON.stringify(innerValue.replace(/\\"/gu, "\""))
+      )
+  );
+};
+
+const parseJsonObjectCandidate = (candidate: string): JsonObject | undefined => {
+  const attempts = [candidate, normalizeJsonLikeText(candidate)];
+
+  for (const attempt of attempts) {
+    try {
+      return toJsonObject(JSON.parse(attempt));
+    } catch {
+      // Try the next local repair strategy.
+    }
+  }
+
+  return undefined;
+};
+
+const saveInvalidJsonDiagnostic = (
+  task: string,
+  content: string,
+  reason: string
+): string | undefined => {
+  try {
+    fs.mkdirSync(jsonDiagnosticDir, { recursive: true });
+    const diagnosticPath = path.join(
+      jsonDiagnosticDir,
+      `${Date.now()}_${task}_${crypto.randomUUID()}.txt`
+    );
+    fs.writeFileSync(
+      diagnosticPath,
+      [
+        `task=${task}`,
+        `reason=${reason}`,
+        "content:",
+        sanitizeProviderMessage(content).slice(0, 20000)
+      ].join("\n")
+    );
+    return diagnosticPath;
+  } catch {
+    return undefined;
+  }
+};
+
+export const extractJsonObject = (
+  content: string | JsonObject | undefined,
+  task = "unknown"
+): JsonObject => {
   if (!content) {
     throw new V2ProviderExecutionError("Provider response did not contain content");
   }
@@ -91,20 +292,35 @@ const extractJsonObject = (content: string | JsonObject | undefined): JsonObject
     return content;
   }
 
-  const fencedJson = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/u);
-  const rawJson = fencedJson?.[1] || content;
-  const startIndex = rawJson.indexOf("{");
-  const endIndex = rawJson.lastIndexOf("}");
+  const rawJson = stripJsonFence(content);
+  const candidates = collectBalancedJsonCandidates(rawJson);
 
-  if (startIndex === -1 || endIndex === -1 || endIndex <= startIndex) {
-    throw new V2ProviderExecutionError("Provider response did not contain a JSON object");
+  if (candidates.length === 0) {
+    const diagnosticPath = saveInvalidJsonDiagnostic(
+      task,
+      content,
+      "no balanced JSON candidate"
+    );
+    throw new V2ProviderExecutionError(
+      `Provider response did not contain a JSON object${
+        diagnosticPath ? `; diagnostic saved to ${diagnosticPath}` : ""
+      }`
+    );
   }
 
-  try {
-    return JSON.parse(rawJson.slice(startIndex, endIndex + 1)) as JsonObject;
-  } catch {
-    throw new V2ProviderExecutionError("Provider response contained invalid JSON");
+  for (const candidate of candidates) {
+    const parsedCandidate = parseJsonObjectCandidate(candidate);
+    if (parsedCandidate) {
+      return parsedCandidate;
+    }
   }
+
+  const diagnosticPath = saveInvalidJsonDiagnostic(task, content, "invalid JSON candidate");
+  throw new V2ProviderExecutionError(
+    `Provider response contained invalid JSON${
+      diagnosticPath ? `; diagnostic saved to ${diagnosticPath}` : ""
+    }`
+  );
 };
 
 const isVideoReference = (value: string): boolean => {
@@ -443,11 +659,57 @@ export const requestMultimodalJson = async (
       type: "json_object"
     },
     messages,
-    max_completion_tokens: 4096,
-    max_tokens: 4096
+    max_completion_tokens: multimodalJsonMaxTokens,
+    max_tokens: multimodalJsonMaxTokens
   })) as ChatCompletionResponse;
+  const content = responseBody.choices?.[0]?.message?.content;
 
-  return extractJsonObject(responseBody.choices?.[0]?.message?.content);
+  try {
+    return extractJsonObject(content, task);
+  } catch (error) {
+    if (typeof content !== "string") {
+      throw error;
+    }
+
+    const repairResponseBody = (await requestJson(providerConfig, {
+      model: providerConfig.model,
+      response_format: {
+        type: "json_object"
+      },
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是严格的 JSON 修复器。你只能输出一个合法 JSON object，不要输出 markdown、解释、注释或额外文本。保留原始语义和字段，修复语法错误。"
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  task: `${task}_repair_invalid_json`,
+                  instruction:
+                    "下面是上一个模型返回的非合法 JSON。请把它修复成一个合法 JSON object。必须只返回 JSON object；如果原始内容是 JSON array，请包装为 {\"items\": [...]}。",
+                  invalid_json_text: content.slice(0, 60000)
+                },
+                null,
+                2
+              )
+            }
+          ]
+        }
+      ],
+      max_completion_tokens: multimodalJsonMaxTokens,
+      max_tokens: multimodalJsonMaxTokens
+    })) as ChatCompletionResponse;
+
+    return extractJsonObject(
+      repairResponseBody.choices?.[0]?.message?.content,
+      `${task}_json_repair`
+    );
+  }
 };
 
 export const requestImageCandidates = async (

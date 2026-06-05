@@ -14,6 +14,7 @@ import {
   buildV2DeterministicMaterialCoverage,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
+import { extractJsonObject } from "../src/v2/providers/apiJsonClient.js";
 import type { V2MaterialCoverage, V2PipelineRequest } from "../src/v2/types.js";
 
 let server: Server;
@@ -689,6 +690,65 @@ test(
   }
 );
 
+test(
+  "v2 material coverage reads specific suggestions with combined slots",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(1.2);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          label: "ice_tea_material_02",
+          role: "user_material" as const
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 7,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        structure_slots: [
+          {
+            slot_name: "usage_process",
+            time_range: "0-1s"
+          }
+        ]
+      },
+      {
+        materials_analysis: {
+          specific_suggestions: [
+            {
+              slot: "product_hero & usage_process",
+              material_suggestion: "素材02（仰拍饮用特写）适合使用过程。"
+            }
+          ]
+        }
+      }
+    );
+
+    assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[0]?.assigned_materials)[0]?.material_id,
+      "user_material_01"
+    );
+  }
+);
+
 test("v2 material coverage attaches production plan image prompts", () => {
   const coverage: V2MaterialCoverage = {
     materials_sufficient: false,
@@ -1022,6 +1082,35 @@ test("v2 target duration keeps a 10 second user request", () => {
   assert.equal(normalizeV2TargetDurationSeconds(10), 10);
   assert.equal(normalizeV2TargetDurationSeconds(2), 5);
   assert.equal(normalizeV2TargetDurationSeconds(90), 60);
+});
+
+test("v2 provider JSON extraction repairs common model JSON issues", () => {
+  assert.deepEqual(
+    extractJsonObject(
+      '```json\n{ unquoted_key: "value", "items": [1, 2,], }\n```',
+      "test_json_repair"
+    ),
+    {
+      unquoted_key: "value",
+      items: [1, 2]
+    }
+  );
+
+  assert.deepEqual(
+    extractJsonObject('前置说明\n[{"slot":"hook"}]\n后置说明', "test_json_array"),
+    {
+      items: [
+        {
+          slot: "hook"
+        }
+      ]
+    }
+  );
+
+  assert.equal(
+    extractJsonObject('{"prompt":"第一行\n第二行"}', "test_json_newline").prompt,
+    "第一行\n第二行"
+  );
 });
 
 test("GET /api/v2/status exposes 4 as the default image candidate count", async () => {
