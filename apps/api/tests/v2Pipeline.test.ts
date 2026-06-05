@@ -195,6 +195,25 @@ test(
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 5);
     assert.equal(coverage.slot_coverage[1]?.coverage_status, "missing");
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 0);
+    assert.deepEqual(coverage.slot_coverage[1]?.available_generation_paths, [
+      "direct_video_from_material_frame",
+      "upload_image_then_video",
+      "generate_image_then_video"
+    ]);
+    assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
+      "generate_direct_video_from_material_frame",
+      "upload_image_then_generate_video",
+      "generate_image_then_video"
+    ]);
+    assert.equal(
+      asRecordArray(coverage.slot_coverage[1]?.direct_video_reference_materials)[0]
+        ?.material_id,
+      "user_material_01"
+    );
+    assert.match(
+      String(asRecord(coverage.slot_coverage[1]?.recommended_video_prompt).prompt),
+      /不要纯文字生成/
+    );
     assert.equal(
       asRecord(coverage.slot_coverage[1]?.recommended_aigc_prompt).prompt_source,
       "deterministic_slot_fallback"
@@ -320,7 +339,14 @@ test(
     assert.equal(coverage.slot_coverage[1]?.gap_reason, "已匹配 2s，但该槽位需要 3s。");
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
       "accept_current_material_as_sufficient",
-      "generate_ai_for_missing_duration"
+      "generate_direct_video_from_material_frame",
+      "upload_image_then_generate_video",
+      "generate_image_then_video"
+    ]);
+    assert.deepEqual(coverage.slot_coverage[1]?.available_generation_paths, [
+      "direct_video_from_material_frame",
+      "upload_image_then_video",
+      "generate_image_then_video"
     ]);
     assert.equal(coverage.slot_coverage[1]?.ai_completion_required_duration, 1);
 
@@ -329,7 +355,14 @@ test(
     assert.equal(coverage.slot_coverage[2]?.frontend_coverage_status, "material_insufficient");
     assert.equal(coverage.slot_coverage[2]?.frontend_coverage_label, "素材不够");
     assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
-      "generate_ai_for_missing_material"
+      "generate_direct_video_from_material_frame",
+      "upload_image_then_generate_video",
+      "generate_image_then_video"
+    ]);
+    assert.deepEqual(coverage.slot_coverage[2]?.available_generation_paths, [
+      "direct_video_from_material_frame",
+      "upload_image_then_video",
+      "generate_image_then_video"
     ]);
     assert.equal(
       asRecord(coverage.slot_coverage[2]?.recommended_aigc_prompt).prompt,
@@ -1070,6 +1103,53 @@ test("v2 material coverage attaches production plan image prompts", () => {
   );
 });
 
+test("v2 material coverage attaches production plan video prompts", () => {
+  const coverage: V2MaterialCoverage = {
+    materials_sufficient: false,
+    requires_ai_completion: true,
+    target_duration_seconds: 8,
+    total_known_material_duration_seconds: 3,
+    hard_constraints: {
+      total_duration_coverage_passed: false,
+      notes: []
+    },
+    material_assets: [],
+    slot_coverage: [
+      {
+        slot_id: "slot_01",
+        slot_type: "product_hero",
+        frontend_coverage_status: "structure_complete_duration_short",
+        recommended_video_prompt: {
+          prompt_ref: "product_hero_image_to_video",
+          prompt_source: "deterministic_slot_fallback",
+          prompt: "后端兜底视频 prompt"
+        }
+      }
+    ]
+  };
+
+  const enrichedCoverage = attachProductionPromptsToMaterialCoverage(coverage, {
+    generation_prompt_package: {
+      video_prompt_candidates: [
+        {
+          prompt_ref: "product_hero_image_to_video",
+          slot_type: "product_hero",
+          prompt: "模型返回的产品亮相图生视频 prompt"
+        }
+      ]
+    }
+  });
+
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_video_prompt).prompt_source,
+    "model_or_plan"
+  );
+  assert.equal(
+    asRecord(enrichedCoverage.slot_coverage[0]?.recommended_video_prompt).prompt,
+    "模型返回的产品亮相图生视频 prompt"
+  );
+});
+
 test("v2 material coverage reads payload prompt generators", () => {
   const coverage: V2MaterialCoverage = {
     materials_sufficient: false,
@@ -1407,6 +1487,63 @@ test("POST /api/v2/generation/video-trim-review rejects missing video URI", asyn
   assert.equal(body.error.code, "invalid_v2_video_trim_review_input");
   assert.match(body.error.message, /video_uri is required/);
 });
+
+test("POST /api/v2/generation/image-to-video rejects text-only video generation", async () => {
+  const response = await fetch(`${baseUrl}/api/v2/generation/image-to-video`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      video_prompt: "只用文字直接生视频",
+      allow_fallback: true
+    })
+  });
+  const body = (await response.json()) as {
+    error: {
+      code: string;
+      message: string;
+    };
+  };
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, "invalid_v2_image_to_video_input");
+  assert.match(body.error.message, /source image is required/);
+});
+
+test(
+  "POST /api/v2/generation/image-to-video can use an existing material frame",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(1.2);
+    const sourceVideoUri = path.join(storageConfig.uploadDir, `${fileId}-sample.mp4`);
+    const response = await fetch(`${baseUrl}/api/v2/generation/image-to-video`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        source_video_uri: sourceVideoUri,
+        video_prompt: "基于已有冰红茶素材截图生成补齐视频",
+        generation_mode: "direct_from_material_frame",
+        duration_seconds: 2,
+        allow_fallback: true
+      })
+    });
+    const body = (await response.json()) as {
+      status: string;
+      input: {
+        image_uri: string;
+        generation_mode: string;
+      };
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.status, "mock_ready");
+    assert.match(body.input.image_uri, /^data:image\/jpeg;base64,/);
+    assert.equal(body.input.generation_mode, "direct_from_material_frame");
+  }
+);
 
 test(
   "v2 final assembly concatenates slot videos with ffmpeg",

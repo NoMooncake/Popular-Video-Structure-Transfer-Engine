@@ -1457,6 +1457,110 @@ const collectAigcImagePromptsBySlot = (
   return promptsBySlot;
 };
 
+const collectAigcVideoPromptsBySlot = (
+  fillableArchitecture: JsonObject
+): Map<string, JsonObject> => {
+  const promptsBySlot = new Map<string, JsonObject>();
+  const addPromptRecord = (promptRecord: JsonObject, fallbackSlot?: unknown): void => {
+    const promptText = getPromptTextFromRecord(promptRecord);
+    const promptWithSlot =
+      fallbackSlot && !getPromptSlotTypes(promptRecord).length
+        ? {
+            ...promptRecord,
+            slot_type: fallbackSlot,
+            prompt: promptText
+          }
+        : {
+            ...promptRecord,
+            prompt: promptText
+          };
+    const slotTypes = getPromptSlotTypes(promptWithSlot);
+
+    for (const slotType of slotTypes) {
+      if (!promptsBySlot.has(slotType)) {
+        promptsBySlot.set(slotType, promptWithSlot);
+      }
+    }
+  };
+  const resultArchitecture = asJsonObject(
+    asJsonObject(fillableArchitecture.result).fillable_architecture
+  );
+  const payload = asJsonObject(fillableArchitecture.payload);
+  const promptContainers = [
+    asJsonObject(fillableArchitecture),
+    payload,
+    asJsonObject(fillableArchitecture.aigc_prompts),
+    asJsonObject(asJsonObject(fillableArchitecture.fillable_architecture).aigc_prompts),
+    asJsonObject(resultArchitecture),
+    asJsonObject(resultArchitecture.aigc_prompts),
+    asJsonObject(fillableArchitecture.generation_prompt_package),
+    asJsonObject(fillableArchitecture.prompt_package),
+    asJsonObject(resultArchitecture.generation_prompt_package),
+    asJsonObject(resultArchitecture.prompt_package),
+    asJsonObject(asJsonObject(fillableArchitecture.assembly).ai_generation_plan),
+    asJsonObject(asJsonObject(payload.assembly).ai_generation_plan),
+    asJsonObject(payload.generation_plan)
+  ];
+
+  for (const container of promptContainers) {
+    const promptItems = [
+      ...(Array.isArray(container.video_prompt_candidates)
+        ? container.video_prompt_candidates
+        : []),
+      ...(Array.isArray(container.video_prompts) ? container.video_prompts : []),
+      ...(Array.isArray(container.video_generation_prompts)
+        ? container.video_generation_prompts
+        : []),
+      ...(Array.isArray(container.image_to_video_prompts)
+        ? container.image_to_video_prompts
+        : [])
+    ];
+
+    for (const item of promptItems) {
+      addPromptRecord(asJsonObject(item));
+    }
+
+    for (const [key, value] of Object.entries(container)) {
+      if (!/(?:_?video_?generation_?prompt|_?image_?to_?video_?prompt)$/iu.test(key)) {
+        continue;
+      }
+
+      const fallbackSlot = key
+        .replace(/_?video_?generation_?prompt$/iu, "")
+        .replace(/_?image_?to_?video_?prompt$/iu, "");
+      addPromptRecord(asJsonObject(value), fallbackSlot);
+    }
+
+    const generativeSlots = Array.isArray(container.generative_slots)
+      ? container.generative_slots
+      : [];
+    for (const item of generativeSlots) {
+      const slotRecord = asJsonObject(item);
+      const fallbackSlot =
+        slotRecord.slot_type ??
+        slotRecord.slot_id ??
+        slotRecord.slot ??
+        slotRecord.slot_name ??
+        slotRecord.target_slot;
+      const videoPrompts = [
+        ...(Array.isArray(slotRecord.video_prompts) ? slotRecord.video_prompts : []),
+        ...(Array.isArray(slotRecord.video_prompt_candidates)
+          ? slotRecord.video_prompt_candidates
+          : []),
+        ...(Array.isArray(slotRecord.image_to_video_prompts)
+          ? slotRecord.image_to_video_prompts
+          : [])
+      ];
+
+      for (const promptItem of videoPrompts) {
+        addPromptRecord(asJsonObject(promptItem), fallbackSlot);
+      }
+    }
+  }
+
+  return promptsBySlot;
+};
+
 const isAcceptedDurationShortSlot = (
   acceptedSlots: Set<string>,
   slotId: string,
@@ -1527,6 +1631,41 @@ const getSlotFallbackPrompt = (
   ].join("\n");
 };
 
+const getSlotFallbackVideoPrompt = (
+  normalized: Required<V2PipelineRequest>,
+  slot: JsonObject,
+  slotType: string,
+  requiredDuration: number
+): string => {
+  const productName = normalized.user_request.product_name || "目标产品";
+  const goal = normalized.user_request.goal;
+  const visualDirection =
+    normalizeOptionalString(slot.visual_goal) ||
+    normalizeOptionalString(slot.visual_direction) ||
+    normalizeOptionalString(slot.description) ||
+    normalizeOptionalString(slot.purpose) ||
+    "根据输入截图延展出适合该广告槽位的连续动态画面。";
+  const copyDirection =
+    normalizeOptionalString(slot.copy_direction) ||
+    normalizeOptionalString(slot.subtitle_or_vo_direction) ||
+    normalizeOptionalString(slot.text_or_voiceover);
+
+  return [
+    `【输入图片与对应槽位】使用已有素材抽帧、用户上传图片或用户确认的生成图作为输入图，生成 ${slotType} 槽位短视频；产品为${productName}，广告目标是“${goal}”。`,
+    `【景别与构图】保持竖屏 9:16 构图，主体清晰，核心商品或动作位于视觉中心，保留字幕安全区。`,
+    `【画面方向】${visualDirection}`,
+    "【运镜方式】基于输入图做自然延展，可轻微推进、拉近、平移或稳定微动；不要大幅改变主体身份、产品包装和场景逻辑。",
+    "【主体动作】如果输入图有产品，突出产品质感、水珠、冰块、光影或包装细节；如果输入图有人物，只做自然表情、饮用、手部或身体微动作，不新增无关人物。",
+    "【环境动态】加入与槽位一致的细微动态，例如水汽、冰块反光、阳光、气泡、背景人群轻微运动或镜头景深变化。",
+    copyDirection
+      ? `【文字/声音】后期可叠加或配合：${copyDirection}`
+      : "【文字/声音】可配合简短音效或后期字幕，画面本身不要生成乱码文字。",
+    `【时长与节奏】目标时长约 ${requiredDuration}s，节奏服务于该槽位表达，避免过快导致商品或动作不可读。`,
+    "【画质风格】真实商业广告摄影质感，高清、稳定、干净，延续输入图的产品、人物和场景一致性。",
+    "【避免事项】不要纯文字生成；必须以输入图为视觉参考。不要生成无关品牌、错误包装、文字乱码、畸形手部或与输入图冲突的人物/场景。"
+  ].join("\n");
+};
+
 export const buildV2DeterministicMaterialCoverage = async (
   normalized: Required<V2PipelineRequest>,
   fillableArchitecture: JsonObject,
@@ -1542,6 +1681,7 @@ export const buildV2DeterministicMaterialCoverage = async (
     }
   }
   const aigcPromptsBySlot = collectAigcImagePromptsBySlot(fillableArchitecture);
+  const videoPromptsBySlot = collectAigcVideoPromptsBySlot(fillableArchitecture);
   const acceptedDurationShortSlots = new Set(
     normalizeStringArray(normalized.options.accepted_duration_short_slots).map(
       (slot) => normalizeSlotType(slot) || slot
@@ -1717,11 +1857,32 @@ export const buildV2DeterministicMaterialCoverage = async (
     );
     const aiCompletionRequiredDuration =
       frontendCoverageStatus === "fully_matched" ? 0 : missingDuration || requiredDuration;
+    const availableGenerationPaths =
+      frontendCoverageStatus === "fully_matched"
+        ? []
+        : [
+            ...(materialAssets.length > 0 ? ["direct_video_from_material_frame"] : []),
+            "upload_image_then_video",
+            "generate_image_then_video"
+          ];
     const availableUserActions =
       frontendCoverageStatus === "structure_complete_duration_short"
-        ? ["accept_current_material_as_sufficient", "generate_ai_for_missing_duration"]
+        ? [
+            "accept_current_material_as_sufficient",
+            ...(availableGenerationPaths.includes("direct_video_from_material_frame")
+              ? ["generate_direct_video_from_material_frame"]
+              : []),
+            "upload_image_then_generate_video",
+            "generate_image_then_video"
+          ]
         : frontendCoverageStatus === "material_insufficient"
-          ? ["generate_ai_for_missing_material"]
+          ? [
+              ...(availableGenerationPaths.includes("direct_video_from_material_frame")
+                ? ["generate_direct_video_from_material_frame"]
+                : []),
+              "upload_image_then_generate_video",
+              "generate_image_then_video"
+            ]
           : durationShortAccepted
             ? ["reopen_ai_completion"]
             : [];
@@ -1730,6 +1891,12 @@ export const buildV2DeterministicMaterialCoverage = async (
       normalizeOptionalString(promptRecord?.prompt) ||
       normalizeOptionalString(promptRecord?.image_prompt) ||
       normalizeOptionalString(promptRecord?.prompt_description);
+    const videoPromptRecord = videoPromptsBySlot.get(slotType);
+    const videoPrompt =
+      normalizeOptionalString(videoPromptRecord?.prompt) ||
+      normalizeOptionalString(videoPromptRecord?.video_prompt) ||
+      normalizeOptionalString(videoPromptRecord?.prompt_description) ||
+      getSlotFallbackVideoPrompt(normalized, slot, slotType, requiredDuration);
     const gapReason =
       coverageStatus === "covered"
         ? undefined
@@ -1738,6 +1905,22 @@ export const buildV2DeterministicMaterialCoverage = async (
           : candidateMaterials.length > 0
             ? "存在候选素材，但可分配时长不足或已被前序槽位使用。"
             : "没有可确定匹配到该槽位的用户素材。";
+    const directReferenceMaterialIds =
+      matches.length > 0
+        ? matches.map((material) => String(material.material_id))
+        : candidateMaterials.length > 0
+          ? candidateMaterials.map((material) => String(material.material_id))
+          : materialAssets.map((material) => String(material.material_id));
+    const directReferenceMaterialSource = materialAssets.filter((asset) =>
+      directReferenceMaterialIds.includes(String(asset.material_id))
+    );
+    const directVideoReferenceMaterials = directReferenceMaterialSource.map((material) => ({
+      material_id: material.material_id,
+      label: material.label,
+      uri: material.uri,
+      duration_seconds: material.duration_seconds,
+      frame_sample_timestamps_seconds: material.frame_sample_timestamps_seconds
+    }));
 
     return {
       slot_id:
@@ -1783,6 +1966,17 @@ export const buildV2DeterministicMaterialCoverage = async (
       unknown_duration_candidate_material_refs: unknownCandidateRefs,
       needs_ai_completion: frontendCoverageStatus !== "fully_matched",
       gap_reason: gapReason,
+      available_generation_paths: availableGenerationPaths,
+      direct_video_reference_materials: directVideoReferenceMaterials,
+      recommended_video_prompt: {
+        prompt_ref:
+          normalizeOptionalString(videoPromptRecord?.prompt_ref) ||
+          normalizeOptionalString(videoPromptRecord?.slot_id) ||
+          `${slotType}_image_to_video`,
+        prompt_source: videoPromptRecord ? "model_or_plan" : "deterministic_slot_fallback",
+        prompt_description: normalizeOptionalString(videoPromptRecord?.prompt_description),
+        prompt: videoPrompt
+      },
       recommended_aigc_prompt: prompt
         ? {
             prompt_ref:
@@ -1872,40 +2066,62 @@ export const attachProductionPromptsToMaterialCoverage = (
   productionPlan: JsonObject
 ): V2MaterialCoverage => {
   const promptsBySlot = collectAigcImagePromptsBySlot(productionPlan);
-  if (promptsBySlot.size === 0) {
+  const videoPromptsBySlot = collectAigcVideoPromptsBySlot(productionPlan);
+  if (promptsBySlot.size === 0 && videoPromptsBySlot.size === 0) {
     return materialCoverage;
   }
 
   return {
     ...materialCoverage,
     slot_coverage: materialCoverage.slot_coverage.map((slotCoverage) => {
-      const existingPrompt = asJsonObject(slotCoverage.recommended_aigc_prompt);
-      if (existingPrompt.prompt_source === "model_or_plan") {
-        return slotCoverage;
-      }
-
       const slotType = normalizeSlotType(slotCoverage.slot_type);
-      const promptRecord = slotType ? promptsBySlot.get(slotType) : undefined;
-      const prompt =
+      const existingPrompt = asJsonObject(slotCoverage.recommended_aigc_prompt);
+      const promptRecord =
+        existingPrompt.prompt_source === "model_or_plan" || !slotType
+          ? undefined
+          : promptsBySlot.get(slotType);
+      const imagePrompt =
         normalizeOptionalString(promptRecord?.prompt) ||
         normalizeOptionalString(promptRecord?.image_prompt) ||
         normalizeOptionalString(promptRecord?.prompt_description);
-
-      if (!prompt || !promptRecord) {
-        return slotCoverage;
-      }
+      const existingVideoPrompt = asJsonObject(slotCoverage.recommended_video_prompt);
+      const videoPromptRecord =
+        existingVideoPrompt.prompt_source === "model_or_plan" || !slotType
+          ? undefined
+          : videoPromptsBySlot.get(slotType);
+      const videoPrompt =
+        normalizeOptionalString(videoPromptRecord?.prompt) ||
+        normalizeOptionalString(videoPromptRecord?.video_prompt) ||
+        normalizeOptionalString(videoPromptRecord?.prompt_description);
 
       return {
         ...slotCoverage,
-        recommended_aigc_prompt: {
-          prompt_ref:
-            normalizeOptionalString(promptRecord.prompt_ref) ||
-            normalizeOptionalString(promptRecord.slot_id) ||
-            slotType,
-          prompt_source: "model_or_plan",
-          prompt_description: normalizeOptionalString(promptRecord.prompt_description),
-          prompt
-        }
+        recommended_aigc_prompt:
+          imagePrompt && promptRecord
+            ? {
+                prompt_ref:
+                  normalizeOptionalString(promptRecord.prompt_ref) ||
+                  normalizeOptionalString(promptRecord.slot_id) ||
+                  slotType,
+                prompt_source: "model_or_plan",
+                prompt_description: normalizeOptionalString(promptRecord.prompt_description),
+                prompt: imagePrompt
+              }
+            : slotCoverage.recommended_aigc_prompt,
+        recommended_video_prompt:
+          videoPrompt && videoPromptRecord
+            ? {
+                prompt_ref:
+                  normalizeOptionalString(videoPromptRecord.prompt_ref) ||
+                  normalizeOptionalString(videoPromptRecord.slot_id) ||
+                  `${slotType}_image_to_video`,
+                prompt_source: "model_or_plan",
+                prompt_description: normalizeOptionalString(
+                  videoPromptRecord.prompt_description
+                ),
+                prompt: videoPrompt
+              }
+            : slotCoverage.recommended_video_prompt
       };
     })
   };
@@ -1993,7 +2209,7 @@ const makeFallbackMaterialAnalysis = (
       enough_for_direct_assembly: enoughVisuals,
       notes: enoughVisuals
         ? "用户素材数量基本足够，可优先生成拼接/剪辑方案。"
-        : "用户素材不足，建议先生成图片候选，再图生视频补齐缺口。"
+        : "用户素材不足，可优先基于现有素材抽帧直接图生视频；如用户希望补充静态画面，再生成图片候选后图生视频。"
     },
     usable_materials: [...fileMaterials, ...textMaterials],
     coverage_by_slot_type: commercialAdSlots.map((slot, index) => ({
@@ -2075,8 +2291,8 @@ const makeFallbackFillableArchitecture = (
     material_fit: asJsonObject(userMaterialAnalysis).coverage_by_slot_type || [],
     decision_points: [
       "如果 product_hero / usage_process 素材足够，优先拼接真实素材。",
-      "如果 hook / comparison / CTA 缺素材，优先生成图片候选供用户确认。",
-      "图片确认后再图生视频，降低直接生成视频的黑盒风险。"
+      "如果 hook / comparison / CTA 缺素材，可先用已有素材抽帧配合图生视频 prompt 直接生成视频。",
+      "如果用户想添加相关图片，再展开图片生成候选；用户确认图片后继续使用同一视频 prompt 图生视频。"
     ]
   };
 };
@@ -2107,7 +2323,7 @@ const makeFallbackProductionPlan = (
       mode: canAssemble ? "direct_editing_plan" : "hybrid_material_plus_generation",
       notes: canAssemble
         ? "素材数量足够，优先输出剪辑拼接方案。"
-        : "素材不足，优先生成关键画面候选，用户确认后再图生视频。",
+        : "素材不足时可基于现有素材抽帧直接图生视频；生图候选作为用户选择的补充路径。",
       timeline_outline: commercialAdSlots.map((slot, index) => ({
         item_id: `outline_${String(index + 1).padStart(2, "0")}`,
         slot_type: slot.slot_type,
@@ -2115,7 +2331,7 @@ const makeFallbackProductionPlan = (
         visual_source:
           canAssemble || index < normalized.user_materials.length
             ? "user_material"
-            : "generated_image_then_video",
+            : "material_frame_or_uploaded_or_generated_image_then_video",
         editing_instruction: `该段用于完成广告目标：${slot.role}。`
       }))
     },
@@ -2215,7 +2431,7 @@ const makeFallbackProductionPlan = (
     },
     guardrails: [
       "AIGC prompt 只描述新商品需要的画面，不复制样例视频内容。",
-      "先生成图片候选并由用户确认，再进入图生视频。"
+      "禁止纯文字直接生视频；必须使用已有素材抽帧、用户上传图片或用户确认的生成图作为图生视频输入。"
     ]
   };
 };
@@ -2277,7 +2493,8 @@ const makeFallbackImageCandidateResponse = (
 };
 
 const makeFallbackImageToVideoResponse = (
-  payload: V2ImageToVideoRequest
+  payload: V2ImageToVideoRequest,
+  sourceImageUri?: string
 ): JsonObject => {
   return {
     source: {
@@ -2288,10 +2505,11 @@ const makeFallbackImageToVideoResponse = (
     job_id: `mock_video_job_${Date.now()}`,
     status: "mock_ready",
     input: {
-      image_uri: payload.approved_image_uri,
+      image_uri: sourceImageUri,
       prompt: payload.video_prompt,
       duration_seconds: payload.duration_seconds || 5,
-      aspect_ratio: payload.aspect_ratio || "9:16"
+      aspect_ratio: payload.aspect_ratio || "9:16",
+      generation_mode: payload.generation_mode || "generated_image"
     },
     note:
       "这是 mock 图生视频任务响应。配置真实视频生成 provider 后才会返回真实生成任务或视频结果。"
@@ -2400,7 +2618,7 @@ export const runV2Pipeline = async (
       deterministic_material_coverage: baseMaterialCoverage,
       detailed_generation_prompt_requirements: detailedGenerationPromptRequirements,
       instruction:
-        "判断现有用户素材是否足够生成商业广告时，必须优先服从 deterministic_material_coverage：只要 materials_sufficient 为 false，就不能输出可直接成片，必须为未覆盖槽位规划 AI 补全或补充素材。如果足够，请用中文返回剪辑/拼接方案；如果不足，请先用中文返回缺失素材的图片生成 prompt，再用中文返回图生视频 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。所有图片生成 prompt 和图生视频 prompt 必须按 detailed_generation_prompt_requirements 中的章节组织，内容要像专业视频提示词一样详细。图片生成 prompt 要明确说明为同一槽位生成 4 张候选图供用户选择，且 4 张图必须是同一个具体主题、同一产品设定、同一场景逻辑下的四种变体，只能在构图、光线、景别、镜头角度或背景细节上有差异。不要用“例如 1/2/3/4”列出多个互斥主体或场景，避免模型把四张候选图生成成四个不同主题。特别注意产品和人物规则：如果用户素材里已有产品、包装、品牌视觉或主角人物，后续生成必须尽量还原它们，不能写“不要出现完整产品”“不要出现人物”等与用户素材冲突的负面约束；这类限制只能表达为“不要出现无关产品/无关人物/无关品牌”。如果用户素材里没有人物且槽位不强制人物出现，则不要凭空生成人物，优先展示产品、道具、场景、手部动作或包装画面；如果必须新增人物，需详细描述符合产品设定和目标人群的人物样貌、穿着、状态和动作。"
+        "判断现有用户素材是否足够生成商业广告时，必须优先服从 deterministic_material_coverage：只要 materials_sufficient 为 false，就不能输出可直接成片，必须为未覆盖或时长不足槽位规划 AI 补全或补充素材。新的补全链路有三种：1. 默认可直接使用已有用户素材的抽帧截图 + 图生视频 prompt 生成视频；2. 用户上传相关图片后，用该图片 + 同一图生视频 prompt 生成视频；3. 用户选择先生成图片候选时，再输出图片生成 prompt，用户确认图片后用同一图生视频 prompt 生成视频。禁止规划纯文字直接生视频。请为每个需补全槽位优先返回详细的图生视频 prompt，并可选返回图片生成 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。所有图片生成 prompt 和图生视频 prompt 必须按 detailed_generation_prompt_requirements 中的章节组织，内容要像专业视频提示词一样详细。图片生成 prompt 要明确说明为同一槽位生成 4 张候选图供用户选择，且 4 张图必须是同一个具体主题、同一产品设定、同一场景逻辑下的四种变体，只能在构图、光线、景别、镜头角度或背景细节上有差异。不要用“例如 1/2/3/4”列出多个互斥主体或场景，避免模型把四张候选图生成成四个不同主题。特别注意产品和人物规则：如果用户素材里已有产品、包装、品牌视觉或主角人物，后续生成必须尽量还原它们，不能写“不要出现完整产品”“不要出现人物”等与用户素材冲突的负面约束；这类限制只能表达为“不要出现无关产品/无关人物/无关品牌”。如果用户素材里没有人物且槽位不强制人物出现，则不要凭空生成人物，优先展示产品、道具、场景、手部动作或包装画面；如果必须新增人物，需详细描述符合产品设定和目标人群的人物样貌、穿着、状态和动作。"
     },
     allowFallback,
     (reason) =>
@@ -2498,7 +2716,7 @@ export const runV2Pipeline = async (
       notes:
         fallbackReasons.length > 0
           ? "V2 已使用降级输出完成。请确认真实 provider adapter 和密钥配置后，再将生成媒体视为真实结果。"
-          : "V2 API-first 链路已完成。如果返回 image_candidates，请先让用户确认候选图，再调用图生视频。"
+          : "V2 API-first 链路已完成。需补全槽位可直接用已有素材抽帧调用图生视频；用户选择补充图片时，再生成或上传图片后调用同一图生视频 prompt。"
     }
   };
 };
@@ -2550,24 +2768,99 @@ export const generateV2ImageCandidates = async (
   }
 };
 
+const normalizeImageToVideoSourceVideos = (payload: V2ImageToVideoRequest): V2VideoRef[] => {
+  const videoRefs: V2VideoRef[] = [];
+
+  if (payload.source_video_uri) {
+    videoRefs.push({
+      uri: payload.source_video_uri,
+      role: "user_material",
+      label: "source_video"
+    });
+  }
+
+  if (payload.source_video) {
+    videoRefs.push({
+      ...payload.source_video,
+      role: payload.source_video.role || "user_material"
+    });
+  }
+
+  if (payload.source_material) {
+    videoRefs.push({
+      ...payload.source_material,
+      role: payload.source_material.role || "user_material"
+    });
+  }
+
+  return videoRefs;
+};
+
+const resolveImageToVideoSourceImage = async (
+  payload: V2ImageToVideoRequest
+): Promise<JsonObject> => {
+  const explicitImageUri =
+    normalizeOptionalString(payload.approved_image_uri) ||
+    normalizeOptionalString(payload.source_image_uri) ||
+    normalizeOptionalString(payload.image_uri);
+
+  if (explicitImageUri) {
+    return {
+      image_uri: explicitImageUri,
+      source_type:
+        payload.generation_mode === "uploaded_image"
+          ? "uploaded_image"
+          : payload.generation_mode === "generated_image"
+            ? "generated_image"
+            : "explicit_image"
+    };
+  }
+
+  const sourceVideoRefs = normalizeImageToVideoSourceVideos(payload);
+  if (sourceVideoRefs.length === 0) {
+    throw new V2PipelineInputError(
+      "source image is required: pass approved_image_uri/source_image_uri, or pass source_video_uri/source_material so the backend can extract a frame"
+    );
+  }
+
+  const frames = await collectV2ReferenceFramesFromVideos(sourceVideoRefs, 1);
+  const sourceFrame = frames[0];
+  if (!sourceFrame) {
+    throw new V2PipelineInputError(
+      "failed to extract source frame from existing material; direct video generation requires a readable local material video"
+    );
+  }
+
+  return {
+    image_uri: sourceFrame.data_url,
+    source_type: "material_frame",
+    source_frame: {
+      frame_id: sourceFrame.frame_id,
+      source_uri: sourceFrame.source_uri,
+      source_label: sourceFrame.source_label,
+      time_seconds: sourceFrame.time_seconds,
+      mime_type: sourceFrame.mime_type
+    }
+  };
+};
+
 export const generateV2ImageToVideo = async (
   payload: V2ImageToVideoRequest
 ): Promise<JsonObject> => {
-  if (!payload.approved_image_uri) {
-    throw new V2PipelineInputError("approved_image_uri is required");
-  }
-
   if (!payload.video_prompt) {
     throw new V2PipelineInputError("video_prompt is required");
   }
 
+  const sourceImage = await resolveImageToVideoSourceImage(payload);
   const requestPayload = {
-    image_uri: payload.approved_image_uri,
+    image_uri: sourceImage.image_uri,
     prompt: payload.video_prompt,
     duration_seconds: payload.duration_seconds || 5,
     aspect_ratio: payload.aspect_ratio || "9:16",
     camera_fixed: payload.camera_fixed,
-    watermark: payload.watermark
+    watermark: payload.watermark,
+    generation_mode: payload.generation_mode || sourceImage.source_type,
+    source_frame: sourceImage.source_frame
   };
   const allowFallback = payload.allow_fallback !== false;
 
@@ -2581,7 +2874,7 @@ export const generateV2ImageToVideo = async (
     }
 
     return {
-      ...makeFallbackImageToVideoResponse(payload),
+      ...makeFallbackImageToVideoResponse(payload, normalizeOptionalString(sourceImage.image_uri)),
       fallback_reason: sanitizeFallbackReason(error)
     };
   }
@@ -2930,6 +3223,9 @@ const saveImageToVideoAutoTrimContext = (
     target_duration_seconds: targetDurationSeconds,
     generation_prompt: payload.video_prompt,
     approved_image_uri: payload.approved_image_uri,
+    source_image_uri: requestPayload.image_uri,
+    source_frame: requestPayload.source_frame,
+    generation_mode: payload.generation_mode || requestPayload.generation_mode,
     requested_video_duration_seconds: requestPayload.duration_seconds,
     allow_fallback: payload.allow_fallback !== false,
     created_at: new Date().toISOString()

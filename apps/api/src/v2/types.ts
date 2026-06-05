@@ -111,8 +111,17 @@ export type V2ImageCandidateRequest = {
 };
 
 export type V2ImageToVideoRequest = {
-  approved_image_uri: string;
+  approved_image_uri?: string;
+  source_image_uri?: string;
+  image_uri?: string;
+  source_video_uri?: string;
+  source_video?: V2VideoRef;
+  source_material?: V2VideoRef;
   video_prompt: string;
+  generation_mode?:
+    | "direct_from_material_frame"
+    | "uploaded_image"
+    | "generated_image";
   duration_seconds?: number;
   target_duration_seconds?: number;
   aspect_ratio?: string;
