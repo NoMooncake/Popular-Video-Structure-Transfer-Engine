@@ -478,17 +478,30 @@ const InputView = ({
                 </div>
               )}
             </label>
-            <label className="upload-card-large">
+            <label className={`upload-card-large ${materialFiles.length > 0 ? 'has-media' : ''}`}>
               <input multiple type="file" accept="image/*,video/*,.txt,.md" onChange={updateMaterialFiles} />
-              <div className="upload-placeholder">
-                <div className="icon-materials"></div>
-                <strong>真实素材</strong>
-                <span>
-                  {materialFiles.length > 0
-                    ? `已选择 ${materialFiles.length} 个素材`
-                    : "添加你的素材"}
-                </span>
-              </div>
+              {materialFiles.length > 0 ? (
+                <div className="materials-list">
+                  {materialFiles.map((file, i) => (
+                    <div key={i} className="material-item-preview">
+                       {file.type.startsWith('image/') ? (
+                         <img src={URL.createObjectURL(file)} alt={file.name} />
+                       ) : file.type.startsWith('video/') ? (
+                         <video src={URL.createObjectURL(file)} />
+                       ) : (
+                         <div className="text-preview">TXT</div>
+                       )}
+                       <span className="file-name">{file.name}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="upload-placeholder">
+                  <div className="icon-materials"></div>
+                  <strong>真实素材</strong>
+                  <span>添加你的素材</span>
+                </div>
+              )}
             </label>
           </div>
         </section>
