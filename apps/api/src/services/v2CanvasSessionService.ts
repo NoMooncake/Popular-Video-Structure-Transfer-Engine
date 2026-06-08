@@ -3,7 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { storageConfig } from "../config/storage.js";
-import { V2PipelineInputError } from "./v2PipelineService.js";
+import { findUploadedVideoById } from "./uploadService.js";
+import {
+  generateV2ImageCandidates,
+  generateV2ImageToVideo,
+  V2PipelineInputError
+} from "./v2PipelineService.js";
 import type { JsonObject } from "../v2/types.js";
 
 export type V2CanvasNode = {
@@ -251,6 +256,305 @@ export const createV2CanvasSessionFromRevalidateResult = (
   };
 
   return saveCanvasSession(session);
+};
+
+const findNode = (
+  session: V2CanvasSession,
+  predicate: (node: V2CanvasNode) => boolean,
+  message: string
+): V2CanvasNode => {
+  const node = session.nodes.find(predicate);
+  if (!node) {
+    throw new V2PipelineInputError(message, 404);
+  }
+
+  return node;
+};
+
+const findMissingNode = (session: V2CanvasSession, payload: JsonObject): V2CanvasNode => {
+  const missingNodeId = normalizeOptionalString(payload.missing_node_id);
+  const slotId = normalizeOptionalString(payload.slot_id);
+
+  return findNode(
+    session,
+    (node) =>
+      node.node_type === "missing_material" &&
+      (missingNodeId ? node.node_id === missingNodeId : !slotId || node.slot_id === slotId),
+    "missing material node not found"
+  );
+};
+
+const upsertNode = (session: V2CanvasSession, nextNode: V2CanvasNode): V2CanvasNode => {
+  const existingIndex = session.nodes.findIndex((node) => node.node_id === nextNode.node_id);
+  if (existingIndex >= 0) {
+    session.nodes[existingIndex] = nextNode;
+  } else {
+    session.nodes.push(nextNode);
+  }
+
+  return nextNode;
+};
+
+const upsertEdge = (session: V2CanvasSession, nextEdge: V2CanvasEdge): V2CanvasEdge => {
+  const existingIndex = session.edges.findIndex((edge) => edge.edge_id === nextEdge.edge_id);
+  if (existingIndex >= 0) {
+    session.edges[existingIndex] = nextEdge;
+  } else {
+    session.edges.push(nextEdge);
+  }
+
+  return nextEdge;
+};
+
+const getPromptTextFromMissingNode = (
+  missingNode: V2CanvasNode,
+  promptType: "video" | "image"
+): string | undefined => {
+  const promptRecord = asJsonObject(
+    promptType === "video"
+      ? missingNode.data.recommended_video_prompt
+      : missingNode.data.recommended_aigc_prompt
+  );
+
+  return normalizeOptionalString(promptRecord.prompt);
+};
+
+export const upsertV2CanvasPromptNode = (
+  canvasSessionId: string,
+  payload: JsonObject
+): JsonObject => {
+  const session = getV2CanvasSession(canvasSessionId);
+  const missingNode = findMissingNode(session, payload);
+  const promptType =
+    normalizeOptionalString(payload.prompt_type) === "image" ? "image" : "video";
+  const prompt =
+    normalizeOptionalString(payload.prompt) ||
+    getPromptTextFromMissingNode(missingNode, promptType);
+  if (!prompt) {
+    throw new V2PipelineInputError("prompt is required");
+  }
+
+  const nodeType = promptType === "image" ? "image_prompt" : "video_prompt";
+  const promptNode = upsertNode(session, {
+    node_id:
+      normalizeOptionalString(payload.node_id) ||
+      makeNodeId(missingNode.slot_id || "slot", promptType, "prompt"),
+    node_type: nodeType,
+    slot_id: missingNode.slot_id,
+    display_order: missingNode.display_order,
+    data: {
+      prompt_type: promptType,
+      prompt,
+      original_recommended_prompt: getPromptTextFromMissingNode(missingNode, promptType),
+      updated_at: new Date().toISOString()
+    }
+  });
+  const edge = upsertEdge(session, {
+    edge_id: makeNodeId(promptNode.node_id, "to", missingNode.node_id),
+    source_node_id: promptNode.node_id,
+    target_node_id: missingNode.node_id,
+    edge_type: "prompt_to_gap"
+  });
+  session.updated_at = new Date().toISOString();
+  saveCanvasSession(session);
+
+  return {
+    canvas_session: session,
+    prompt_node: promptNode,
+    edge
+  };
+};
+
+const getPromptNodeForGap = (
+  session: V2CanvasSession,
+  missingNode: V2CanvasNode,
+  nodeType: "video_prompt" | "image_prompt"
+): V2CanvasNode | undefined => {
+  for (const promptEdge of session.edges.filter(
+    (edge) => edge.target_node_id === missingNode.node_id && edge.edge_type === "prompt_to_gap"
+  )) {
+    const promptNode = session.nodes.find(
+      (node) => node.node_id === promptEdge.source_node_id && node.node_type === nodeType
+    );
+    if (promptNode) {
+      return promptNode;
+    }
+  }
+
+  return undefined;
+};
+
+export const generateV2CanvasImageCandidates = async (
+  canvasSessionId: string,
+  payload: JsonObject
+): Promise<JsonObject> => {
+  const session = getV2CanvasSession(canvasSessionId);
+  const missingNode = findMissingNode(session, payload);
+  const imagePromptNode = getPromptNodeForGap(session, missingNode, "image_prompt");
+  const prompt =
+    normalizeOptionalString(payload.prompt) ||
+    normalizeOptionalString(imagePromptNode?.data.prompt) ||
+    getPromptTextFromMissingNode(missingNode, "image");
+  if (!prompt) {
+    throw new V2PipelineInputError("image prompt is required");
+  }
+
+  const result = await generateV2ImageCandidates({
+    prompt,
+    count: getNumber(payload.count, 4),
+    allow_fallback: payload.allow_fallback !== false,
+    use_image_provider: payload.use_image_provider !== false
+  });
+  const rawCandidates = Array.isArray(result.candidates)
+    ? result.candidates
+    : Array.isArray(result.data)
+      ? result.data
+      : [];
+  const imageCandidateNodes = rawCandidates.map((candidate, index): V2CanvasNode => {
+    const record = asJsonObject(candidate);
+    return upsertNode(session, {
+      node_id: makeNodeId(
+        missingNode.slot_id || "slot",
+        "image_candidate",
+        String(index + 1).padStart(2, "0")
+      ),
+      node_type: "image_candidate",
+      slot_id: missingNode.slot_id,
+      display_order: missingNode.display_order,
+      data: {
+        ...record,
+        prompt,
+        selected: false
+      }
+    });
+  });
+
+  session.updated_at = new Date().toISOString();
+  saveCanvasSession(session);
+
+  return {
+    canvas_session: session,
+    image_generation_result: result,
+    image_candidate_nodes: imageCandidateNodes
+  };
+};
+
+const getConnectedImageCandidateNode = (
+  session: V2CanvasSession,
+  missingNode: V2CanvasNode,
+  payload: JsonObject
+): V2CanvasNode | undefined => {
+  const imageCandidateNodeId = normalizeOptionalString(payload.image_candidate_node_id);
+  if (imageCandidateNodeId) {
+    return session.nodes.find(
+      (node) => node.node_id === imageCandidateNodeId && node.node_type === "image_candidate"
+    );
+  }
+
+  const imageEdge = session.edges.find(
+    (edge) => edge.target_node_id === missingNode.node_id && edge.edge_type === "image_to_gap"
+  );
+  if (!imageEdge) {
+    return undefined;
+  }
+
+  return session.nodes.find(
+    (node) => node.node_id === imageEdge.source_node_id && node.node_type === "image_candidate"
+  );
+};
+
+const getSourceVideoUriForMissingNode = (missingNode: V2CanvasNode): string | undefined => {
+  const refs = Array.isArray(missingNode.data.direct_video_reference_materials)
+    ? missingNode.data.direct_video_reference_materials.map(asJsonObject)
+    : [];
+  for (const ref of refs) {
+    const fileId = normalizeOptionalString(ref.file_id);
+    const localPath = fileId ? findUploadedVideoById(fileId) : undefined;
+    if (localPath) {
+      return localPath;
+    }
+
+    const uri = normalizeOptionalString(ref.uri);
+    if (uri && uri.startsWith("/") && fs.existsSync(uri)) {
+      return uri;
+    }
+  }
+
+  return undefined;
+};
+
+export const generateV2CanvasGapVideo = async (
+  canvasSessionId: string,
+  payload: JsonObject
+): Promise<JsonObject> => {
+  const session = getV2CanvasSession(canvasSessionId);
+  const missingNode = findMissingNode(session, payload);
+  const videoPromptNode = getPromptNodeForGap(session, missingNode, "video_prompt");
+  const videoPrompt =
+    normalizeOptionalString(payload.video_prompt) ||
+    normalizeOptionalString(videoPromptNode?.data.prompt) ||
+    getPromptTextFromMissingNode(missingNode, "video");
+  if (!videoPrompt) {
+    throw new V2PipelineInputError("video prompt is required");
+  }
+
+  const imageCandidateNode = getConnectedImageCandidateNode(session, missingNode, payload);
+  const imageUri =
+    normalizeOptionalString(payload.approved_image_uri) ||
+    normalizeOptionalString(imageCandidateNode?.data.uri) ||
+    normalizeOptionalString(imageCandidateNode?.data.url) ||
+    normalizeOptionalString(imageCandidateNode?.data.image_url);
+  const sourceVideoUri = imageUri ? undefined : getSourceVideoUriForMissingNode(missingNode);
+  if (!imageUri && !sourceVideoUri) {
+    throw new V2PipelineInputError(
+      "gap video generation requires a connected image candidate or an existing material reference"
+    );
+  }
+
+  const generationResult = await generateV2ImageToVideo({
+    video_prompt: videoPrompt,
+    approved_image_uri: imageUri,
+    source_video_uri: sourceVideoUri,
+    duration_seconds:
+      getNumber(payload.duration_seconds, getNumber(missingNode.data.missing_duration, 5)) || 5,
+    generation_mode: imageUri ? "generated_image" : "direct_from_material_frame",
+    allow_fallback: payload.allow_fallback !== false,
+    use_video_provider: payload.use_video_provider !== false
+  });
+  const generatedVideoNode = upsertNode(session, {
+    node_id: makeNodeId(
+      missingNode.slot_id || "slot",
+      "generated_video",
+      crypto.randomUUID()
+    ),
+    node_type: "generated_video",
+    slot_id: missingNode.slot_id,
+    display_order: missingNode.display_order,
+    data: {
+      video_prompt: videoPrompt,
+      generation_mode: imageUri ? "generated_image" : "direct_from_material_frame",
+      source_image_node_id: imageCandidateNode?.node_id,
+      video_prompt_node_id: videoPromptNode?.node_id,
+      missing_node_id: missingNode.node_id,
+      generation_result: generationResult,
+      created_at: new Date().toISOString()
+    }
+  });
+  const edge = upsertEdge(session, {
+    edge_id: makeNodeId(generatedVideoNode.node_id, "to", missingNode.node_id),
+    source_node_id: generatedVideoNode.node_id,
+    target_node_id: missingNode.node_id,
+    edge_type: "generated_video_to_gap"
+  });
+  session.updated_at = new Date().toISOString();
+  saveCanvasSession(session);
+
+  return {
+    canvas_session: session,
+    generated_video_node: generatedVideoNode,
+    edge,
+    generation_result: generationResult
+  };
 };
 
 const normalizeCanvasNode = (value: unknown): V2CanvasNode => {

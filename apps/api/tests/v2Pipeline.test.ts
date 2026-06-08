@@ -1815,6 +1815,7 @@ test(
     });
     const longRevalidate = (await longRevalidateResponse.json()) as {
       canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session_id: string;
     };
     assert.equal(longRevalidateResponse.status, 200);
     assert.equal(
@@ -1823,6 +1824,86 @@ test(
     );
     assert.equal(longRevalidate.canvas_nodes[0]?.missing_duration, 1);
     assert.equal(asRecordArray(longRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
+
+    const promptNodeResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          prompt_type: "video",
+          prompt: "冰红茶冰块飞溅，镜头快速推近瓶身，补足清凉冲击。"
+        })
+      }
+    );
+    const promptNodeBody = (await promptNodeResponse.json()) as {
+      prompt_node: Record<string, unknown>;
+    };
+    assert.equal(promptNodeResponse.status, 201);
+    assert.equal(promptNodeBody.prompt_node.node_type, "video_prompt");
+
+    const imagePromptNodeResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          prompt_type: "image",
+          prompt: "冰红茶瓶身、冰块和水珠的竖屏广告关键画面。"
+        })
+      }
+    );
+    assert.equal(imagePromptNodeResponse.status, 201);
+
+    const imageCandidatesResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/image-candidates`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          count: 4,
+          use_image_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const imageCandidatesBody = (await imageCandidatesResponse.json()) as {
+      image_candidate_nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(imageCandidatesResponse.status, 201);
+    assert.equal(imageCandidatesBody.image_candidate_nodes.length, 4);
+    assert.equal(imageCandidatesBody.image_candidate_nodes[0]?.node_type, "image_candidate");
+
+    const gapVideoResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/gap-video`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          use_video_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const gapVideoBody = (await gapVideoResponse.json()) as {
+      generated_video_node: Record<string, unknown>;
+      generation_result: Record<string, unknown>;
+    };
+    assert.equal(gapVideoResponse.status, 200);
+    assert.equal(gapVideoBody.generated_video_node.node_type, "generated_video");
+    assert.equal(gapVideoBody.generation_result.status, "mock_ready");
 
     const addMaterialResponse = await fetch(
       `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01/materials`,

@@ -2831,6 +2831,13 @@ export const generateV2ImageCandidates = async (
   );
   const allowFallback = payload.allow_fallback !== false;
 
+  if (payload.use_image_provider === false) {
+    return {
+      ...makeFallbackImageCandidateResponse(promptPackage, count),
+      fallback_reason: "image provider disabled by request"
+    };
+  }
+
   try {
     const referenceVideoRefs = [
       ...normalizeVideoRefs(payload.reference_videos, [], "user_material"),
@@ -2949,6 +2956,13 @@ export const generateV2ImageToVideo = async (
     source_frame: sourceImage.source_frame
   };
   const allowFallback = payload.allow_fallback !== false;
+
+  if (payload.use_video_provider === false) {
+    return {
+      ...makeFallbackImageToVideoResponse(payload, normalizeOptionalString(sourceImage.image_uri)),
+      fallback_reason: "video provider disabled by request"
+    };
+  }
 
   try {
     const providerResponse = await requestImageToVideo(requestPayload);

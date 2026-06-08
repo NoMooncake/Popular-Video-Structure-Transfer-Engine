@@ -8,8 +8,11 @@ import {
   readV2MaterialCandidatePool
 } from "../services/v2MaterialCandidatePoolService.js";
 import {
+  generateV2CanvasGapVideo,
+  generateV2CanvasImageCandidates,
   getV2CanvasSession,
-  updateV2CanvasSession
+  updateV2CanvasSession,
+  upsertV2CanvasPromptNode
 } from "../services/v2CanvasSessionService.js";
 import {
   addUploadedFilesToV2ScriptSlot,
@@ -372,6 +375,79 @@ v2Routes.patch("/canvas-sessions/:canvasSessionId", (req, res) => {
       error: {
         code: "v2_canvas_session_update_failed",
         message: getErrorMessage(error, "V2 画布会话更新失败")
+      }
+    });
+  }
+});
+
+v2Routes.post("/canvas-sessions/:canvasSessionId/prompt-nodes", (req, res) => {
+  try {
+    res.status(201).json(
+      upsertV2CanvasPromptNode(req.params.canvasSessionId, req.body ?? {})
+    );
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_canvas_prompt_node_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_canvas_prompt_node_update_failed",
+        message: getErrorMessage(error, "V2 画布 prompt 节点更新失败")
+      }
+    });
+  }
+});
+
+v2Routes.post("/canvas-sessions/:canvasSessionId/image-candidates", async (req, res) => {
+  try {
+    res.status(201).json(
+      await generateV2CanvasImageCandidates(req.params.canvasSessionId, req.body ?? {})
+    );
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_canvas_image_candidate_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_canvas_image_candidate_generation_failed",
+        message: getErrorMessage(error, "V2 画布图片候选生成失败")
+      }
+    });
+  }
+});
+
+v2Routes.post("/canvas-sessions/:canvasSessionId/gap-video", async (req, res) => {
+  try {
+    res.json(await generateV2CanvasGapVideo(req.params.canvasSessionId, req.body ?? {}));
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_canvas_gap_video_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_canvas_gap_video_generation_failed",
+        message: getErrorMessage(error, "V2 画布空缺视频生成失败")
       }
     });
   }

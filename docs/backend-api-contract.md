@@ -1003,6 +1003,57 @@ Request:
 }
 ```
 
+### `POST /api/v2/canvas-sessions/:canvasSessionId/prompt-nodes`
+
+Creates or updates one editable prompt node for a single missing material node.
+This does not generate media.
+
+Request:
+
+```json
+{
+  "slot_id": "slot_03",
+  "prompt_type": "video",
+  "prompt": "用户编辑后的图生视频 prompt"
+}
+```
+
+`prompt_type` can be `video` or `image`. The backend connects the prompt node to the matching `missing_material` node with `edge_type = "prompt_to_gap"`.
+
+### `POST /api/v2/canvas-sessions/:canvasSessionId/image-candidates`
+
+Generates image candidates from the connected image prompt node, or from `prompt` in the request.
+The result is saved as `image_candidate` nodes. These nodes are not automatically selected; the frontend should connect the chosen one to the missing material node with `edge_type = "image_to_gap"`.
+
+Request:
+
+```json
+{
+  "slot_id": "slot_03",
+  "count": 4,
+  "use_image_provider": true,
+  "allow_fallback": true
+}
+```
+
+### `POST /api/v2/canvas-sessions/:canvasSessionId/gap-video`
+
+Generates video for one missing material node only. It does not scan or complete other gaps.
+The backend reads the connected video prompt node. If an image candidate is connected to the same missing material node, it uses that image. Otherwise it extracts a reference frame from the existing material assigned to that gap.
+
+Request:
+
+```json
+{
+  "slot_id": "slot_03",
+  "image_candidate_node_id": "slot_03_image_candidate_02",
+  "use_video_provider": true,
+  "allow_fallback": true
+}
+```
+
+Response includes the updated `canvas_session`, a `generated_video` node, and the raw `generation_result`.
+
 ### `POST /api/v2/material-candidate-pools/from-script-session`
 
 Builds only the material candidate pool from a script session, without recomputing canvas coverage.
