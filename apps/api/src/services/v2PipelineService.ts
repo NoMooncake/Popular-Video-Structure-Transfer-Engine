@@ -3450,22 +3450,30 @@ export const reviewAndTrimV2GeneratedVideo = async (
   };
 
   let rawAnalysis: JsonObject;
-  try {
-    rawAnalysis = await requestMultimodalJson(
-      "review_generated_video_for_trim",
-      v2SystemPrompt,
-      analysisPayload
-    );
-  } catch (error) {
-    if (!allowFallback) {
-      throw error;
-    }
-
+  if (payload.use_multimodal_provider === false) {
     rawAnalysis = makeFallbackGeneratedVideoTrimAnalysis(
       targetDurationSeconds,
       videoDurationSeconds,
-      sanitizeFallbackReason(error)
+      "multimodal provider disabled by request"
     );
+  } else {
+    try {
+      rawAnalysis = await requestMultimodalJson(
+        "review_generated_video_for_trim",
+        v2SystemPrompt,
+        analysisPayload
+      );
+    } catch (error) {
+      if (!allowFallback) {
+        throw error;
+      }
+
+      rawAnalysis = makeFallbackGeneratedVideoTrimAnalysis(
+        targetDurationSeconds,
+        videoDurationSeconds,
+        sanitizeFallbackReason(error)
+      );
+    }
   }
 
   const trimRecommendation = normalizeTrimRecommendation(

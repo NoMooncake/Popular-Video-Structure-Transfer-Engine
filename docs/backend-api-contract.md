@@ -1054,6 +1054,26 @@ Request:
 
 Response includes the updated `canvas_session`, a `generated_video` node, and the raw `generation_result`.
 
+### `POST /api/v2/canvas-sessions/:canvasSessionId/generated-videos/review-trim`
+
+Reviews and trims one generated video node, then writes the usable trimmed video URI back to that node.
+If the generation task has not returned a video URI yet, the node is marked `trim_status = "pending_video_uri"` instead of failing the whole canvas.
+
+Request:
+
+```json
+{
+  "generated_video_node_id": "slot_03_generated_video_uuid",
+  "video_uri": "/local/or/http/generated-video.mp4",
+  "target_duration_seconds": 1.2,
+  "trim_video": true,
+  "use_multimodal_provider": true,
+  "allow_fallback": true
+}
+```
+
+Response includes the updated `canvas_session`, the updated `generated_video_node`, `trim_result`, and `usable_video_uri`.
+
 ### `POST /api/v2/material-candidate-pools/from-script-session`
 
 Builds only the material candidate pool from a script session, without recomputing canvas coverage.

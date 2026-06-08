@@ -11,6 +11,7 @@ import {
   generateV2CanvasGapVideo,
   generateV2CanvasImageCandidates,
   getV2CanvasSession,
+  reviewAndTrimV2CanvasGeneratedVideo,
   updateV2CanvasSession,
   upsertV2CanvasPromptNode
 } from "../services/v2CanvasSessionService.js";
@@ -452,6 +453,37 @@ v2Routes.post("/canvas-sessions/:canvasSessionId/gap-video", async (req, res) =>
     });
   }
 });
+
+v2Routes.post(
+  "/canvas-sessions/:canvasSessionId/generated-videos/review-trim",
+  async (req, res) => {
+    try {
+      res.json(
+        await reviewAndTrimV2CanvasGeneratedVideo(
+          req.params.canvasSessionId,
+          req.body ?? {}
+        )
+      );
+    } catch (error) {
+      if (error instanceof V2PipelineInputError) {
+        res.status(error.statusCode).json({
+          error: {
+            code: "invalid_v2_canvas_generated_video_review_input",
+            message: error.message
+          }
+        });
+        return;
+      }
+
+      res.status(getStatusCode(error)).json({
+        error: {
+          code: "v2_canvas_generated_video_review_failed",
+          message: getErrorMessage(error, "V2 画布生成视频复核裁剪失败")
+        }
+      });
+    }
+  }
+);
 
 v2Routes.post("/material-candidate-pools/from-script-session", async (req, res) => {
   try {

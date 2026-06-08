@@ -145,6 +145,7 @@ export type V2GeneratedVideoTrimReviewRequest = {
   slot_description?: string;
   trim_video?: boolean;
   allow_fallback?: boolean;
+  use_multimodal_provider?: boolean;
 };
 
 export type V2FinalAssemblySlot = {

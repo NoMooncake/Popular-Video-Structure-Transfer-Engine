@@ -1905,6 +1905,30 @@ test(
     assert.equal(gapVideoBody.generated_video_node.node_type, "generated_video");
     assert.equal(gapVideoBody.generation_result.status, "mock_ready");
 
+    const reviewTrimResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/generated-videos/review-trim`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          generated_video_node_id: gapVideoBody.generated_video_node.node_id,
+          video_uri: path.join(storageConfig.uploadDir, `${firstFileId}-sample.mp4`),
+          target_duration_seconds: 0.5,
+          use_multimodal_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const reviewTrimBody = (await reviewTrimResponse.json()) as {
+      generated_video_node: Record<string, unknown>;
+      usable_video_uri: string;
+    };
+    assert.equal(reviewTrimResponse.status, 200);
+    assert.match(reviewTrimBody.usable_video_uri, /^\/api\/v2\/generation\/trimmed-videos\//);
+    assert.equal(asRecord(reviewTrimBody.generated_video_node.data).trim_status, "trimmed");
+
     const addMaterialResponse = await fetch(
       `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01/materials`,
       {

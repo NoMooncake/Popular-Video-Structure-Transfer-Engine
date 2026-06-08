@@ -7,6 +7,7 @@ import { findUploadedVideoById } from "./uploadService.js";
 import {
   generateV2ImageCandidates,
   generateV2ImageToVideo,
+  reviewAndTrimV2GeneratedVideo,
   V2PipelineInputError
 } from "./v2PipelineService.js";
 import type { JsonObject } from "../v2/types.js";
@@ -554,6 +555,133 @@ export const generateV2CanvasGapVideo = async (
     generated_video_node: generatedVideoNode,
     edge,
     generation_result: generationResult
+  };
+};
+
+const getGeneratedVideoUri = (value: JsonObject): string | undefined => {
+  const directUri =
+    normalizeOptionalString(value.video_uri) ||
+    normalizeOptionalString(value.video_url) ||
+    normalizeOptionalString(value.url) ||
+    normalizeOptionalString(value.output_video_url);
+  if (directUri) {
+    return directUri;
+  }
+
+  const data = asJsonObject(value.data);
+  const nestedDirectUri =
+    normalizeOptionalString(data.video_uri) ||
+    normalizeOptionalString(data.video_url) ||
+    normalizeOptionalString(data.url) ||
+    normalizeOptionalString(data.output_video_url);
+  if (nestedDirectUri) {
+    return nestedDirectUri;
+  }
+
+  const generationResult = asJsonObject(value.generation_result);
+  return (
+    normalizeOptionalString(generationResult.video_uri) ||
+    normalizeOptionalString(generationResult.video_url) ||
+    normalizeOptionalString(generationResult.url) ||
+    normalizeOptionalString(generationResult.output_video_url)
+  );
+};
+
+const getGeneratedVideoNode = (
+  session: V2CanvasSession,
+  payload: JsonObject
+): V2CanvasNode => {
+  const generatedVideoNodeId = normalizeOptionalString(payload.generated_video_node_id);
+  const slotId = normalizeOptionalString(payload.slot_id);
+
+  return findNode(
+    session,
+    (node) =>
+      node.node_type === "generated_video" &&
+      (generatedVideoNodeId
+        ? node.node_id === generatedVideoNodeId
+        : !slotId || node.slot_id === slotId),
+    "generated video node not found"
+  );
+};
+
+const getMissingNodeForGeneratedVideo = (
+  session: V2CanvasSession,
+  generatedVideoNode: V2CanvasNode
+): V2CanvasNode | undefined => {
+  const gapEdge = session.edges.find(
+    (edge) =>
+      edge.source_node_id === generatedVideoNode.node_id &&
+      edge.edge_type === "generated_video_to_gap"
+  );
+  if (!gapEdge) {
+    return undefined;
+  }
+
+  return session.nodes.find(
+    (node) => node.node_id === gapEdge.target_node_id && node.node_type === "missing_material"
+  );
+};
+
+export const reviewAndTrimV2CanvasGeneratedVideo = async (
+  canvasSessionId: string,
+  payload: JsonObject
+): Promise<JsonObject> => {
+  const session = getV2CanvasSession(canvasSessionId);
+  const generatedVideoNode = getGeneratedVideoNode(session, payload);
+  const missingNode = getMissingNodeForGeneratedVideo(session, generatedVideoNode);
+  const videoUri =
+    normalizeOptionalString(payload.video_uri) || getGeneratedVideoUri(generatedVideoNode.data);
+
+  if (!videoUri) {
+    generatedVideoNode.data = {
+      ...generatedVideoNode.data,
+      trim_status: "pending_video_uri",
+      trim_status_reason: "generated video task has not returned a video URI yet",
+      updated_at: new Date().toISOString()
+    };
+    session.updated_at = new Date().toISOString();
+    saveCanvasSession(session);
+
+    return {
+      canvas_session: session,
+      generated_video_node: generatedVideoNode,
+      trim_status: "pending_video_uri"
+    };
+  }
+
+  const trimResult = await reviewAndTrimV2GeneratedVideo({
+    video_uri: videoUri,
+    slot_id: generatedVideoNode.slot_id,
+    target_duration_seconds: getNumber(
+      payload.target_duration_seconds,
+      getNumber(missingNode?.data.missing_duration, 5)
+    ),
+    generation_prompt: normalizeOptionalString(generatedVideoNode.data.video_prompt),
+    slot_description: normalizeOptionalString(missingNode?.data.slot_type),
+    trim_video: payload.trim_video !== false,
+    allow_fallback: payload.allow_fallback !== false,
+    use_multimodal_provider: payload.use_multimodal_provider !== false
+  });
+  const trimmedVideoPath = normalizeOptionalString(trimResult.trimmed_video_path);
+  const trimmedVideoUri = trimmedVideoPath
+    ? `/api/v2/generation/trimmed-videos/${encodeURIComponent(path.basename(trimmedVideoPath))}`
+    : undefined;
+  generatedVideoNode.data = {
+    ...generatedVideoNode.data,
+    trim_status: "trimmed",
+    trim_result: trimResult,
+    usable_video_uri: trimmedVideoUri || videoUri,
+    updated_at: new Date().toISOString()
+  };
+  session.updated_at = new Date().toISOString();
+  saveCanvasSession(session);
+
+  return {
+    canvas_session: session,
+    generated_video_node: generatedVideoNode,
+    trim_result: trimResult,
+    usable_video_uri: trimmedVideoUri || videoUri
   };
 };
 
