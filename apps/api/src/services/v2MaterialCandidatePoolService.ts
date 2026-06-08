@@ -7,6 +7,7 @@ import { findUploadedVideoById } from "./uploadService.js";
 import { V2PipelineInputError } from "./v2PipelineService.js";
 import type { V2ScriptSession } from "./v2ScriptCanvasService.js";
 import { parseVideoMetadata, type VideoMetadata } from "./videoParserService.js";
+import { requestMultimodalJson } from "../v2/providers/apiJsonClient.js";
 import type { JsonObject } from "../v2/types.js";
 
 const candidatePoolRootDir = path.join(storageConfig.outputDir, "v2-material-candidate-pools");
@@ -42,6 +43,36 @@ const normalizeBoolean = (value: unknown, fallback: boolean): boolean => {
   return fallback;
 };
 
+const asJsonObject = (value: unknown): JsonObject =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as JsonObject)
+    : {};
+
+const normalizeStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeOptionalString(item))
+      .filter((item): item is string => Boolean(item));
+  }
+
+  const singleValue = normalizeOptionalString(value);
+  return singleValue ? [singleValue] : [];
+};
+
+const normalizeNumber = (
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number
+): number => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return fallback;
+  }
+
+  return Number(Math.max(minimum, Math.min(maximum, numericValue)).toFixed(3));
+};
+
 const sanitizeId = (value: string): string => {
   const normalizedValue = value.replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 120);
   if (!normalizedValue) {
@@ -66,6 +97,34 @@ const getCandidatePoolPath = (candidatePoolId: string): string =>
 
 const publicCandidateFrameUri = (candidatePoolId: string, filename: string): string =>
   `/api/v2/material-candidate-pools/${encodeURIComponent(candidatePoolId)}/frames/${encodeURIComponent(filename)}`;
+
+const getCandidateFramePathFromUri = (
+  candidatePoolId: string,
+  frameUri: unknown
+): string | undefined => {
+  const normalizedFrameUri = normalizeOptionalString(frameUri);
+  if (!normalizedFrameUri) {
+    return undefined;
+  }
+
+  const encodedFilename = normalizedFrameUri.split("/").at(-1);
+  if (!encodedFilename) {
+    return undefined;
+  }
+
+  const filename = path.basename(decodeURIComponent(encodedFilename));
+  if (filename !== decodeURIComponent(encodedFilename) || !filename.endsWith(".jpg")) {
+    return undefined;
+  }
+
+  const framePath = path.join(
+    candidatePoolFrameRootDir,
+    sanitizeId(candidatePoolId),
+    filename
+  );
+
+  return fs.existsSync(framePath) ? framePath : undefined;
+};
 
 const getHighFrequencyTimestamps = (durationSeconds: number): number[] => {
   const timestampSet = new Set<number>();
@@ -329,6 +388,228 @@ const buildMaterialSegments = async (
   };
 };
 
+const getFallbackSegmentRefinement = (segment: JsonObject, reason?: string): JsonObject => {
+  const assignedSlotType = normalizeOptionalString(segment.assigned_slot_type) || "material";
+  const assignedSlotId = normalizeOptionalString(segment.assigned_slot_id) || assignedSlotType;
+  const label =
+    normalizeOptionalString(segment.label) ||
+    normalizeOptionalString(segment.source_material_id) ||
+    assignedSlotId;
+
+  return {
+    ...segment,
+    final_source_in_seconds: segment.source_in_seconds,
+    final_source_out_seconds: segment.source_out_seconds,
+    visual_tags: [assignedSlotType],
+    usable_slot_types: [assignedSlotType],
+    quality_score: 0.6,
+    content_summary: `${label} 可作为 ${assignedSlotType} 的候选素材，等待多模态模型进一步确认。`,
+    action_summary: "待多模态模型确认动作细节。",
+    product_presence: "unknown",
+    scene_type: "unknown",
+    refinement_suggestion: {
+      action: "keep",
+      reason: reason || "multimodal provider unavailable"
+    },
+    refinement_source: "deterministic_fallback",
+    refinement_status: "fallback_pending_multimodal"
+  };
+};
+
+const normalizeProviderSegmentRefinements = (
+  providerResponse: JsonObject
+): Map<string, JsonObject> => {
+  const rawSegments = Array.isArray(providerResponse.material_segments)
+    ? providerResponse.material_segments
+    : Array.isArray(providerResponse.segments)
+      ? providerResponse.segments
+      : [];
+
+  const refinements = new Map<string, JsonObject>();
+  for (const rawSegment of rawSegments) {
+    const segment = asJsonObject(rawSegment);
+    const segmentId = normalizeOptionalString(segment.segment_id);
+    if (segmentId) {
+      refinements.set(segmentId, segment);
+    }
+  }
+
+  return refinements;
+};
+
+const applyProviderSegmentRefinement = (
+  segment: JsonObject,
+  providerSegment: JsonObject
+): JsonObject => {
+  const sourceInSeconds = Number(segment.source_in_seconds);
+  const sourceOutSeconds = Number(segment.source_out_seconds);
+  const boundedSourceInSeconds = Number.isFinite(sourceInSeconds) ? sourceInSeconds : 0;
+  const boundedSourceOutSeconds =
+    Number.isFinite(sourceOutSeconds) && sourceOutSeconds > boundedSourceInSeconds
+      ? sourceOutSeconds
+      : boundedSourceInSeconds + Number(segment.usable_duration_seconds || 0);
+  const refinedInSeconds = normalizeNumber(
+    providerSegment.refined_source_in_seconds ?? providerSegment.source_in_seconds,
+    boundedSourceInSeconds,
+    boundedSourceInSeconds,
+    boundedSourceOutSeconds
+  );
+  const refinedOutSeconds = normalizeNumber(
+    providerSegment.refined_source_out_seconds ?? providerSegment.source_out_seconds,
+    boundedSourceOutSeconds,
+    refinedInSeconds,
+    boundedSourceOutSeconds
+  );
+  const hasUsableDuration = refinedOutSeconds - refinedInSeconds >= 0.2;
+  const visualTags = normalizeStringArray(
+    providerSegment.visual_tags ?? providerSegment.tags
+  );
+  const usableSlotTypes = normalizeStringArray(
+    providerSegment.usable_slot_types ?? providerSegment.slot_types
+  );
+
+  return {
+    ...segment,
+    final_source_in_seconds: hasUsableDuration
+      ? refinedInSeconds
+      : segment.source_in_seconds,
+    final_source_out_seconds: hasUsableDuration
+      ? refinedOutSeconds
+      : segment.source_out_seconds,
+    visual_tags: visualTags,
+    usable_slot_types:
+      usableSlotTypes.length > 0
+        ? usableSlotTypes
+        : [normalizeOptionalString(segment.assigned_slot_type) || "material"],
+    quality_score: normalizeNumber(providerSegment.quality_score, 0.7, 0, 1),
+    content_summary:
+      normalizeOptionalString(providerSegment.content_summary) ||
+      normalizeOptionalString(providerSegment.summary) ||
+      "多模态模型已读取该候选片段。",
+    action_summary: normalizeOptionalString(providerSegment.action_summary),
+    product_presence: normalizeOptionalString(providerSegment.product_presence),
+    scene_type: normalizeOptionalString(providerSegment.scene_type),
+    refinement_suggestion: asJsonObject(
+      providerSegment.refinement_suggestion || providerSegment.edit_suggestion
+    ),
+    refinement_source: "multimodal_provider",
+    refinement_status: hasUsableDuration ? "refined" : "provider_invalid_time_repaired"
+  };
+};
+
+const buildRefinementProviderPayload = (
+  session: V2ScriptSession,
+  candidatePoolId: string,
+  materialSegments: JsonObject[]
+): JsonObject => {
+  const slotSummaries = session.slots.map((slot) => ({
+    slot_id: slot.slot_id,
+    slot_type: slot.slot_type,
+    slot_name: slot.slot_name,
+    display_order: slot.display_order,
+    required_duration: slot.required_duration,
+    shot_description: slot.shot_description
+  }));
+
+  return {
+    user_request: session.user_request,
+    slots: slotSummaries,
+    material_segments: materialSegments.map((segment) => ({
+      segment_id: segment.segment_id,
+      assigned_slot_id: segment.assigned_slot_id,
+      assigned_slot_type: segment.assigned_slot_type,
+      source_material_id: segment.source_material_id,
+      source_in_seconds: segment.source_in_seconds,
+      source_out_seconds: segment.source_out_seconds,
+      usable_duration_seconds: segment.usable_duration_seconds,
+      frame_times: segment.high_frequency_frame_timestamps_seconds,
+      frames: Array.isArray(segment.frames)
+        ? segment.frames.map((frame) => {
+            const frameRecord = asJsonObject(frame);
+            return {
+              frame_id: frameRecord.frame_id,
+              time_seconds: frameRecord.time_seconds,
+              image_uri: getCandidateFramePathFromUri(candidatePoolId, frameRecord.uri)
+            };
+          })
+        : []
+    }))
+  };
+};
+
+const refineMaterialSegments = async (
+  session: V2ScriptSession,
+  candidatePoolId: string,
+  materialSegments: JsonObject[],
+  useMultimodalProvider: boolean
+): Promise<{ material_segments: JsonObject[]; refinement: JsonObject }> => {
+  if (materialSegments.length === 0) {
+    return {
+      material_segments: [],
+      refinement: {
+        status: "skipped_empty_candidate_pool",
+        provider_used: false
+      }
+    };
+  }
+
+  if (!useMultimodalProvider) {
+    return {
+      material_segments: materialSegments.map((segment) =>
+        getFallbackSegmentRefinement(segment, "provider refinement disabled by request")
+      ),
+      refinement: {
+        status: "deterministic_fallback",
+        provider_used: false,
+        reason: "provider refinement disabled by request"
+      }
+    };
+  }
+
+  try {
+    const providerResponse = await requestMultimodalJson(
+      "v2_refine_material_candidate_pool",
+      [
+        "你是广告素材理解和候选片段精修专家。",
+        "你会收到脚本段落、候选素材片段和每段抽帧。请只输出合法 JSON object。",
+        "不要改写脚本结构，不要根据素材长短判断广告节奏；用户需求和脚本段落优先。",
+        "对每个 material_segments 项输出 segment_id、visual_tags、usable_slot_types、quality_score、content_summary、action_summary、product_presence、scene_type。",
+        "如需建议调整起止点，输出 refined_source_in_seconds/refined_source_out_seconds，必须落在原片段 source_in_seconds/source_out_seconds 之内。",
+        "如果片段不适合使用，quality_score 可以较低，但仍需保留该 segment_id。"
+      ].join("\n"),
+      buildRefinementProviderPayload(session, candidatePoolId, materialSegments)
+    );
+    const refinements = normalizeProviderSegmentRefinements(providerResponse);
+
+    return {
+      material_segments: materialSegments.map((segment) => {
+        const segmentId = normalizeOptionalString(segment.segment_id);
+        const refinement = segmentId ? refinements.get(segmentId) : undefined;
+        return refinement
+          ? applyProviderSegmentRefinement(segment, refinement)
+          : getFallbackSegmentRefinement(segment, "provider omitted this segment");
+      }),
+      refinement: {
+        status: "refined",
+        provider_used: true,
+        provider_response_segment_count: refinements.size
+      }
+    };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "multimodal provider failed";
+    return {
+      material_segments: materialSegments.map((segment) =>
+        getFallbackSegmentRefinement(segment, reason)
+      ),
+      refinement: {
+        status: "deterministic_fallback",
+        provider_used: false,
+        reason
+      }
+    };
+  }
+};
+
 const writeCandidatePool = (candidatePool: JsonObject): JsonObject => {
   ensureCandidatePoolDir();
   fs.writeFileSync(
@@ -352,7 +633,23 @@ export const buildV2MaterialCandidatePool = async (
       `${session.session_id}_candidate_pool`
   );
   const extractFrames = normalizeBoolean(payload.extract_frames, true);
+  const refineSegments = normalizeBoolean(payload.refine_segments, true);
+  const useMultimodalProvider = normalizeBoolean(payload.use_multimodal_provider, true);
   const segmentResult = await buildMaterialSegments(session, candidatePoolId, extractFrames);
+  const refinementResult = refineSegments
+    ? await refineMaterialSegments(
+        session,
+        candidatePoolId,
+        segmentResult.material_segments,
+        useMultimodalProvider
+      )
+    : {
+        material_segments: segmentResult.material_segments,
+        refinement: {
+          status: "skipped_by_request",
+          provider_used: false
+        }
+      };
   const candidatePool = {
     candidate_pool_id: candidatePoolId,
     session_id: session.session_id,
@@ -363,14 +660,16 @@ export const buildV2MaterialCandidatePool = async (
       source_material_understanding:
         "uniform_high_frequency_candidate_frames_then_multimodal_refinement",
       segment_max_duration_seconds: maxCandidateSegmentDurationSeconds,
-      frame_interval_seconds: highFrequencyFrameIntervalSeconds
+      frame_interval_seconds: highFrequencyFrameIntervalSeconds,
+      refinement_enabled: refineSegments
     },
     material_assets: segmentResult.material_assets,
-    material_segments: segmentResult.material_segments,
+    material_segments: refinementResult.material_segments,
+    refinement: refinementResult.refinement,
     summary: {
       material_count: segmentResult.material_assets.length,
-      segment_count: segmentResult.material_segments.length,
-      frame_count: segmentResult.material_segments.reduce(
+      segment_count: refinementResult.material_segments.length,
+      frame_count: refinementResult.material_segments.reduce(
         (total, segment) => total + (Array.isArray(segment.frames) ? segment.frames.length : 0),
         0
       ),

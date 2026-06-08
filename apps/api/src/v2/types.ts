@@ -108,6 +108,7 @@ export type V2ImageCandidateRequest = {
   reference_images?: string[];
   reference_video_uris?: string[];
   reference_videos?: V2VideoRef[];
+  use_image_provider?: boolean;
 };
 
 export type V2ImageToVideoRequest = {
@@ -132,6 +133,7 @@ export type V2ImageToVideoRequest = {
   camera_fixed?: boolean;
   watermark?: boolean;
   allow_fallback?: boolean;
+  use_video_provider?: boolean;
 };
 
 export type V2GeneratedVideoTrimReviewRequest = {
@@ -143,6 +145,7 @@ export type V2GeneratedVideoTrimReviewRequest = {
   slot_description?: string;
   trim_video?: boolean;
   allow_fallback?: boolean;
+  use_multimodal_provider?: boolean;
 };
 
 export type V2FinalAssemblySlot = {

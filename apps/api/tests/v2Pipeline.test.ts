@@ -1584,7 +1584,7 @@ test(
 
     assert.equal(createResponse.status, 201);
     assert.equal(created.slots[0]?.required_duration, 2);
-    assert.equal(created.slots[0]?.shot_description, "冰红茶瓶身和冰块特写。");
+    assert.equal(created.slots[0]?.shot_description, "产品亮相¹\n冰红茶瓶身和冰块特写。");
 
     const lockedResponse = await fetch(
       `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`,
@@ -1639,26 +1639,112 @@ test(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session_id: created.session_id
+        session_id: created.session_id,
+        use_multimodal_provider: false
       })
     });
     const shortRevalidate = (await shortRevalidateResponse.json()) as {
       material_candidate_pool: {
         candidate_pool_id: string;
         summary: Record<string, unknown>;
+        refinement: Record<string, unknown>;
       };
       material_segments: Array<Record<string, unknown>>;
       material_coverage: {
         slot_coverage: Array<Record<string, unknown>>;
+        matching_source: string;
       };
       canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session_id: string;
+      canvas_session: {
+        canvas_session_id: string;
+        nodes: Array<Record<string, unknown>>;
+        edges: Array<Record<string, unknown>>;
+      };
+      cover_plan: Record<string, unknown>;
     };
 
     assert.equal(shortRevalidateResponse.status, 200);
     assert.equal(shortRevalidate.material_candidate_pool.summary.segment_count, 1);
     assert.equal(shortRevalidate.material_candidate_pool.summary.frame_count, 3);
+    assert.match(
+      String(shortRevalidate.material_candidate_pool.refinement.status),
+      /^deterministic_fallback$/
+    );
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(shortRevalidate.cover_plan.cover_title, "冰红茶，一眼心动");
+    assert.ok(Array.isArray(shortRevalidate.cover_plan.cover_copy_options));
+    assert.match(
+      String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
+      /冰红茶/
+    );
+    assert.match(
+      String(asRecord(shortRevalidate.cover_plan.recommended_source).frame_uri),
+      /^\/api\/v2\/material-candidate-pools\//
+    );
+    assert.match(shortRevalidate.canvas_session_id, /^v2_canvas_/);
+    assert.equal(
+      shortRevalidate.canvas_session.canvas_session_id,
+      shortRevalidate.canvas_session_id
+    );
+    assert.ok(
+      shortRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "script_slot"
+      )
+    );
+    assert.ok(
+      shortRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "material_segment"
+      )
+    );
+    const savedCanvasResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${shortRevalidate.canvas_session_id}`
+    );
+    const savedCanvas = (await savedCanvasResponse.json()) as {
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+    assert.equal(savedCanvasResponse.status, 200);
+    assert.equal(savedCanvas.nodes.length, shortRevalidate.canvas_session.nodes.length);
+    const updatedCanvasResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${shortRevalidate.canvas_session_id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          nodes: [
+            {
+              ...savedCanvas.nodes[0],
+              position: {
+                x: 120,
+                y: 80
+              }
+            },
+            ...savedCanvas.nodes.slice(1)
+          ],
+          edges: savedCanvas.edges
+        })
+      }
+    );
+    const updatedCanvas = (await updatedCanvasResponse.json()) as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(updatedCanvasResponse.status, 200);
+    assert.deepEqual(asRecord(updatedCanvas.nodes[0]?.position), { x: 120, y: 80 });
+    assert.equal(shortRevalidate.material_coverage.matching_source, "refined_material_segments");
     assert.equal(shortRevalidate.material_coverage.slot_coverage[0]?.required_duration, 0.5);
+    assert.equal(
+      shortRevalidate.material_coverage.slot_coverage[0]?.matching_source,
+      "refined_material_segments"
+    );
+    assert.equal(
+      asRecordArray(shortRevalidate.material_coverage.slot_coverage[0]?.assigned_segments)
+        .length,
+      1
+    );
+    assert.equal(asRecordArray(shortRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
     assert.equal(shortRevalidate.material_segments.length, 1);
     assert.equal(
       shortRevalidate.material_segments[0]?.segmentation_source,
@@ -1672,6 +1758,10 @@ test(
       shortRevalidate.material_segments[0]?.high_frequency_frame_timestamps_seconds,
       [0, 0.5, 1]
     );
+    assert.ok(Array.isArray(shortRevalidate.material_segments[0]?.visual_tags));
+    assert.ok(Array.isArray(shortRevalidate.material_segments[0]?.usable_slot_types));
+    assert.equal(typeof shortRevalidate.material_segments[0]?.quality_score, "number");
+    assert.equal(typeof shortRevalidate.material_segments[0]?.content_summary, "string");
     const frames = asRecordArray(shortRevalidate.material_segments[0]?.frames);
     assert.equal(frames.length, 3);
     assert.match(String(frames[0]?.uri), /^\/api\/v2\/material-candidate-pools\//);
@@ -1699,15 +1789,20 @@ test(
         },
         body: JSON.stringify({
           session_id: created.session_id,
-          candidate_pool_id: `${created.session_id}_direct_test_pool`
+          candidate_pool_id: `${created.session_id}_direct_test_pool`,
+          use_multimodal_provider: false
         })
       }
     );
     const directPool = (await directPoolResponse.json()) as {
       summary: Record<string, unknown>;
+      refinement: Record<string, unknown>;
+      material_segments: Array<Record<string, unknown>>;
     };
     assert.equal(directPoolResponse.status, 201);
     assert.equal(directPool.summary.segment_count, 1);
+    assert.equal(directPool.refinement.status, "deterministic_fallback");
+    assert.equal(directPool.material_segments[0]?.refinement_source, "deterministic_fallback");
 
     await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
       method: "PATCH",
@@ -1725,11 +1820,13 @@ test(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session_id: created.session_id
+        session_id: created.session_id,
+        use_multimodal_provider: false
       })
     });
     const longRevalidate = (await longRevalidateResponse.json()) as {
       canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session_id: string;
     };
     assert.equal(longRevalidateResponse.status, 200);
     assert.equal(
@@ -1737,6 +1834,111 @@ test(
       "structure_complete_duration_short"
     );
     assert.equal(longRevalidate.canvas_nodes[0]?.missing_duration, 1);
+    assert.equal(asRecordArray(longRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
+
+    const promptNodeResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          prompt_type: "video",
+          prompt: "冰红茶冰块飞溅，镜头快速推近瓶身，补足清凉冲击。"
+        })
+      }
+    );
+    const promptNodeBody = (await promptNodeResponse.json()) as {
+      prompt_node: Record<string, unknown>;
+    };
+    assert.equal(promptNodeResponse.status, 201);
+    assert.equal(promptNodeBody.prompt_node.node_type, "video_prompt");
+
+    const imagePromptNodeResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          prompt_type: "image",
+          prompt: "冰红茶瓶身、冰块和水珠的竖屏广告关键画面。"
+        })
+      }
+    );
+    assert.equal(imagePromptNodeResponse.status, 201);
+
+    const imageCandidatesResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/image-candidates`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          count: 4,
+          use_image_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const imageCandidatesBody = (await imageCandidatesResponse.json()) as {
+      image_candidate_nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(imageCandidatesResponse.status, 201);
+    assert.equal(imageCandidatesBody.image_candidate_nodes.length, 4);
+    assert.equal(imageCandidatesBody.image_candidate_nodes[0]?.node_type, "image_candidate");
+
+    const gapVideoResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/gap-video`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          use_video_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const gapVideoBody = (await gapVideoResponse.json()) as {
+      generated_video_node: Record<string, unknown>;
+      generation_result: Record<string, unknown>;
+    };
+    assert.equal(gapVideoResponse.status, 200);
+    assert.equal(gapVideoBody.generated_video_node.node_type, "generated_video");
+    assert.equal(gapVideoBody.generation_result.status, "mock_ready");
+
+    const reviewTrimResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/generated-videos/review-trim`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          generated_video_node_id: gapVideoBody.generated_video_node.node_id,
+          video_uri: path.join(storageConfig.uploadDir, `${firstFileId}-sample.mp4`),
+          target_duration_seconds: 0.5,
+          use_multimodal_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const reviewTrimBody = (await reviewTrimResponse.json()) as {
+      generated_video_node: Record<string, unknown>;
+      usable_video_uri: string;
+    };
+    assert.equal(reviewTrimResponse.status, 200);
+    assert.match(reviewTrimBody.usable_video_uri, /^\/api\/v2\/generation\/trimmed-videos\//);
+    assert.equal(asRecord(reviewTrimBody.generated_video_node.data).trim_status, "trimmed");
 
     const addMaterialResponse = await fetch(
       `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01/materials`,
@@ -1758,16 +1960,41 @@ test(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session_id: created.session_id
+        session_id: created.session_id,
+        use_multimodal_provider: false
       })
     });
     const completedRevalidate = (await completedRevalidateResponse.json()) as {
       canvas_nodes: Array<Record<string, unknown>>;
       material_segments: Array<Record<string, unknown>>;
+      canvas_session_id: string;
     };
     assert.equal(completedRevalidateResponse.status, 200);
     assert.equal(completedRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(completedRevalidate.material_segments.length, 2);
+    assert.equal(asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).length, 2);
+
+    const canvasAssemblyResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${completedRevalidate.canvas_session_id}/final-video`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          target_duration_seconds: 2,
+          resolution: "360x640",
+          fps: 12
+        })
+      }
+    );
+    const canvasAssembly = (await canvasAssemblyResponse.json()) as {
+      assembly_slots: Array<Record<string, unknown>>;
+      final_assembly: Record<string, unknown>;
+    };
+    assert.equal(canvasAssemblyResponse.status, 200);
+    assert.equal(canvasAssembly.assembly_slots.length, 2);
+    assert.match(String(canvasAssembly.final_assembly.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
   }
 );
 
@@ -1864,7 +2091,8 @@ test(
       },
       body: JSON.stringify({
         session_id: created.session_id,
-        extract_frames: false
+        extract_frames: false,
+        use_multimodal_provider: false
       })
     });
     const revalidated = (await revalidateResponse.json()) as {

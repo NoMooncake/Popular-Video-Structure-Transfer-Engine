@@ -749,7 +749,7 @@ Response:
       "slot_id": "slot_01",
       "display_order": 1,
       "required_duration": 2,
-      "shot_description": "冰红茶瓶身和冰块特写。",
+      "shot_description": "产品亮相¹\n冰红茶瓶身和冰块特写。",
       "voiceover_text": "冰爽一下。",
       "material_folder_id": "slot_01_materials",
       "editable_fields": ["required_duration", "voiceover_text", "material_ref"],
@@ -759,6 +759,8 @@ Response:
   ]
 }
 ```
+
+`shot_description` is formatted for the script page. Its first line is the shot category plus sample-source superscript, for example `Hook¹` or `产品亮相²`; the following lines contain the actual shot description.
 
 ### `PATCH /api/v2/script-sessions/:sessionId/slots/:slotId`
 
@@ -822,6 +824,9 @@ Request:
   "session_id": "v2_script_uuid",
   "candidate_pool_id": "optional-stable-pool-id",
   "extract_frames": true,
+  "refine_segments": true,
+  "use_multimodal_provider": true,
+  "persist_canvas_session": true,
   "accepted_duration_short_slots": ["slot_02"]
 }
 ```
@@ -832,9 +837,65 @@ Response:
 {
   "session_id": "v2_script_uuid",
   "target_duration_seconds": 7,
+  "canvas_session_id": "v2_canvas_uuid",
+  "canvas_session": {
+    "canvas_session_id": "v2_canvas_uuid",
+    "script_session_id": "v2_script_uuid",
+    "nodes": [
+      {
+        "node_id": "slot_01_slot",
+        "node_type": "script_slot",
+        "slot_id": "slot_01",
+        "display_order": 1,
+        "data": {}
+      },
+      {
+        "node_id": "slot_01_missing_material",
+        "node_type": "missing_material",
+        "slot_id": "slot_01",
+        "display_order": 1,
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "slot_01_slot_has_gap",
+        "source_node_id": "slot_01_slot",
+        "target_node_id": "slot_01_missing_material",
+        "edge_type": "has_gap"
+      }
+    ]
+  },
   "script_slots": [],
+  "cover_plan": {
+    "cover_title": "冰红茶，一眼心动",
+    "cover_subtitle": "冰红茶宣传片",
+    "cover_copy_options": [
+      "冰红茶，一眼心动",
+      "冰红茶，现在就想试",
+      "冰红茶高光时刻"
+    ],
+    "visual_direction": "冰红茶瓶身和冰块特写。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。",
+    "recommended_source": {
+      "type": "material_segment",
+      "slot_id": "slot_01",
+      "slot_type": "product_hero",
+      "segment_id": "slot_01_seg_01_01",
+      "frame_id": "slot_01_seg_01_01_frame_002",
+      "frame_uri": "/api/v2/material-candidate-pools/v2_script_uuid_canvas_candidate_pool/frames/slot_01_seg_01_01_frame_002_0_5s.jpg"
+    },
+    "cover_image_prompt": {
+      "prompt_ref": "cover_image_prompt",
+      "prompt_source": "deterministic_canvas_cover_plan",
+      "prompt": "竖屏商业广告封面，主题是冰红茶..."
+    }
+  },
   "material_candidate_pool": {
     "candidate_pool_id": "v2_script_uuid_canvas_candidate_pool",
+    "refinement": {
+      "status": "refined",
+      "provider_used": true
+    },
     "summary": {
       "material_count": 1,
       "segment_count": 1,
@@ -852,7 +913,16 @@ Response:
       "display_order": 1,
       "source_in_seconds": 0,
       "source_out_seconds": 1.5,
+      "final_source_in_seconds": 0,
+      "final_source_out_seconds": 1.5,
       "usable_duration_seconds": 1.5,
+      "visual_tags": ["product_hero", "ice", "drink"],
+      "usable_slot_types": ["product_hero"],
+      "quality_score": 0.82,
+      "content_summary": "冰红茶瓶身和冰块特写，适合作为产品亮相素材。",
+      "action_summary": "冰块和饮品形成清凉冲击。",
+      "product_presence": "visible",
+      "scene_type": "product_closeup",
       "high_frequency_frame_timestamps_seconds": [0, 0.5, 1, 1.5],
       "frames": [
         {
@@ -865,13 +935,35 @@ Response:
       ],
       "segmentation_source": "uniform_high_frequency_candidate_split",
       "pacing_inference_source": "user_request_first_material_pacing_not_authoritative",
+      "refinement_source": "multimodal_provider",
+      "refinement_status": "refined",
       "status": "candidate_pool_ready",
       "next_step": "multimodal_refinement"
     }
   ],
   "material_coverage": {
-    "slot_coverage": []
+    "matching_source": "refined_material_segments",
+    "slot_coverage": [
+      {
+        "slot_id": "slot_01",
+        "frontend_coverage_status": "fully_matched",
+        "required_duration": 2,
+        "matched_material_duration": 2,
+        "missing_duration": 0,
+        "assigned_segments": [
+          {
+            "segment_id": "slot_01_seg_01_01",
+            "source_material_id": "slot_01_material_01",
+            "source_in_seconds": 0,
+            "source_out_seconds": 1.5,
+            "matched_material_duration": 1.5
+          }
+        ],
+        "matching_source": "refined_material_segments"
+      }
+    ]
   },
+  "legacy_material_coverage": {},
   "canvas_nodes": [
     {
       "slot_id": "slot_01",
@@ -880,7 +972,9 @@ Response:
       "coverage_status": "fully_matched",
       "required_duration": 2,
       "matched_material_duration": 2,
-      "missing_duration": 0
+      "missing_duration": 0,
+      "assigned_segments": [],
+      "matching_source": "refined_material_segments"
     }
   ]
 }
@@ -892,8 +986,139 @@ Canvas status values remain:
 - `structure_complete_duration_short`
 - `material_insufficient`
 
-The current `material_segments` implementation is deterministic duration-based segmentation. It is a foundation for the later multimodal refinement step, not yet a model-refined shot boundary result.
+`material_segments` starts from deterministic high-frequency candidate splitting, then attempts multimodal refinement when `refine_segments` is true.
+If the multimodal provider is unavailable, the API returns deterministic fallback refinement fields with `refinement.status = "deterministic_fallback"`.
+Canvas coverage uses the current script order, current slot durations, and the refined `material_segments` from each slot folder.
+`legacy_material_coverage` is included for debugging the older material-level calculation and should not drive the canvas UI.
+When `persist_canvas_session` is not false, this endpoint also persists an initial canvas session with script slot, material segment, missing material, and sequence nodes/edges.
+`cover_plan` is generated during this same canvas-entry analysis so the frontend can display final cover copy, visual direction, a recommended material frame, and a reusable cover image prompt without running another analysis step.
 The segment pacing policy is user-request-first; `material_segments` should not be read as a final fast/slow ad classification.
+
+### `GET /api/v2/canvas-sessions/:canvasSessionId`
+
+Reads a persisted canvas session.
+
+### `PATCH /api/v2/canvas-sessions/:canvasSessionId`
+
+Persists frontend canvas edits such as node positions and user-adjusted edges. This endpoint does not trigger generation.
+
+Request:
+
+```json
+{
+  "nodes": [
+    {
+      "node_id": "slot_01_slot",
+      "node_type": "script_slot",
+      "slot_id": "slot_01",
+      "position": {
+        "x": 120,
+        "y": 80
+      },
+      "data": {}
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "slot_01_to_slot_02",
+      "source_node_id": "slot_01_slot",
+      "target_node_id": "slot_02_slot",
+      "edge_type": "sequence"
+    }
+  ]
+}
+```
+
+### `POST /api/v2/canvas-sessions/:canvasSessionId/prompt-nodes`
+
+Creates or updates one editable prompt node for a single missing material node.
+This does not generate media.
+
+Request:
+
+```json
+{
+  "slot_id": "slot_03",
+  "prompt_type": "video",
+  "prompt": "用户编辑后的图生视频 prompt"
+}
+```
+
+`prompt_type` can be `video` or `image`. The backend connects the prompt node to the matching `missing_material` node with `edge_type = "prompt_to_gap"`.
+
+### `POST /api/v2/canvas-sessions/:canvasSessionId/image-candidates`
+
+Generates image candidates from the connected image prompt node, or from `prompt` in the request.
+The result is saved as `image_candidate` nodes. These nodes are not automatically selected; the frontend should connect the chosen one to the missing material node with `edge_type = "image_to_gap"`.
+
+Request:
+
+```json
+{
+  "slot_id": "slot_03",
+  "count": 4,
+  "use_image_provider": true,
+  "allow_fallback": true
+}
+```
+
+### `POST /api/v2/canvas-sessions/:canvasSessionId/gap-video`
+
+Generates video for one missing material node only. It does not scan or complete other gaps.
+The backend reads the connected video prompt node. If an image candidate is connected to the same missing material node, it uses that image. Otherwise it extracts a reference frame from the existing material assigned to that gap.
+
+Request:
+
+```json
+{
+  "slot_id": "slot_03",
+  "image_candidate_node_id": "slot_03_image_candidate_02",
+  "use_video_provider": true,
+  "allow_fallback": true
+}
+```
+
+Response includes the updated `canvas_session`, a `generated_video` node, and the raw `generation_result`.
+
+### `POST /api/v2/canvas-sessions/:canvasSessionId/generated-videos/review-trim`
+
+Reviews and trims one generated video node, then writes the usable trimmed video URI back to that node.
+If the generation task has not returned a video URI yet, the node is marked `trim_status = "pending_video_uri"` instead of failing the whole canvas.
+
+Request:
+
+```json
+{
+  "generated_video_node_id": "slot_03_generated_video_uuid",
+  "video_uri": "/local/or/http/generated-video.mp4",
+  "target_duration_seconds": 1.2,
+  "trim_video": true,
+  "use_multimodal_provider": true,
+  "allow_fallback": true
+}
+```
+
+Response includes the updated `canvas_session`, the updated `generated_video_node`, `trim_result`, and `usable_video_uri`.
+
+### `POST /api/v2/canvas-sessions/:canvasSessionId/final-video`
+
+Builds final assembly slots from the current canvas session and calls ffmpeg final assembly.
+The backend follows `sequence` edges between `script_slot` nodes, then uses connected `material_segment` nodes and trimmed `generated_video` nodes for each slot.
+Original clip audio is muted by the ffmpeg assembly layer. Final BGM remains `pending_provider_integration`.
+
+Request:
+
+```json
+{
+  "target_duration_seconds": 8,
+  "resolution": "720x1280",
+  "fps": 24,
+  "background_color": "black",
+  "allow_loop_short_clips": true
+}
+```
+
+Response includes `assembly_slots` and the existing `final_assembly` payload with `final_video_url`.
 
 ### `POST /api/v2/material-candidate-pools/from-script-session`
 
@@ -905,7 +1130,9 @@ Request:
 {
   "session_id": "v2_script_uuid",
   "candidate_pool_id": "optional-stable-pool-id",
-  "extract_frames": true
+  "extract_frames": true,
+  "refine_segments": true,
+  "use_multimodal_provider": true
 }
 ```
 
@@ -920,10 +1147,15 @@ Response:
     "source_material_pacing_is_authoritative": false,
     "source_material_understanding": "uniform_high_frequency_candidate_frames_then_multimodal_refinement",
     "segment_max_duration_seconds": 1.5,
-    "frame_interval_seconds": 0.5
+    "frame_interval_seconds": 0.5,
+    "refinement_enabled": true
   },
   "material_assets": [],
   "material_segments": [],
+  "refinement": {
+    "status": "refined",
+    "provider_used": true
+  },
   "summary": {
     "material_count": 0,
     "segment_count": 0,
