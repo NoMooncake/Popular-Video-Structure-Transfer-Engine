@@ -4,14 +4,14 @@ import path from "node:path";
 
 import { storageConfig } from "../config/storage.js";
 import { findUploadedVideoById, type UploadedVideoFile } from "./uploadService.js";
+import { buildV2MaterialCandidatePool } from "./v2MaterialCandidatePoolService.js";
 import {
   buildV2DeterministicMaterialCoverage,
   V2PipelineInputError
 } from "./v2PipelineService.js";
-import { parseVideoMetadata } from "./videoParserService.js";
 import type { JsonObject, V2PipelineRequest, V2VideoRef } from "../v2/types.js";
 
-type V2ScriptSlotMaterial = {
+export type V2ScriptSlotMaterial = {
   material_id: string;
   file_id?: string;
   uri: string;
@@ -20,7 +20,7 @@ type V2ScriptSlotMaterial = {
   assigned_at: string;
 };
 
-type V2ScriptSlot = {
+export type V2ScriptSlot = {
   slot_id: string;
   slot_type: string;
   slot_name?: string;
@@ -35,7 +35,7 @@ type V2ScriptSlot = {
   materials: V2ScriptSlotMaterial[];
 };
 
-type V2ScriptSession = {
+export type V2ScriptSession = {
   session_id: string;
   created_at: string;
   updated_at: string;
@@ -569,80 +569,18 @@ const makeCoverageMaterialAnalysis = (session: V2ScriptSession): JsonObject => (
   )
 });
 
-const buildSegmentForMaterial = async (
-  slot: V2ScriptSlot,
-  material: V2ScriptSlotMaterial,
-  materialIndex: number
-): Promise<JsonObject[]> => {
-  if (!material.file_id) {
-    return [];
-  }
-
-  const localPath = findUploadedVideoById(material.file_id);
-  if (!localPath) {
-    return [];
-  }
-
-  const metadata = await parseVideoMetadata(localPath);
-  const duration = metadata.duration_seconds;
-  const maxSegmentDuration = 1.5;
-  const segmentCount = Math.max(1, Math.ceil(duration / maxSegmentDuration));
-  const segmentDuration = duration / segmentCount;
-  const highFrequencyFrameInterval = 0.5;
-  const highFrequencyFrameTimestamps = Array.from(
-    {
-      length: Math.max(1, Math.ceil(duration / highFrequencyFrameInterval) + 1)
-    },
-    (_value, frameIndex) =>
-      Number(
-        Math.min(duration, frameIndex * highFrequencyFrameInterval).toFixed(3)
-      )
-  );
-
-  return Array.from({ length: segmentCount }, (_value, segmentIndex) => {
-    const sourceIn = Number((segmentIndex * segmentDuration).toFixed(3));
-    const sourceOut = Number(
-      Math.min(duration, sourceIn + segmentDuration).toFixed(3)
-    );
-    const mid = Number(((sourceIn + sourceOut) / 2).toFixed(3));
-    const candidateFrameTimestamps = highFrequencyFrameTimestamps.filter(
-      (timestamp) => timestamp >= sourceIn && timestamp <= sourceOut
-    );
-
-    return {
-      segment_id: `${slot.slot_id}_seg_${String(materialIndex + 1).padStart(2, "0")}_${String(segmentIndex + 1).padStart(2, "0")}`,
-      source_material_id: material.material_id,
-      file_id: material.file_id,
-      uri: material.uri,
-      assigned_slot_id: slot.slot_id,
-      assigned_slot_type: slot.slot_type,
-      source_in_seconds: sourceIn,
-      source_out_seconds: sourceOut,
-      usable_duration_seconds: Number((sourceOut - sourceIn).toFixed(3)),
-      representative_frame_timestamps_seconds: [sourceIn, mid, sourceOut],
-      high_frequency_frame_timestamps_seconds:
-        candidateFrameTimestamps.length > 0
-          ? candidateFrameTimestamps
-          : [sourceIn, mid, sourceOut],
-      segmentation_source: "uniform_high_frequency_candidate_split",
-      pacing_inference_source: "user_request_first_material_pacing_not_authoritative",
-      status: "ready_for_multimodal_refinement"
-    };
-  });
-};
-
 export const buildV2ScriptMaterialSegments = async (
   session: V2ScriptSession
 ): Promise<JsonObject[]> => {
-  const nestedSegments = await Promise.all(
-    session.slots.flatMap((slot) =>
-      slot.materials.map((material, index) =>
-        buildSegmentForMaterial(slot, material, index)
-      )
-    )
-  );
+  const candidatePool = await buildV2MaterialCandidatePool({
+    script_session: session,
+    candidate_pool_id: `${session.session_id}_candidate_pool`,
+    extract_frames: true
+  });
 
-  return nestedSegments.flat();
+  return Array.isArray(candidatePool.material_segments)
+    ? candidatePool.material_segments.map((segment) => asJsonObject(segment))
+    : [];
 };
 
 export const revalidateV2CanvasFromScript = async (
@@ -659,7 +597,16 @@ export const revalidateV2CanvasFromScript = async (
   const acceptedDurationShortSlots = normalizeStringArray(
     payload.accepted_duration_short_slots
   );
-  const materialSegments = await buildV2ScriptMaterialSegments(session);
+  const materialCandidatePool = await buildV2MaterialCandidatePool({
+    script_session: session,
+    candidate_pool_id:
+      normalizeOptionalString(payload.candidate_pool_id) ||
+      `${session.session_id}_canvas_candidate_pool`,
+    extract_frames: payload.extract_frames !== false
+  });
+  const materialSegments = Array.isArray(materialCandidatePool.material_segments)
+    ? materialCandidatePool.material_segments
+    : [];
   const materialCoverage = await buildV2DeterministicMaterialCoverage(
     makeCoverageRequest(session, acceptedDurationShortSlots),
     makeCoverageArchitecture(session),
@@ -676,6 +623,7 @@ export const revalidateV2CanvasFromScript = async (
         "uniform_high_frequency_candidate_frames_then_multimodal_refinement"
     },
     script_slots: session.slots,
+    material_candidate_pool: materialCandidatePool,
     material_segments: materialSegments,
     material_coverage: materialCoverage,
     canvas_nodes: materialCoverage.slot_coverage.map((coverage) => ({

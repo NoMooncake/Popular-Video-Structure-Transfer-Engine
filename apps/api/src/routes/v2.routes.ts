@@ -3,6 +3,11 @@ import multer from "multer";
 
 import { config } from "../config/index.js";
 import {
+  buildV2MaterialCandidatePool,
+  findV2MaterialCandidateFrameFile,
+  readV2MaterialCandidatePool
+} from "../services/v2MaterialCandidatePoolService.js";
+import {
   addUploadedFilesToV2ScriptSlot,
   addV2ScriptSlotMaterials,
   createV2ScriptSession,
@@ -296,6 +301,81 @@ v2Routes.post("/canvas/revalidate", async (req, res) => {
       }
     });
   }
+});
+
+v2Routes.post("/material-candidate-pools/from-script-session", async (req, res) => {
+  try {
+    const session =
+      req.body?.script_session && typeof req.body.script_session === "object"
+        ? req.body.script_session
+        : getV2ScriptSession(
+            String(req.body?.session_id || req.body?.script_session_id || "")
+          );
+    const result = await buildV2MaterialCandidatePool({
+      ...req.body,
+      script_session: session
+    });
+    res.status(201).json(result);
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_material_candidate_pool_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_material_candidate_pool_failed",
+        message: getErrorMessage(error, "V2 素材候选池生成失败")
+      }
+    });
+  }
+});
+
+v2Routes.get("/material-candidate-pools/:candidatePoolId", (req, res) => {
+  try {
+    res.json(readV2MaterialCandidatePool(req.params.candidatePoolId));
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_material_candidate_pool_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_material_candidate_pool_read_failed",
+        message: getErrorMessage(error, "V2 素材候选池读取失败")
+      }
+    });
+  }
+});
+
+v2Routes.get("/material-candidate-pools/:candidatePoolId/frames/:filename", (req, res) => {
+  const framePath = findV2MaterialCandidateFrameFile(
+    req.params.candidatePoolId,
+    req.params.filename
+  );
+
+  if (!framePath) {
+    res.status(404).json({
+      error: {
+        code: "material_candidate_frame_not_found",
+        message: "Material candidate frame not found"
+      }
+    });
+    return;
+  }
+
+  res.sendFile(framePath);
 });
 
 v2Routes.post("/assembly/final-video", async (req, res) => {
