@@ -44,6 +44,22 @@ export const env = {
   llmEndpointId: readOptionalString("LLM_ENDPOINT_ID"),
   llmApiKey: readOptionalString("LLM_API_KEY"),
   seedanceApiKey: readOptionalString("SEEDANCE_API_KEY"),
+  arkApiKey: readOptionalString("ARK_API_KEY"),
   aigcImageApiKey: readOptionalString("AIGC_IMAGE_API_KEY"),
-  aigcVideoApiKey: readOptionalString("AIGC_VIDEO_API_KEY")
+  aigcVideoApiKey: readOptionalString("AIGC_VIDEO_API_KEY"),
+  v2MultimodalProvider: readString("V2_MULTIMODAL_PROVIDER", "xiaomi"),
+  v2MultimodalApiBaseUrl: readOptionalString("V2_MULTIMODAL_API_BASE_URL"),
+  v2MultimodalApiPath: readString("V2_MULTIMODAL_API_PATH", "/chat/completions"),
+  v2MultimodalModel: readOptionalString("V2_MULTIMODAL_MODEL"),
+  v2MultimodalApiKey: readOptionalString("V2_MULTIMODAL_API_KEY"),
+  v2ImageProvider: readString("V2_IMAGE_PROVIDER", "seedance"),
+  v2ImageApiBaseUrl: readOptionalString("V2_IMAGE_API_BASE_URL"),
+  v2ImageApiPath: readString("V2_IMAGE_API_PATH", "/images/generations"),
+  v2ImageModel: readOptionalString("V2_IMAGE_MODEL"),
+  v2ImageApiKey: readOptionalString("V2_IMAGE_API_KEY") || readOptionalString("ARK_API_KEY"),
+  v2VideoProvider: readString("V2_VIDEO_PROVIDER", "seedance"),
+  v2VideoApiBaseUrl: readString("V2_VIDEO_API_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
+  v2VideoApiPath: readString("V2_VIDEO_API_PATH", "/contents/generations/tasks"),
+  v2VideoModel: readOptionalString("V2_VIDEO_MODEL"),
+  v2VideoApiKey: readOptionalString("V2_VIDEO_API_KEY") || readOptionalString("ARK_API_KEY")
 } as const;

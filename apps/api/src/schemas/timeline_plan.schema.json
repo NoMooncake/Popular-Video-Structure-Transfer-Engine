@@ -38,6 +38,9 @@
     "gap_report_ref": {
       "type": "string"
     },
+    "slot_mapping_ref": {
+      "type": "string"
+    },
     "target_video": {
       "type": "object",
       "additionalProperties": false,
@@ -212,6 +215,19 @@
           ]
         },
         "gap_ref": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "fill_strategy_ref": {
           "oneOf": [
             {
               "type": "string"

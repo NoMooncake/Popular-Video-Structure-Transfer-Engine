@@ -1,0 +1,664 @@
+# Backend API Contract for Frontend
+
+This document describes the local P0 backend API used by the frontend demo.
+
+- Base URL: `http://localhost:<PORT>`
+- Default API prefix: `/api`
+- Local default port: `4000`, or `PORT` from `.env`
+- Request/response format: JSON unless the endpoint is file upload or media serving
+- Sensitive config such as API keys and provider endpoints must stay in `.env` and must not be sent to the frontend.
+
+## Status and Model Modes
+
+Most P0 endpoints are rule-based and deterministic. Structure extraction can call a real LLM when backend env config is present, but supports mock/fallback mode.
+
+| Area | Endpoint | Mode |
+| --- | --- | --- |
+| Health | `GET /api/health` | local |
+| Upload and media | `/api/upload/*`, `/api/frames/*` | local filesystem |
+| Sample analysis | `POST /api/sample/analyze` | real video parser + mock transcript |
+| Structure extraction | `POST /api/structure/extract` | real LLM when configured, or mock/fallback |
+| Material input/analysis | `/api/material/*` | rule-based |
+| Migration/gap/timeline | `/api/structure/migrate`, `/api/gap/*`, `/api/generate/timeline` | rule-based |
+| Full pipeline | `POST /api/pipeline/p0` | orchestration; can use mock/fallback |
+
+## Shared Error Format
+
+Standard errors use:
+
+```json
+{
+  "error": {
+    "code": "error_code",
+    "message": "Human-readable error"
+  }
+}
+```
+
+Pipeline stage errors include the failed stage:
+
+```json
+{
+  "error": {
+    "code": "pipeline_stage_failed",
+    "stage": "material_input",
+    "message": "selling_points must include at least one item"
+  }
+}
+```
+
+Known pipeline stages:
+
+- `sample_analyze`
+- `structure_extract`
+- `material_input`
+- `material_analyze`
+- `structure_migrate`
+- `gap_detect`
+- `gap_fill_strategy`
+- `timeline_generate`
+
+## Core Data References
+
+Frontend should treat these IDs as references, not local paths.
+
+| Field | Meaning |
+| --- | --- |
+| `file_id` | uploaded video id returned by upload API |
+| `path` | frontend-safe media URL for uploaded video |
+| `uri` | frontend-safe media URL for frame/image references |
+| `material_ref` | id of a material in `material_analysis.materials` |
+| `gap_ref` | id of a gap in `gap_report.gaps` |
+| `fill_strategy_ref` | fill strategy type used for a timeline item |
+
+Do not rely on local filesystem paths from the backend.
+
+## Endpoints
+
+### `GET /api/health`
+
+Checks that the API service is running.
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "service": "popular-video-structure-transfer-api",
+  "environment": "development",
+  "uptime_seconds": 10,
+  "timestamp": "2026-06-03T00:00:00.000Z"
+}
+```
+
+### `POST /api/upload/video`
+
+Uploads one video file.
+
+Content type: `multipart/form-data`
+
+Form fields:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `file` | file | yes | `.mp4`, `.mov`, `.webm` |
+
+Response `201`:
+
+```json
+{
+  "files": [
+    {
+      "file_id": "uuid",
+      "original_filename": "sample.mp4",
+      "mime_type": "video/mp4",
+      "size": 123456,
+      "path": "/api/upload/files/uuid"
+    }
+  ]
+}
+```
+
+Frontend usually reads the first item: `files[0].file_id`.
+
+Common errors:
+
+- `400 missing_file`
+- `400 invalid_upload`
+
+### `POST /api/upload/videos`
+
+Uploads multiple video files.
+
+Content type: `multipart/form-data`
+
+Form fields:
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `files` | file[] | yes | max 10 files |
+
+Response shape is the same as `POST /api/upload/video`.
+
+### `GET /api/upload/files/:fileId`
+
+Serves an uploaded video by `file_id`.
+
+Response: video file stream.
+
+Common errors:
+
+- `404 file_not_found`
+
+### `GET /api/frames/:fileId/:filename`
+
+Serves extracted frame images.
+
+Example:
+
+```text
+/api/frames/<fileId>/cover.jpg
+/api/frames/<fileId>/keyframe_001.jpg
+```
+
+Response: image file stream.
+
+Common errors:
+
+- `404 frame_not_found`
+
+### `POST /api/sample/analyze`
+
+Analyzes an uploaded sample video. This runs video metadata parsing and frame extraction. Transcript is currently a placeholder.
+
+Request:
+
+```json
+{
+  "file_id": "uploaded-video-file-id"
+}
+```
+
+Response: `sample_analysis`
+
+Important fields:
+
+```json
+{
+  "id": "sample_analysis_<fileId>",
+  "source": {
+    "type": "uploaded_video",
+    "file_id": "<fileId>",
+    "path": "/api/upload/files/<fileId>"
+  },
+  "video": {
+    "duration_seconds": 20,
+    "width": 720,
+    "height": 1280,
+    "aspect_ratio": "9:16",
+    "cover_frame": {
+      "uri": "/api/frames/<fileId>/cover.jpg",
+      "mime_type": "image/jpeg",
+      "width": 720,
+      "height": 1280
+    }
+  },
+  "keyframes": [],
+  "transcript": {
+    "status": "not_started",
+    "summary": "..."
+  }
+}
+```
+
+Common errors:
+
+- `400 missing_file_id`
+- `404 file_not_found`
+- `422 sample_analyze_failed`
+- `503 sample_analyze_failed`
+
+### `POST /api/structure/extract`
+
+Extracts a structure blueprint from `sample_analysis`.
+
+Request:
+
+```json
+{
+  "sample_analysis": {},
+  "vertical": "seeding_de_seeding",
+  "category": "general_recommendation_review",
+  "use_mock": true
+}
+```
+
+Notes:
+
+- Set `use_mock: true` for deterministic frontend/demo runs.
+- Without `use_mock`, backend may call the configured LLM if available.
+- If LLM config is missing, backend falls back to rule-based output.
+
+Response: `structure_blueprint`
+
+Important fields:
+
+```json
+{
+  "id": "structure_blueprint_<sampleAnalysisId>",
+  "source": {
+    "type": "mock",
+    "model": "fallback_rule_engine"
+  },
+  "slots": [
+    {
+      "slot_id": "slot_01",
+      "slot_type": "risk_or_pain_hook",
+      "time_range": {
+        "start_seconds": 0,
+        "end_seconds": 3
+      },
+      "content_goal": "...",
+      "required_materials": [],
+      "packaging_features": []
+    }
+  ]
+}
+```
+
+Common errors:
+
+- `400 invalid_structure_extract_input`
+- `502 structure_extract_failed`
+
+### `POST /api/material/input`
+
+Normalizes user creative input and material references.
+
+Request:
+
+```json
+{
+  "target_topic": "猫粮避坑种草",
+  "target_audience": "新手养猫用户",
+  "product_name": "低敏猫粮",
+  "creative_brief": "做一个 20 秒种草/避坑短视频",
+  "selling_points": ["单一肉源", "低油配方", "小包装试吃"],
+  "uploaded_file_ids": ["file-id-1", "file-id-2"],
+  "text_assets": [
+    {
+      "type": "copy",
+      "content": "适合肠胃敏感、容易挑食的猫咪。"
+    }
+  ]
+}
+```
+
+Response `201`: `material_input`
+
+Important fields:
+
+```json
+{
+  "id": "material_input_<uuid>",
+  "target": {
+    "target_topic": "猫粮避坑种草"
+  },
+  "selling_points": [],
+  "uploaded_files": [
+    {
+      "file_id": "file-id-1",
+      "path": "/api/upload/files/file-id-1",
+      "role": "user_material"
+    }
+  ],
+  "text_assets": []
+}
+```
+
+Common errors:
+
+- `400 invalid_material_input`
+
+### `POST /api/material/analyze`
+
+Analyzes `material_input` into structured material candidates for slot matching.
+
+Request option A:
+
+```json
+{
+  "material_input": {}
+}
+```
+
+Request option B: same body as `POST /api/material/input`.
+
+Response: `material_analysis`
+
+Important fields:
+
+```json
+{
+  "id": "material_analysis_<materialInputId>",
+  "materials": [
+    {
+      "material_id": "m_file_01",
+      "type": "video",
+      "uri": "/api/upload/files/file-id-1",
+      "candidate_slot_types": ["pain_desire", "product_reveal"]
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "seg_01",
+      "material_ref": "m_file_01",
+      "recommended_slot": "product_reveal",
+      "fit_score": 0.7
+    }
+  ],
+  "coverage_summary": {}
+}
+```
+
+Common errors:
+
+- `400 invalid_material_analysis_input`
+
+### `POST /api/structure/migrate`
+
+Maps sample structure slots to new content and user materials.
+
+Request:
+
+```json
+{
+  "structure_blueprint": {},
+  "material_analysis": {},
+  "target_topic": "猫粮避坑种草",
+  "selling_points": ["单一肉源", "低油配方"]
+}
+```
+
+Response: `slot_mapping`
+
+Important fields:
+
+```json
+{
+  "id": "slot_mapping_<structureId>_<materialAnalysisId>",
+  "mappings": [
+    {
+      "slot_id": "slot_01",
+      "slot_type": "risk_or_pain_hook",
+      "material_status": "partial",
+      "missing_material": true,
+      "matched_material_refs": ["m_text_selling_points"],
+      "suggested_copy": "猫粮避坑种草，先别急着照抄爆款结构。"
+    }
+  ],
+  "summary": {
+    "ready_for_gap_detection": true,
+    "ready_for_timeline": true
+  }
+}
+```
+
+Common errors:
+
+- `400 invalid_structure_migration_input`
+
+### `POST /api/gap/detect`
+
+Detects material gaps from slot mapping.
+
+Request:
+
+```json
+{
+  "slot_mapping": {},
+  "confidence_threshold": 0.72
+}
+```
+
+Response: `gap_report`
+
+Important fields:
+
+```json
+{
+  "id": "gap_report_<slotMappingId>",
+  "summary": {
+    "total_gaps": 2,
+    "overall_status": "partial"
+  },
+  "gaps": [
+    {
+      "gap_id": "gap_01",
+      "slot_id": "slot_01",
+      "missing": "缺少开头吸引镜头",
+      "impact": "...",
+      "strategy": "...",
+      "fill_options": []
+    }
+  ]
+}
+```
+
+Common errors:
+
+- `400 invalid_gap_detect_input`
+
+### `POST /api/gap/fill-strategy`
+
+Adds executable fill strategies to each gap.
+
+Request:
+
+```json
+{
+  "gap_report": {},
+  "target_topic": "猫粮避坑种草"
+}
+```
+
+Response: `gap_report` with enriched `gaps[].fill_options`.
+
+Important strategy types:
+
+- `text_overlay_fill`
+- `packaging_card_fill`
+- `reuse_existing_material`
+- `aigc_prompt_candidate`
+- `structure_reorder`
+
+For P0, `aigc_prompt_candidate` only returns a prompt. It does not call image/video generation.
+
+Common errors:
+
+- `400 invalid_gap_fill_strategy_input`
+
+### `POST /api/generate/timeline`
+
+Generates a frontend-ready timeline plan.
+
+Request:
+
+```json
+{
+  "structure_blueprint": {},
+  "slot_mapping": {},
+  "gap_report": {},
+  "fill_strategies": {}
+}
+```
+
+Response: `timeline_plan`
+
+Important fields:
+
+```json
+{
+  "id": "timeline_plan_<slotMappingId>",
+  "target_video": {
+    "duration_seconds": 20,
+    "aspect_ratio": "9:16",
+    "platform_style": "short_video",
+    "title": "猫粮避坑种草"
+  },
+  "script": {
+    "title": "...",
+    "summary": "...",
+    "full_text": "..."
+  },
+  "timeline": [
+    {
+      "item_id": "tl_01",
+      "slot_id": "slot_01",
+      "time_range": {
+        "label": "0-3s",
+        "start_seconds": 0,
+        "end_seconds": 3
+      },
+      "slot_type": "risk_or_pain_hook",
+      "visual_source": "reuse",
+      "subtitle": "...",
+      "voiceover": "...",
+      "packaging": [],
+      "material_ref": ["m_text_selling_points"],
+      "gap_ref": "gap_01",
+      "fill_strategy_ref": "text_overlay_fill"
+    }
+  ]
+}
+```
+
+Visual source values:
+
+- `user_material`
+- `reuse`
+- `aigc`
+- `text_card`
+- `generated_graphic`
+- `stock`
+- `missing`
+
+Common errors:
+
+- `400 invalid_timeline_generate_input`
+
+### `POST /api/pipeline/p0`
+
+Runs the complete P0 backend flow in one request. This is the preferred frontend/demo endpoint.
+
+Request option A: use uploaded sample video.
+
+```json
+{
+  "sample_file_id": "uploaded-sample-file-id",
+  "material_input": {
+    "target_topic": "猫粮避坑种草",
+    "selling_points": ["单一肉源", "低油配方"],
+    "uploaded_file_ids": ["user-material-file-id"],
+    "text_assets": [
+      {
+        "type": "copy",
+        "content": "适合肠胃敏感、容易挑食的猫咪。"
+      }
+    ]
+  },
+  "use_mock": true,
+  "confidence_threshold": 0.99
+}
+```
+
+Request option B: use existing sample analysis fixture/object.
+
+```json
+{
+  "sample_analysis": {},
+  "material_input": {},
+  "use_mock": true
+}
+```
+
+Response:
+
+```json
+{
+  "id": "p0_pipeline_<sampleAnalysisId>_<materialInputId>",
+  "summary": {
+    "status": "completed",
+    "stage_count": 8,
+    "total_slots": 5,
+    "total_gaps": 5,
+    "timeline_duration_seconds": 30,
+    "timeline_item_count": 5
+  },
+  "stages": {
+    "sample_analysis": {},
+    "structure_blueprint": {},
+    "material_input": {},
+    "material_analysis": {},
+    "slot_mapping": {},
+    "gap_report": {},
+    "fill_strategies": {},
+    "timeline_plan": {}
+  }
+}
+```
+
+Frontend can render:
+
+- sample video metadata and frames from `stages.sample_analysis`
+- structure cards from `stages.structure_blueprint.slots`
+- material coverage from `stages.material_analysis`
+- card connection/status from `stages.slot_mapping.mappings`
+- missing/partial status from `stages.gap_report.gaps`
+- fill suggestions from `stages.fill_strategies.gaps[].fill_options`
+- final timeline from `stages.timeline_plan.timeline`
+
+Common errors:
+
+- `400 pipeline_stage_failed`
+- `404 pipeline_stage_failed`
+- `422 pipeline_stage_failed`
+- `503 pipeline_stage_failed`
+
+Pipeline errors always include `error.stage`.
+
+### Dev-Only Endpoints
+
+These are only mounted when `NODE_ENV !== "production"`.
+
+#### `GET /api/dev/schemas`
+
+Returns available schema names.
+
+#### `POST /api/dev/validate/:schemaName`
+
+Validates a JSON payload against one schema.
+
+Example:
+
+```text
+POST /api/dev/validate/timeline_plan
+```
+
+#### `GET /api/dev/video-metadata/:fileId`
+
+Parses video metadata for an uploaded file.
+
+#### `GET /api/dev/video-frames/:fileId`
+
+Extracts cover and keyframes for an uploaded file.
+
+## Frontend Integration Notes
+
+1. Prefer `POST /api/pipeline/p0` for the first integration.
+2. Use `use_mock: true` for deterministic demo and UI development.
+3. Use `timeline_plan.timeline[]` as the source of timeline rows/cards.
+4. Use `slot_mapping.mappings[]` as the source of structure migration card status.
+5. Use `gap_report.gaps[]` and `fill_strategies.gaps[]` to show missing material and recommended actions.
+6. Render media only through API URLs like `/api/upload/files/:fileId` and `/api/frames/:fileId/:filename`.
+7. Never show backend local filesystem paths.
