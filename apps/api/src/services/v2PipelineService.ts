@@ -5,6 +5,7 @@ import path from "node:path";
 import { findUploadedVideoById } from "./uploadService.js";
 import { runFFmpeg, runFFprobe } from "../utils/ffmpeg.js";
 import {
+  V2ProviderExecutionError,
   requestImageCandidates,
   requestImageToVideo,
   requestMultimodalJson,
@@ -507,6 +508,20 @@ const getReferenceTimelineRecords = (analysis: JsonObject): JsonObject[] => {
   return [];
 };
 
+export const getV2ProviderErrorMessage = (output: JsonObject): string | undefined => {
+  const directError = normalizeOptionalString(output.error);
+  if (directError) {
+    return directError;
+  }
+
+  const errorObject = asJsonObject(output.error);
+  return (
+    normalizeOptionalString(errorObject.message) ||
+    normalizeOptionalString(errorObject.error) ||
+    normalizeOptionalString(output.error_message)
+  );
+};
+
 const splitReferenceContentLogic = (analysis: JsonObject): string[] => {
   const root = getReferenceAnalysisRoot(analysis);
   const payload = asJsonObject(analysis.payload);
@@ -526,6 +541,13 @@ const splitReferenceContentLogic = (analysis: JsonObject): string[] => {
     .filter(Boolean)
     .slice(0, 8);
 };
+
+export const hasV2ReferenceAnalysisContent = (analysis: JsonObject): boolean =>
+  getReferenceTimelineRecords(analysis).length > 0 ||
+  splitReferenceContentLogic(analysis).length > 0;
+
+export const isErroredV2ReferenceAnalysisOutput = (analysis: JsonObject): boolean =>
+  Boolean(getV2ProviderErrorMessage(analysis)) && !hasV2ReferenceAnalysisContent(analysis);
 
 const getReferenceMigrationText = (
   analysis: JsonObject,
@@ -2868,6 +2890,126 @@ const callMultimodalWithFallback = async (
   }
 };
 
+const buildReferenceFramePromptPayload = (
+  frames: V2ReferenceFrame[],
+  includeImageAttachment: boolean
+): JsonObject[] =>
+  frames.map((frame) => ({
+    frame_id: frame.frame_id,
+    time_seconds: frame.time_seconds,
+    public_uri: frame.public_uri,
+    mime_type: frame.mime_type,
+    uri: includeImageAttachment ? frame.data_url : undefined
+  }));
+
+const buildReferenceVideoAnalysisPayload = (
+  normalized: Required<V2PipelineRequest>,
+  videoRef: V2VideoRef,
+  index: number,
+  targetDuration: number,
+  adaptiveSlotPlanningRules: JsonObject,
+  frames: V2ReferenceFrame[],
+  mode: "video_and_frames" | "frames_only"
+): JsonObject => ({
+  vertical: "commercial_advertising",
+  target_duration_seconds: targetDuration,
+  reference_index: index + 1,
+  video:
+    mode === "video_and_frames"
+      ? videoRef
+      : {
+          file_id: videoRef.file_id,
+          label: videoRef.label,
+          role: videoRef.role
+        },
+  reference_frames: buildReferenceFramePromptPayload(frames, mode === "frames_only"),
+  reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
+  adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
+  material_understanding_policy: materialUnderstandingPolicy,
+  instruction:
+    mode === "frames_only"
+      ? "阅读并理解这个商业广告样例视频。原视频附件不可用或被 provider 拒绝，请只根据已附加的 reference_frames 关键帧进行样例解析。reference_frames 按时间从该样例抽出，必须用中文返回 reference_video_analysis.slot_timeline 数组，数组按时间顺序覆盖主要分镜段落；每段必须包含 slot_type、start_time、end_time、duration_seconds、visual_description、copywriting、analysis、migration_possibility，并尽量包含 frame_refs，引用最接近该段的 reference_frames.frame_id。请同时返回 visual_style、persuasion_logic、content_logic 和 reusable_patterns。只把样例节奏当作可迁移参考，不要把用户后续成片节奏绑定为同一种快切/慢节奏类型。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
+      : "阅读并理解这个商业广告样例视频。请同时参考 reference_frames，它们是按时间从该样例抽出的关键帧。必须用中文返回 reference_video_analysis.slot_timeline 数组，数组按时间顺序覆盖主要分镜段落；每段必须包含 slot_type、start_time、end_time、duration_seconds、visual_description、copywriting、analysis、migration_possibility，并尽量包含 frame_refs，引用最接近该段的 reference_frames.frame_id。请同时返回 visual_style、persuasion_logic、content_logic 和 reusable_patterns。只把样例节奏当作可迁移参考，不要把用户后续成片节奏绑定为同一种快切/慢节奏类型。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
+});
+
+const callReferenceAnalysisWithFrameRetry = async (
+  normalized: Required<V2PipelineRequest>,
+  videoRef: V2VideoRef,
+  index: number,
+  targetDuration: number,
+  adaptiveSlotPlanningRules: JsonObject,
+  frames: V2ReferenceFrame[],
+  allowFallback: boolean
+): Promise<{ output: JsonObject; fallbackReason?: string }> => {
+  const fallbackFactory = (reason?: string): JsonObject =>
+    makeFallbackReferenceAnalysis(videoRef, index + 1, targetDuration, reason);
+  const callFramesOnly = async (reason: string): Promise<JsonObject> => {
+    const output = await requestMultimodalJson(
+      "analyze_reference_video",
+      v2SystemPrompt,
+      buildReferenceVideoAnalysisPayload(
+        normalized,
+        videoRef,
+        index,
+        targetDuration,
+        adaptiveSlotPlanningRules,
+        frames,
+        "frames_only"
+      )
+    );
+    const retryError = getV2ProviderErrorMessage(output);
+
+    if (isErroredV2ReferenceAnalysisOutput(output)) {
+      throw new V2ProviderExecutionError(
+        `reference video analysis failed after frames-only retry: ${retryError || reason}`
+      );
+    }
+
+    return output;
+  };
+
+  try {
+    const output = await requestMultimodalJson(
+      "analyze_reference_video",
+      v2SystemPrompt,
+      buildReferenceVideoAnalysisPayload(
+        normalized,
+        videoRef,
+        index,
+        targetDuration,
+        adaptiveSlotPlanningRules,
+        frames,
+        "video_and_frames"
+      )
+    );
+
+    if (!isErroredV2ReferenceAnalysisOutput(output)) {
+      return { output };
+    }
+
+    const reason = getV2ProviderErrorMessage(output) || "provider returned error output";
+    return { output: await callFramesOnly(reason) };
+  } catch (error) {
+    const originalReason = sanitizeFallbackReason(error);
+
+    try {
+      return { output: await callFramesOnly(originalReason) };
+    } catch (retryError) {
+      const retryReason = sanitizeFallbackReason(retryError);
+
+      if (!allowFallback) {
+        throw retryError;
+      }
+
+      const fallbackReason = `${originalReason}; frames-only retry failed: ${retryReason}`;
+      return {
+        output: fallbackFactory(fallbackReason),
+        fallbackReason
+      };
+    }
+  }
+};
+
 const makeFallbackImageCandidateResponse = (
   promptPackage: JsonObject,
   count: number
@@ -2942,27 +3084,14 @@ const runV2ReferenceAnalysisStage = async (
 
   const referenceAnalysisResults = await Promise.all(
     normalized.reference_videos.map((videoRef, index) =>
-      callMultimodalWithFallback(
-        "analyze_reference_video",
-        {
-          vertical: "commercial_advertising",
-          target_duration_seconds: targetDuration,
-          reference_index: index + 1,
-          video: videoRef,
-          reference_frames: referenceFramesByVideo[index].map((frame) => ({
-            frame_id: frame.frame_id,
-            time_seconds: frame.time_seconds,
-            public_uri: frame.public_uri
-          })),
-          reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
-          adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
-          material_understanding_policy: materialUnderstandingPolicy,
-          instruction:
-            "阅读并理解这个商业广告样例视频。请同时参考 reference_frames，它们是按时间从该样例抽出的关键帧。必须用中文返回 reference_video_analysis.slot_timeline 数组，数组按时间顺序覆盖主要分镜段落；每段必须包含 slot_type、start_time、end_time、duration_seconds、visual_description、copywriting、analysis、migration_possibility，并尽量包含 frame_refs，引用最接近该段的 reference_frames.frame_id。请同时返回 visual_style、persuasion_logic、content_logic 和 reusable_patterns。只把样例节奏当作可迁移参考，不要把用户后续成片节奏绑定为同一种快切/慢节奏类型。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
-        },
+      callReferenceAnalysisWithFrameRetry(
+        normalized,
+        videoRef,
+        index,
+        targetDuration,
+        adaptiveSlotPlanningRules,
+        referenceFramesByVideo[index] || [],
         allowFallback,
-        (reason) =>
-          makeFallbackReferenceAnalysis(videoRef, index + 1, targetDuration, reason)
       )
     )
   );

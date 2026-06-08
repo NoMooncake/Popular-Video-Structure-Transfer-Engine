@@ -2,18 +2,21 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { after, before, test } from "node:test";
 
 import { app } from "../src/app.js";
+import { config } from "../src/config/index.js";
 import { storageConfig } from "../src/config/storage.js";
 import {
+  analyzeV2ReferenceVideos,
   assembleV2FinalVideo,
   attachProductionPromptsToMaterialCoverage,
   buildV2DeterministicMaterialCoverage,
   buildV2ReferenceAnalysisTables,
   getAdaptiveSlotPlanningRules,
+  isErroredV2ReferenceAnalysisOutput,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
 import { extractJsonObject } from "../src/v2/providers/apiJsonClient.js";
@@ -1553,6 +1556,157 @@ test("v2 reference analysis tables bind timeline rows to extracted frame URIs", 
   assert.equal(rows[0]?.migration_possibility, "高度可迁移。可迁移为新广告的冰爽产品开场。");
   assert.equal(rows[1]?.migration_possibility, "高度可迁移。可迁移为新商品的主体亮相。");
 });
+
+test(
+  "v2 reference analysis retries provider error output with attached frames",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    assert.equal(
+      isErroredV2ReferenceAnalysisOutput({
+        error: "The request was rejected because it was considered high risk"
+      }),
+      true
+    );
+
+    const providerCalls: Array<Record<string, unknown>> = [];
+    const mockProvider = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        providerCalls.push(JSON.parse(body) as Record<string, unknown>);
+        const content =
+          providerCalls.length === 1
+            ? {
+                error: "The request was rejected because it was considered high risk"
+              }
+            : {
+                reference_video_analysis: {
+                  slot_timeline: [
+                    {
+                      slot_type: "strong_hook",
+                      start_time: 0,
+                      end_time: 2,
+                      duration_seconds: 2,
+                      visual_description: "瓶盖打开，饮料气泡和冰爽质感形成开场冲击。",
+                      copywriting: "冰爽开场",
+                      analysis: "用强特写快速建立清爽记忆点。",
+                      migration_possibility: "高，可迁移为冰红茶开瓶特写和清爽气泡。"
+                    }
+                  ],
+                  content_logic: "开瓶强特写 -> 气泡质感"
+                }
+              };
+
+        response.writeHead(200, {
+          "Content-Type": "application/json"
+        });
+        response.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify(content)
+                }
+              }
+            ]
+          })
+        );
+      });
+    });
+    await new Promise<void>((resolve) => {
+      mockProvider.listen(0, "127.0.0.1", resolve);
+    });
+
+    const mutableConfig = config as unknown as {
+      providers: {
+        v2: {
+          multimodal: {
+            provider: string;
+            apiBaseUrl?: string;
+            apiPath: string;
+            model?: string;
+            apiKey?: string;
+            enabled: boolean;
+          };
+        };
+      };
+    };
+    const previousProvider = {
+      ...mutableConfig.providers.v2.multimodal
+    };
+
+    try {
+      const providerPort = getServerPort(mockProvider);
+      Object.assign(mutableConfig.providers.v2.multimodal, {
+        provider: "mock",
+        apiBaseUrl: `http://127.0.0.1:${providerPort}`,
+        apiPath: "/chat/completions",
+        model: "mock-model",
+        apiKey: "test-key",
+        enabled: true
+      });
+
+      const fileId = createUploadedTestVideo(4);
+      const videoPath = path.join(storageConfig.uploadDir, `${fileId}-sample.mp4`);
+      const result = await analyzeV2ReferenceVideos({
+        user_request: {
+          goal: "生成一个冰红茶的宣传视频"
+        },
+        reference_videos: [
+          {
+            file_id: fileId,
+            uri: videoPath,
+            role: "reference_sample",
+            label: "新增样例"
+          }
+        ],
+        user_materials: [],
+        options: {
+          target_duration_seconds: 20,
+          allow_fallback: false,
+          generate_image_candidates: false
+        }
+      });
+
+      assert.equal(providerCalls.length, 2);
+
+      const retryMessage = asRecordArray(providerCalls[1]?.messages)[1];
+      const retryContent = asRecordArray(retryMessage?.content);
+      assert.equal(
+        retryContent.filter((part) => part.type === "image_url").length,
+        6
+      );
+      assert.equal(
+        retryContent.filter((part) => part.type === "video_url").length,
+        0
+      );
+
+      const tables = asRecordArray(asRecord(result.stages).reference_analysis_tables);
+      const rows = asRecordArray(tables[0]?.rows);
+      assert.equal(rows.length, 1);
+      assert.equal(asRecord(rows[0]?.shot_description).title, "强 Hook");
+      assert.equal(
+        rows[0]?.migration_possibility,
+        "高度可迁移。可迁移为冰红茶开瓶特写和清爽气泡。"
+      );
+    } finally {
+      Object.assign(mutableConfig.providers.v2.multimodal, previousProvider);
+      await new Promise<void>((resolve, reject) => {
+        mockProvider.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    }
+  }
+);
 
 test("GET /api/v2/status exposes 4 as the default image candidate count", async () => {
   const response = await fetch(`${baseUrl}/api/v2/status`);
