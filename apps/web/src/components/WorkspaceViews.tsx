@@ -478,6 +478,9 @@ const InputView = ({
                 </div>
               )}
             </label>
+            
+            <div className="upload-plus-icon">+</div>
+
             <label className={`upload-card-large ${materialFiles.length > 0 ? 'has-media' : ''}`}>
               <input multiple type="file" accept="image/*,video/*,.txt,.md" onChange={updateMaterialFiles} />
               {materialFiles.length > 0 ? (
