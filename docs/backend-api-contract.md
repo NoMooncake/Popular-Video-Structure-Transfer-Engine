@@ -749,7 +749,7 @@ Response:
       "slot_id": "slot_01",
       "display_order": 1,
       "required_duration": 2,
-      "shot_description": "冰红茶瓶身和冰块特写。",
+      "shot_description": "产品亮相¹\n冰红茶瓶身和冰块特写。",
       "voiceover_text": "冰爽一下。",
       "material_folder_id": "slot_01_materials",
       "editable_fields": ["required_duration", "voiceover_text", "material_ref"],
@@ -759,6 +759,8 @@ Response:
   ]
 }
 ```
+
+`shot_description` is formatted for the script page. Its first line is the shot category plus sample-source superscript, for example `Hook¹` or `产品亮相²`; the following lines contain the actual shot description.
 
 ### `PATCH /api/v2/script-sessions/:sessionId/slots/:slotId`
 

@@ -260,6 +260,97 @@ const getSlotMaterials = (slot: JsonObject): V2ScriptSlotMaterial[] => {
     .filter((material): material is V2ScriptSlotMaterial => Boolean(material));
 };
 
+const slotTypeLabelMap: Record<string, string> = {
+  strong_hook: "Hook",
+  hook: "Hook",
+  pain_point_scene: "痛点场景",
+  product_hero: "产品介入",
+  product_intro: "产品介入",
+  usage_process: "使用动作",
+  usage_action: "使用动作",
+  selling_point_proof: "卖点证明",
+  proof: "卖点证明",
+  effect_comparison: "效果对比",
+  comparison: "效果对比",
+  cta: "CTA"
+};
+
+const toSuperscript = (value: number): string => {
+  const superscriptDigits: Record<string, string> = {
+    "0": "⁰",
+    "1": "¹",
+    "2": "²",
+    "3": "³",
+    "4": "⁴",
+    "5": "⁵",
+    "6": "⁶",
+    "7": "⁷",
+    "8": "⁸",
+    "9": "⁹"
+  };
+
+  return String(Math.max(1, Math.floor(value)))
+    .split("")
+    .map((digit) => superscriptDigits[digit] || digit)
+    .join("");
+};
+
+const getSlotTypeLabel = (
+  slotType: string,
+  slotName: string | undefined,
+  slotId: string
+): string => {
+  const normalizedSlotType = slotType.toLowerCase().replace(/[^a-z0-9]+/gu, "_");
+  return slotName || slotTypeLabelMap[normalizedSlotType] || slotType || slotId;
+};
+
+const getSourceSampleIndices = (slot: JsonObject): number[] => {
+  const rawValues = [
+    slot.source_sample_index,
+    slot.sample_index,
+    slot.reference_index,
+    slot.reference_video_index,
+    slot.source_reference_index,
+    slot.source_sample_number,
+    slot.sample_number,
+    asJsonObject(slot.frontend_display).source_sample_index
+  ];
+  const sourceReferences = [
+    ...normalizeStringArray(slot.source_reference_ids),
+    ...normalizeStringArray(slot.source_references),
+    ...normalizeStringArray(slot.reference_ids),
+    ...normalizeStringArray(slot.source_reference_id)
+  ];
+  const parsedValues = rawValues
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const parsedReferenceValues = sourceReferences
+    .map((value) => value.match(/(\d+)/u)?.[1])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const indices = Array.from(new Set([...parsedValues, ...parsedReferenceValues]));
+
+  return indices.length > 0 ? indices : [1];
+};
+
+const formatScriptShotDescription = (
+  slot: JsonObject,
+  slotType: string,
+  slotName: string | undefined,
+  slotId: string,
+  shotDescription: string
+): string => {
+  const label = getSlotTypeLabel(slotType, slotName, slotId);
+  const sampleMark = getSourceSampleIndices(slot).map(toSuperscript).join("");
+  const firstLine = `${label}${sampleMark}`;
+  if (shotDescription.startsWith(`${firstLine}\n`)) {
+    return shotDescription;
+  }
+
+  return `${firstLine}\n${shotDescription}`;
+};
+
 const normalizeScriptSlot = (
   slot: JsonObject,
   index: number,
@@ -306,7 +397,13 @@ const normalizeScriptSlot = (
     display_order: index + 1,
     required_duration: requiredDuration,
     original_required_duration: requiredDuration,
-    shot_description: shotDescription,
+    shot_description: formatScriptShotDescription(
+      slot,
+      slotType,
+      slotName,
+      slotId,
+      shotDescription
+    ),
     voiceover_text: voiceoverText,
     copy: voiceoverText,
     material_folder_id: `${slotId}_materials`,

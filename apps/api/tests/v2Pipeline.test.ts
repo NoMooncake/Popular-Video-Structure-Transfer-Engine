@@ -1584,7 +1584,7 @@ test(
 
     assert.equal(createResponse.status, 201);
     assert.equal(created.slots[0]?.required_duration, 2);
-    assert.equal(created.slots[0]?.shot_description, "冰红茶瓶身和冰块特写。");
+    assert.equal(created.slots[0]?.shot_description, "产品亮相¹\n冰红茶瓶身和冰块特写。");
 
     const lockedResponse = await fetch(
       `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`,
