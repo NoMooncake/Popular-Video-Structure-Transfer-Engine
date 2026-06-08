@@ -1559,6 +1559,49 @@ input {
   padding: 0 8px;
 }
 
+.figma-analysis-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 400px;
+  width: 100%;
+  animation: fadeIn 0.3s ease;
+}
+
+.figma-analysis-loading p {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.figma-analysis-loading span {
+  color: #717375;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.analysis-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid rgba(254, 44, 85, 0.2);
+  border-top-color: #fe2c55;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @media (min-width: 1440px) {
   .figma-analysis-table-wrap {
     width: 1076px;

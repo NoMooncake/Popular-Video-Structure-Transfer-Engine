@@ -717,6 +717,46 @@ const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
   ]
 };
 
+const generateMockAnalysis = (filename: string): SampleAnalysisRow[] => {
+  const name = filename.replace(/\.[^.]+$/, "");
+  return [
+    {
+      duration: "0 - 2s",
+      image: figmaSampleImages[0],
+      shotTitle: "开场吸引",
+      shotDescription: `${name}产品近景特写，光线扫过包装表面，突出质感与品牌调性`,
+      migrationPossibility: "可迁移为粉饼开盖、粉扑轻压、粉质飞散等强特写开场。"
+    },
+    {
+      duration: "2 - 5s",
+      image: figmaSampleImages[1],
+      shotTitle: "卖点展示",
+      shotDescription: `多角度展示${name}核心卖点，镜头聚焦产品细节与使用效果`,
+      migrationPossibility: "可迁移为粉饼上脸、局部定妆、镜面反光与包装展示。"
+    },
+    {
+      duration: "5 - 7s",
+      image: figmaSampleImages[2],
+      shotTitle: "场景验证",
+      shotDescription: `真实使用场景中展示${name}带来的状态变化，强调实际效果`,
+      migrationPossibility: "可迁移为通勤、约会、聚会前后的妆面稳定对比。"
+    },
+    {
+      duration: "7 - 10s",
+      image: figmaSampleImages[3],
+      shotTitle: "行动引导",
+      shotDescription: `结尾展示${name}最终效果，给出明确选择理由和购买引导`,
+      migrationPossibility: "可迁移为购买理由总结、色号/肤质选择提示和 CTA。"
+    }
+  ];
+};
+
+type ExtraSample = {
+  name: string;
+  status: "loading" | "done";
+  rows: SampleAnalysisRow[];
+};
+
 const FigmaSampleAnalysisView = ({
   onNext,
   sampleAnalysis,
@@ -729,25 +769,67 @@ const FigmaSampleAnalysisView = ({
   structureBlueprint?: StructureBlueprint;
 }) => {
   const [activeSample, setActiveSample] = useState(2);
-  const [extraSamples, setExtraSamples] = useState<{ name: string }[]>([]);
+  const [extraSamples, setExtraSamples] = useState<ExtraSample[]>([]);
   const addSampleInputRef = useRef<HTMLInputElement>(null);
   const backendRows = sampleAnalysis
     ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
     : null;
-  const rows = backendRows ?? sampleAnalysisTables[activeSample];
   const sourceLabel = sampleFile?.original_filename ?? "口红广告";
 
   const baseSampleCount = backendRows ? 1 : 3;
-  const totalSamples = baseSampleCount + extraSamples.length;
 
   const handleAddSample = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const newSamples = Array.from(files).map((f) => ({ name: f.name }));
-    setExtraSamples((prev) => [...prev, ...newSamples]);
-    setActiveSample(totalSamples + 1); // jump to first new sample
-    e.target.value = ""; // reset so same file can be re-selected
+
+    Array.from(files).forEach((file, fileIdx) => {
+      const newIndex = baseSampleCount + extraSamples.length + fileIdx + 1;
+      const placeholder: ExtraSample = {
+        name: file.name,
+        status: "loading",
+        rows: []
+      };
+
+      setExtraSamples((prev) => [...prev, placeholder]);
+      setActiveSample(newIndex);
+
+      // Simulate AI analysis with 1.5s delay
+      setTimeout(() => {
+        setExtraSamples((prev) =>
+          prev.map((s, i) =>
+            i === prev.length - 1 - (files.length - 1 - fileIdx)
+              ? { ...s, status: "done" as const, rows: generateMockAnalysis(file.name) }
+              : s
+          )
+        );
+      }, 1500);
+    });
+
+    e.target.value = "";
   };
+
+  // Determine which rows to show
+  const getActiveRows = (): { rows: SampleAnalysisRow[] | null; loading: boolean; label: string } => {
+    if (backendRows && activeSample === 0) {
+      return { rows: backendRows, loading: false, label: sourceLabel };
+    }
+    const extraIdx = activeSample - baseSampleCount - 1;
+    if (extraIdx >= 0 && extraIdx < extraSamples.length) {
+      const extra = extraSamples[extraIdx];
+      return {
+        rows: extra.status === "done" ? extra.rows : null,
+        loading: extra.status === "loading",
+        label: extra.name
+      };
+    }
+    return {
+      rows: sampleAnalysisTables[activeSample] ?? sampleAnalysisTables[1],
+      loading: false,
+      label: sourceLabel
+    };
+  };
+
+  const active = getActiveRows();
 
   return (
     <div className="figma-analysis-page">
@@ -809,31 +891,39 @@ const FigmaSampleAnalysisView = ({
         </nav>
 
         <main className="figma-analysis-table-wrap">
-          <div className="figma-analysis-table" role="table" aria-label="样例解析">
-            <div className="figma-analysis-row figma-analysis-head" role="row">
-              <div role="columnheader" style={{ width: '80px', flexShrink: 0 }}>时长</div>
-              <div role="columnheader" style={{ width: '300px', flexShrink: 0 }}>样例视频</div>
-              <div role="columnheader" style={{ width: '280px', flexShrink: 0 }}>分镜描述</div>
-              <div role="columnheader" style={{ width: '360px', flexShrink: 0 }}>迁移可能性</div>
+          {active.loading ? (
+            <div className="figma-analysis-loading">
+              <div className="analysis-spinner" />
+              <p>正在解析样例视频…</p>
+              <span>{active.label}</span>
             </div>
-            {rows.map((row) => (
-              <div className="figma-analysis-row" key={`${activeSample}-${row.duration}`} role="row">
-                <div className="duration-cell" role="cell">
-                  {row.duration}
-                </div>
-                <div className="sample-media-cell" role="cell">
-                  <img alt="" src={row.image} />
-                </div>
-                <div className="shot-desc-cell" role="cell">
-                  <strong>{row.shotTitle}</strong>
-                  <span>{row.shotDescription}</span>
-                </div>
-                <div className="migration-possibility-cell" role="cell">
-                  {row.migrationPossibility}
-                </div>
+          ) : (
+            <div className="figma-analysis-table" role="table" aria-label="样例解析">
+              <div className="figma-analysis-row figma-analysis-head" role="row">
+                <div role="columnheader" style={{ width: '80px', flexShrink: 0 }}>时长</div>
+                <div role="columnheader" style={{ width: '300px', flexShrink: 0 }}>样例视频</div>
+                <div role="columnheader" style={{ width: '280px', flexShrink: 0 }}>分镜描述</div>
+                <div role="columnheader" style={{ width: '360px', flexShrink: 0 }}>迁移可能性</div>
               </div>
-            ))}
-          </div>
+              {(active.rows ?? []).map((row) => (
+                <div className="figma-analysis-row" key={`${activeSample}-${row.duration}`} role="row">
+                  <div className="duration-cell" role="cell">
+                    {row.duration}
+                  </div>
+                  <div className="sample-media-cell" role="cell">
+                    <img alt="" src={row.image} />
+                  </div>
+                  <div className="shot-desc-cell" role="cell">
+                    <strong>{row.shotTitle}</strong>
+                    <span>{row.shotDescription}</span>
+                  </div>
+                  <div className="migration-possibility-cell" role="cell">
+                    {row.migrationPossibility}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </main>
       </div>
     </div>
