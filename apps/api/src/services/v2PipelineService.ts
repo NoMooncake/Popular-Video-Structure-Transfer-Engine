@@ -382,7 +382,7 @@ const commercialAdSlots = [
     slot_type: "strong_hook",
     role: "前 3 秒抓人，制造停留",
     common_visuals: ["夸张问题", "强视觉", "反差画面"],
-    common_packaging: ["大字标题", "快切", "强音效"]
+    common_packaging: ["大字标题", "节奏强化", "强音效"]
   },
   {
     slot_type: "pain_point_scene",
@@ -422,12 +422,26 @@ const commercialAdSlots = [
   }
 ] as const;
 
+const materialUnderstandingPolicy = {
+  source_material_pacing_is_not_authoritative: true,
+  generated_structure_pacing_priority: [
+    "用户明确描述的节奏/风格/平台需求",
+    "用户目标时长和必须表达的信息密度",
+    "样例视频的可迁移说服逻辑",
+    "用户素材内容本身可支撑的画面类型"
+  ],
+  fallback_when_user_pacing_unspecified:
+    "如果用户没有明确要求快切或慢节奏，再用样例视频和素材内容做弱参考；不要只因为素材长、短或一镜到底就判定最终广告节奏。",
+  material_understanding_method:
+    "对用户素材统一做高频候选帧/片段理解，必要时直接让多模态模型阅读完整素材或完整抽帧序列；不先按素材推断广告类型。"
+} as const;
+
 export const getAdaptiveSlotPlanningRules = (targetDuration: number): JsonObject => {
   if (targetDuration <= 8) {
     return {
       target_slot_count_range: "3-5",
       rule:
-        "6-8秒短广告不能机械拆成7个模块。必须合并或舍弃非必要模块，优先保证每个模块表达完整、镜头可读、逻辑顺畅。",
+        "6-8秒短广告不能机械拆成7个模块。必须合并或舍弃非必要模块，优先保证每个模块表达完整、镜头可读、逻辑顺畅。成片节奏优先服从用户需求；素材节奏只作为弱参考。",
       recommended_structures: [
         "strong_hook + product_hero/selling_point_proof + usage/effect + cta",
         "strong_hook/product_hero + usage_process + effect_comparison/cta",
@@ -442,7 +456,7 @@ export const getAdaptiveSlotPlanningRules = (targetDuration: number): JsonObject
     return {
       target_slot_count_range: "4-6",
       rule:
-        "8-15秒广告可以保留核心商业链路，但仍应按素材和叙事需要合并相邻模块，避免每段过短或重复表达。",
+        "8-15秒广告可以保留核心商业链路，但仍应按用户需求、信息密度和叙事需要合并相邻模块，避免每段过短或重复表达。不要把用户原始素材的镜头长短当作成片节奏结论。",
       recommended_structures: [
         "strong_hook + pain/product + selling_point + usage/effect + cta",
         "strong_hook + product_hero + selling_point_proof + usage_process + effect_comparison/cta"
@@ -454,7 +468,7 @@ export const getAdaptiveSlotPlanningRules = (targetDuration: number): JsonObject
   return {
     target_slot_count_range: "6-7",
     rule:
-      "15秒以上可以展开完整商业广告结构，但仍需根据素材和叙事质量调整时长，不要为了填满模板而重复镜头。",
+      "15秒以上可以展开完整商业广告结构，但仍需根据用户需求、表达重点和素材可用性调整时长，不要为了填满模板而重复镜头。素材可能是一镜到底或碎片素材，不能单独决定最终广告节奏。",
     recommended_structures: [
       "strong_hook + pain_point_scene + product_hero + selling_point_proof + usage_process + effect_comparison + cta"
     ],
@@ -2604,8 +2618,9 @@ export const runV2Pipeline = async (
           video: videoRef,
           reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
           adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
+          material_understanding_policy: materialUnderstandingPolicy,
           instruction:
-            "阅读并理解这个商业广告样例视频。请用中文返回广告结构槽位、节奏、视觉/包装风格、说服逻辑、内容逻辑和可迁移模式。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
+            "阅读并理解这个商业广告样例视频。请用中文返回广告结构槽位、视觉/包装风格、说服逻辑、内容逻辑和可迁移模式。只把样例节奏当作可迁移参考，不要把用户后续成片节奏绑定为同一种快切/慢节奏类型。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
         },
         allowFallback,
         (reason) =>
@@ -2627,11 +2642,12 @@ export const runV2Pipeline = async (
       target_duration_seconds: targetDuration,
       reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
       adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
+      material_understanding_policy: materialUnderstandingPolicy,
       user_request: normalized.user_request,
       user_materials: normalized.user_materials,
       text_assets: normalized.text_assets,
       instruction:
-        "分析用户想要什么，以及用户素材能支撑一个商业广告短视频中的哪些槽位。reusable_slot_type_reference 只是槽位类型参考；请根据目标时长和素材质量判断哪些槽位应该合并、保留或舍弃。请用中文返回可用素材、弱素材、缺失素材、素材到槽位的建议。所有说明和后续 prompt 必须中文。"
+        "先分析用户想要什么，再分析用户素材能支撑一个商业广告短视频中的哪些槽位。最终成片节奏优先服从用户描述、目标时长和信息密度；用户素材的时长、是否一镜到底、是否碎片化都不能单独决定成片是快切还是慢节奏。请把素材当作待理解内容，统一按高频候选帧/片段或完整素材阅读来判断画面类型、动作、产品、场景和质量。reusable_slot_type_reference 只是槽位类型参考；请根据用户需求、目标时长、信息密度和素材质量判断哪些槽位应该合并、保留或舍弃。请用中文返回可用素材、弱素材、缺失素材、素材到槽位的建议。所有说明和后续 prompt 必须中文。"
     },
     allowFallback,
     (reason) => makeFallbackMaterialAnalysis(normalized, reason)
@@ -2648,11 +2664,12 @@ export const runV2Pipeline = async (
       target_duration_seconds: targetDuration,
       reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
       adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
+      material_understanding_policy: materialUnderstandingPolicy,
       user_request: normalized.user_request,
       reference_video_analyses: referenceVideoAnalyses,
       user_material_analysis: userMaterialAnalysis,
       instruction:
-        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
+        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。成片节奏和结构取舍必须优先服从用户需求、目标时长和信息密度；如果用户没有明确节奏要求，再把样例和素材作为弱参考。不要根据用户原始素材的长短或一镜到底形式直接判定成片节奏。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
     },
     allowFallback,
     (reason) =>
@@ -2681,6 +2698,7 @@ export const runV2Pipeline = async (
       target_duration_seconds: targetDuration,
       user_request: normalized.user_request,
       adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
+      material_understanding_policy: materialUnderstandingPolicy,
       fillable_architecture: fillableArchitecture,
       user_material_analysis: userMaterialAnalysis,
       deterministic_material_coverage: baseMaterialCoverage,
