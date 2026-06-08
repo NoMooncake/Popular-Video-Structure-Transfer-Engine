@@ -1907,7 +1907,6 @@ export const buildV2DeterministicMaterialCoverage = async (
         ? []
         : [
             ...(materialAssets.length > 0 ? ["direct_video_from_material_frame"] : []),
-            "upload_image_then_video",
             "generate_image_then_video"
           ];
     const availableUserActions =
@@ -1917,7 +1916,6 @@ export const buildV2DeterministicMaterialCoverage = async (
             ...(availableGenerationPaths.includes("direct_video_from_material_frame")
               ? ["generate_direct_video_from_material_frame"]
               : []),
-            "upload_image_then_generate_video",
             "generate_image_then_video"
           ]
         : frontendCoverageStatus === "material_insufficient"
@@ -1925,7 +1923,6 @@ export const buildV2DeterministicMaterialCoverage = async (
               ...(availableGenerationPaths.includes("direct_video_from_material_frame")
                 ? ["generate_direct_video_from_material_frame"]
                 : []),
-              "upload_image_then_generate_video",
               "generate_image_then_video"
             ]
           : durationShortAccepted
@@ -2349,13 +2346,20 @@ const makeFallbackFillableArchitecture = (
       ],
       visual_direction: slot.common_visuals,
       packaging: slot.common_packaging,
-      editable_fields: ["visual", "subtitle", "voiceover", "packaging", "material_ref"]
+      editable_fields: ["duration", "voiceover_text", "material_ref"],
+      locked_fields: ["visual", "shot_description", "packaging"],
+      edit_policy: {
+        visual_structure_locked: true,
+        voiceover_text_editable: true,
+        text_to_speech: "future_work"
+      }
     })),
     material_fit: asJsonObject(userMaterialAnalysis).coverage_by_slot_type || [],
     decision_points: [
       "如果 product_hero / usage_process 素材足够，优先拼接真实素材。",
       "如果 hook / comparison / CTA 缺素材，可先用已有素材抽帧配合图生视频 prompt 直接生成视频。",
-      "如果用户想添加相关图片，再展开图片生成候选；用户确认图片后继续使用同一视频 prompt 图生视频。"
+      "补全弹窗不上传缺失素材；如果用户想补充素材，应回到脚本页上传到对应段落文件夹。",
+      "如果用户想添加相关图片，由后端先生图候选；用户确认图片后继续使用同一视频 prompt 图生视频。"
     ]
   };
 };
@@ -3661,6 +3665,14 @@ export const assembleV2FinalVideo = async (
     final_duration_seconds: finalDurationSeconds,
     resolution: resolution.label,
     fps,
+    audio_policy: {
+      source_clip_audio: "muted",
+      per_clip_bgm: "disabled",
+      final_bgm: {
+        selection_mode: "ai_selected_at_final_assembly",
+        status: "pending_provider_integration"
+      }
+    },
     slots: segmentResults
   };
 };

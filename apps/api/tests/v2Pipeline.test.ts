@@ -197,12 +197,10 @@ test(
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 0);
     assert.deepEqual(coverage.slot_coverage[1]?.available_generation_paths, [
       "direct_video_from_material_frame",
-      "upload_image_then_video",
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
       "generate_direct_video_from_material_frame",
-      "upload_image_then_generate_video",
       "generate_image_then_video"
     ]);
     assert.equal(
@@ -357,12 +355,10 @@ test(
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
       "accept_current_material_as_sufficient",
       "generate_direct_video_from_material_frame",
-      "upload_image_then_generate_video",
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[1]?.available_generation_paths, [
       "direct_video_from_material_frame",
-      "upload_image_then_video",
       "generate_image_then_video"
     ]);
     assert.equal(coverage.slot_coverage[1]?.ai_completion_required_duration, 1);
@@ -377,12 +373,10 @@ test(
     );
     assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
       "generate_direct_video_from_material_frame",
-      "upload_image_then_generate_video",
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[2]?.available_generation_paths, [
       "direct_video_from_material_frame",
-      "upload_image_then_video",
       "generate_image_then_video"
     ]);
     assert.equal(
@@ -1595,6 +1589,14 @@ test(
 
     assert.match(String(result.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
     assert.equal(result.planned_duration_seconds, 1);
+    assert.deepEqual(result.audio_policy, {
+      source_clip_audio: "muted",
+      per_clip_bgm: "disabled",
+      final_bgm: {
+        selection_mode: "ai_selected_at_final_assembly",
+        status: "pending_provider_integration"
+      }
+    });
     assert.ok(
       Math.abs(Number(result.final_duration_seconds) - 1) < 0.15,
       `expected final duration close to 1s, got ${result.final_duration_seconds}`
