@@ -659,7 +659,9 @@ export const revalidateV2CanvasFromScript = async (
     candidate_pool_id:
       normalizeOptionalString(payload.candidate_pool_id) ||
       `${session.session_id}_canvas_candidate_pool`,
-    extract_frames: payload.extract_frames !== false
+    extract_frames: payload.extract_frames !== false,
+    refine_segments: payload.refine_segments !== false,
+    use_multimodal_provider: payload.use_multimodal_provider !== false
   });
   const materialSegments = Array.isArray(materialCandidatePool.material_segments)
     ? materialCandidatePool.material_segments

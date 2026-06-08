@@ -822,6 +822,8 @@ Request:
   "session_id": "v2_script_uuid",
   "candidate_pool_id": "optional-stable-pool-id",
   "extract_frames": true,
+  "refine_segments": true,
+  "use_multimodal_provider": true,
   "accepted_duration_short_slots": ["slot_02"]
 }
 ```
@@ -835,6 +837,10 @@ Response:
   "script_slots": [],
   "material_candidate_pool": {
     "candidate_pool_id": "v2_script_uuid_canvas_candidate_pool",
+    "refinement": {
+      "status": "refined",
+      "provider_used": true
+    },
     "summary": {
       "material_count": 1,
       "segment_count": 1,
@@ -852,7 +858,16 @@ Response:
       "display_order": 1,
       "source_in_seconds": 0,
       "source_out_seconds": 1.5,
+      "final_source_in_seconds": 0,
+      "final_source_out_seconds": 1.5,
       "usable_duration_seconds": 1.5,
+      "visual_tags": ["product_hero", "ice", "drink"],
+      "usable_slot_types": ["product_hero"],
+      "quality_score": 0.82,
+      "content_summary": "冰红茶瓶身和冰块特写，适合作为产品亮相素材。",
+      "action_summary": "冰块和饮品形成清凉冲击。",
+      "product_presence": "visible",
+      "scene_type": "product_closeup",
       "high_frequency_frame_timestamps_seconds": [0, 0.5, 1, 1.5],
       "frames": [
         {
@@ -865,6 +880,8 @@ Response:
       ],
       "segmentation_source": "uniform_high_frequency_candidate_split",
       "pacing_inference_source": "user_request_first_material_pacing_not_authoritative",
+      "refinement_source": "multimodal_provider",
+      "refinement_status": "refined",
       "status": "candidate_pool_ready",
       "next_step": "multimodal_refinement"
     }
@@ -892,7 +909,8 @@ Canvas status values remain:
 - `structure_complete_duration_short`
 - `material_insufficient`
 
-The current `material_segments` implementation is deterministic duration-based segmentation. It is a foundation for the later multimodal refinement step, not yet a model-refined shot boundary result.
+`material_segments` starts from deterministic high-frequency candidate splitting, then attempts multimodal refinement when `refine_segments` is true.
+If the multimodal provider is unavailable, the API returns deterministic fallback refinement fields with `refinement.status = "deterministic_fallback"`.
 The segment pacing policy is user-request-first; `material_segments` should not be read as a final fast/slow ad classification.
 
 ### `POST /api/v2/material-candidate-pools/from-script-session`
@@ -905,7 +923,9 @@ Request:
 {
   "session_id": "v2_script_uuid",
   "candidate_pool_id": "optional-stable-pool-id",
-  "extract_frames": true
+  "extract_frames": true,
+  "refine_segments": true,
+  "use_multimodal_provider": true
 }
 ```
 
@@ -920,10 +940,15 @@ Response:
     "source_material_pacing_is_authoritative": false,
     "source_material_understanding": "uniform_high_frequency_candidate_frames_then_multimodal_refinement",
     "segment_max_duration_seconds": 1.5,
-    "frame_interval_seconds": 0.5
+    "frame_interval_seconds": 0.5,
+    "refinement_enabled": true
   },
   "material_assets": [],
   "material_segments": [],
+  "refinement": {
+    "status": "refined",
+    "provider_used": true
+  },
   "summary": {
     "material_count": 0,
     "segment_count": 0,

@@ -1639,13 +1639,15 @@ test(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session_id: created.session_id
+        session_id: created.session_id,
+        use_multimodal_provider: false
       })
     });
     const shortRevalidate = (await shortRevalidateResponse.json()) as {
       material_candidate_pool: {
         candidate_pool_id: string;
         summary: Record<string, unknown>;
+        refinement: Record<string, unknown>;
       };
       material_segments: Array<Record<string, unknown>>;
       material_coverage: {
@@ -1657,6 +1659,10 @@ test(
     assert.equal(shortRevalidateResponse.status, 200);
     assert.equal(shortRevalidate.material_candidate_pool.summary.segment_count, 1);
     assert.equal(shortRevalidate.material_candidate_pool.summary.frame_count, 3);
+    assert.match(
+      String(shortRevalidate.material_candidate_pool.refinement.status),
+      /^deterministic_fallback$/
+    );
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(shortRevalidate.material_coverage.slot_coverage[0]?.required_duration, 0.5);
     assert.equal(shortRevalidate.material_segments.length, 1);
@@ -1672,6 +1678,10 @@ test(
       shortRevalidate.material_segments[0]?.high_frequency_frame_timestamps_seconds,
       [0, 0.5, 1]
     );
+    assert.ok(Array.isArray(shortRevalidate.material_segments[0]?.visual_tags));
+    assert.ok(Array.isArray(shortRevalidate.material_segments[0]?.usable_slot_types));
+    assert.equal(typeof shortRevalidate.material_segments[0]?.quality_score, "number");
+    assert.equal(typeof shortRevalidate.material_segments[0]?.content_summary, "string");
     const frames = asRecordArray(shortRevalidate.material_segments[0]?.frames);
     assert.equal(frames.length, 3);
     assert.match(String(frames[0]?.uri), /^\/api\/v2\/material-candidate-pools\//);
@@ -1699,15 +1709,20 @@ test(
         },
         body: JSON.stringify({
           session_id: created.session_id,
-          candidate_pool_id: `${created.session_id}_direct_test_pool`
+          candidate_pool_id: `${created.session_id}_direct_test_pool`,
+          use_multimodal_provider: false
         })
       }
     );
     const directPool = (await directPoolResponse.json()) as {
       summary: Record<string, unknown>;
+      refinement: Record<string, unknown>;
+      material_segments: Array<Record<string, unknown>>;
     };
     assert.equal(directPoolResponse.status, 201);
     assert.equal(directPool.summary.segment_count, 1);
+    assert.equal(directPool.refinement.status, "deterministic_fallback");
+    assert.equal(directPool.material_segments[0]?.refinement_source, "deterministic_fallback");
 
     await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
       method: "PATCH",
@@ -1725,7 +1740,8 @@ test(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session_id: created.session_id
+        session_id: created.session_id,
+        use_multimodal_provider: false
       })
     });
     const longRevalidate = (await longRevalidateResponse.json()) as {
@@ -1758,7 +1774,8 @@ test(
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        session_id: created.session_id
+        session_id: created.session_id,
+        use_multimodal_provider: false
       })
     });
     const completedRevalidate = (await completedRevalidateResponse.json()) as {
@@ -1864,7 +1881,8 @@ test(
       },
       body: JSON.stringify({
         session_id: created.session_id,
-        extract_frames: false
+        extract_frames: false,
+        use_multimodal_provider: false
       })
     });
     const revalidated = (await revalidateResponse.json()) as {
