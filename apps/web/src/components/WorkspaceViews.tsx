@@ -776,10 +776,10 @@ const FigmaSampleAnalysisView = ({
         <main className="figma-analysis-table-wrap">
           <div className="figma-analysis-table" role="table" aria-label="样例解析">
             <div className="figma-analysis-row figma-analysis-head" role="row">
-              <div role="columnheader">时长</div>
-              <div role="columnheader">样例视频</div>
-              <div role="columnheader">分镜描述</div>
-              <div role="columnheader">迁移可能性</div>
+              <div role="columnheader" style={{ width: '80px' }}>时长</div>
+              <div role="columnheader" style={{ width: '300px' }}>样例视频</div>
+              <div role="columnheader" style={{ width: '280px' }}>分镜描述</div>
+              <div role="columnheader" style={{ width: '360px' }}>迁移可能性</div>
             </div>
             {rows.map((row) => (
               <div className="figma-analysis-row" key={`${activeSample}-${row.duration}`} role="row">

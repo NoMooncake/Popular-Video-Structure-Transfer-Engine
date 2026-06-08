@@ -1374,20 +1374,19 @@ input {
   display: flex;
   flex: 1;
   overflow: hidden;
-  width: min(100%, 1632px);
+  width: min(100%, 1728px);
   margin: 0 auto;
   position: relative;
-  padding-top: 50px;
 }
 
 .figma-sample-nav {
-  width: 80px;
-  flex-shrink: 0;
+  position: absolute;
+  left: 58px;
+  top: 406px; /* 498px - 74px topbar - 18px top margin */
   display: flex;
   flex-direction: column;
   gap: 16px;
   align-items: center;
-  padding-top: 20px;
 }
 
 .figma-sample-nav button {
@@ -1423,11 +1422,14 @@ input {
 }
 
 .figma-analysis-table-wrap {
-  flex: 1;
+  position: absolute;
+  left: 366px;
+  top: 97px; /* 171px - 74px topbar */
+  right: 0;
+  bottom: 0;
   overflow-y: auto;
   overflow-x: auto;
   padding-bottom: 28px;
-  padding-right: 20px;
 }
 
 .figma-analysis-table {
@@ -1436,13 +1438,14 @@ input {
   border: 1px solid #717375;
   border-radius: 16px;
   padding: 0 16px 8px;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
 }
 
 .figma-analysis-row {
-  display: grid;
-  grid-template-columns: 80px 300px 280px 360px;
-  column-gap: 8px;
+  display: flex;
+  gap: 8px;
   align-items: center;
   min-height: 240px;
 }
@@ -1452,14 +1455,12 @@ input {
 }
 
 .figma-analysis-row > div {
-  min-width: 0;
   color: #ffffff;
   font-family: inherit;
   font-size: 20px;
   font-weight: 400;
   line-height: 1.5;
   text-align: center;
-  letter-spacing: -0.22px;
 }
 
 .figma-analysis-head > div {
@@ -1471,20 +1472,17 @@ input {
   white-space: nowrap;
 }
 
-.figma-analysis-head > div + div {
-  border-left: 1px solid #717375;
-}
-
 .duration-cell {
+  width: 80px;
   display: flex;
   align-items: center;
   justify-content: center;
   height: 240px;
   padding: 0 4px;
-  white-space: nowrap;
 }
 
 .sample-media-cell {
+  width: 300px;
   height: 240px;
   padding: 8px;
 }
@@ -1497,6 +1495,7 @@ input {
 }
 
 .shot-desc-cell {
+  width: 280px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1521,6 +1520,7 @@ input {
 }
 
 .migration-possibility-cell {
+  width: 360px;
   display: flex;
   align-items: center;
   justify-content: center;
