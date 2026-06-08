@@ -332,11 +332,7 @@ const InputView = ({
     "idle" | "uploading" | "analyzing" | "extracting" | "success" | "error"
   >("idle");
   const [sampleFile, setSampleFile] = useState<File | null>(null);
-  const [targetBrief, setTargetBrief] = useState(
-    "新手养猫怎么选猫粮：不同猫咪需求对应不同猫粮，不要盲买。"
-  );
-  const [targetTopic, setTargetTopic] = useState("宠物用品 / 猫粮");
-  const [targetDuration, setTargetDuration] = useState("目标时长：20 秒");
+  const [targetTopic] = useState("宠物用品 / 猫粮"); // Kept for backend call
   const [showModal, setShowModal] = useState(false);
 
   const isRunning = ["uploading", "analyzing", "extracting"].includes(pipelineStatus);
@@ -427,84 +423,88 @@ const InputView = ({
   };
 
   return (
-    <div className="page-shell input-page">
-      <CanvasTopBar
-        actionLabel={isRunning ? "分析中..." : "开始分析"}
-        activeStep="input"
-        onNext={runPipeline}
-        onStepChange={onStepChange}
-        subtitle="先把样例、真实需求和可用素材放进同一个工作台，后续分析会基于这些输入生成可解释的结构迁移方案。"
-        title="输入素材"
-      />
+    <div className="page-shell input-page-redesign">
+      <header className="simple-top-bar">
+        <div className="brand-mark">ShotSwift</div>
+        <div className="figma-avatar">F</div>
+      </header>
 
-      <section className="hero-panel">
-        <div className="hero-copy">
-          <span className="eyebrow">Create Brief</span>
-          <h2>今天想做什么样的短视频？</h2>
-        </div>
-        <div className="prompt-box">
-          <textarea
-            onChange={(event) => setBrief(event.target.value)}
-            rows={4}
-            value={brief}
-          />
-          <button aria-label="提交需求" onClick={runPipeline} type="button">
-            {isRunning ? "…" : "→"}
-          </button>
-        </div>
-      </section>
+      <main className="content-container">
+        <section className="main-section">
+          <div className="hero-simple">
+            <h2>开始一次视频迁移</h2>
+            <p>描述你想生成的视频主题、核心目的和风格参考</p>
+          </div>
 
-      <section className="input-layout">
-        <div className="upload-card-grid">
-          <label className={`upload-card ${sampleFile ? 'has-media' : ''}`}>
-            <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={updateSampleFile} />
-            {sampleFile ? (
-              <div className="upload-preview">
-                <video src={URL.createObjectURL(sampleFile)} controls width="100%" style={{ borderRadius: '8px', maxHeight: '180px', objectFit: 'cover' }} />
-                <span className="file-name">{sampleFile.name}</span>
+          <div className="prompt-box-wide">
+            <textarea
+              onChange={(event) => setBrief(event.target.value)}
+              rows={4}
+              value={brief}
+              placeholder="详细描述一下今天的任务吧..."
+            />
+            <button aria-label="提交需求" onClick={runPipeline} type="button" className="submit-arrow-btn">
+              {isRunning ? "..." : "↑"}
+            </button>
+          </div>
+
+          {pipelineStatus !== "idle" && pipelineStatus !== "success" && (
+             <div className={`pipeline-status ${pipelineStatus === "error" ? "status-error" : ""}`}>
+               {pipelineStatus === "error" ? (
+                 <div className="status-icon-error">!</div>
+               ) : (
+                 <span className="status-badge">{pipelineStatus}</span>
+               )}
+               <div className="status-content">
+                 <p className="status-note">{pipelineNote}</p>
+                 {pipelineError && <p className="error-text">{pipelineError}</p>}
+               </div>
+             </div>
+          )}
+
+          <div className="upload-section-large">
+            <label className={`upload-card-large ${sampleFile ? 'has-media' : ''}`}>
+              <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={updateSampleFile} />
+              {sampleFile ? (
+                <div className="upload-preview-large">
+                  <video src={URL.createObjectURL(sampleFile)} controls width="100%" />
+                  <span className="file-name">{sampleFile.name}</span>
+                </div>
+              ) : (
+                <div className="upload-placeholder">
+                  <div className="icon-video"></div>
+                  <strong>参考素材</strong>
+                  <span>添加你想分析的样例视频</span>
+                </div>
+              )}
+            </label>
+            <label className="upload-card-large">
+              <input multiple type="file" accept="image/*,video/*,.txt,.md" onChange={updateMaterialFiles} />
+              <div className="upload-placeholder">
+                <div className="icon-materials"></div>
+                <strong>真实素材</strong>
+                <span>
+                  {materialFiles.length > 0
+                    ? `已选择 ${materialFiles.length} 个素材`
+                    : "添加你的素材"}
+                </span>
               </div>
-            ) : (
-              <>
-                <span className="upload-icon">01</span>
-                <strong>上传样例视频</strong>
-                <span>用来学习 Hook、节奏、包装和 CTA。</span>
-              </>
-            )}
-          </label>
-          <label className="upload-card">
-            <input multiple type="file" accept="image/*,video/*,.txt,.md" onChange={updateMaterialFiles} />
-            <span className="upload-icon">02</span>
-            <strong>上传真实素材</strong>
-            <span>
-              {materialFiles.length > 0
-                ? `已选择 ${materialFiles.length} 个素材`
-                : "上传图片、视频片段、产品文案和案例素材。"}
-            </span>
-          </label>
-        </div>
-
-        <section className="work-panel brief-panel">
-          <div className="panel-heading">
-            <span>真实诉求和目标案例</span>
-            <strong>可编辑</strong>
+            </label>
           </div>
-          <textarea
-            onChange={(event) => setTargetBrief(event.target.value)}
-            rows={5}
-            value={targetBrief}
-          />
-          <div className="field-row">
-            <input onChange={(event) => setTargetTopic(event.target.value)} value={targetTopic} />
-            <input onChange={(event) => setTargetDuration(event.target.value)} value={targetDuration} />
-          </div>
-          <div className="panel-heading">
-            <span>接口状态</span>
-            <strong>{pipelineStatus === "idle" ? "未运行" : pipelineStatus}</strong>
-          </div>
-          <p>{pipelineNote}</p>
-          {pipelineError ? <p role="alert">{pipelineError}</p> : null}
         </section>
-      </section>
+
+        <section className="canvas-section">
+          <h3>画布初始</h3>
+          <div className="existing-canvases-scroll">
+            {figmaSampleImages.map((src, i) => (
+              <div className="canvas-card" key={i}>
+                <img src={src} alt="Canvas placeholder" />
+                <div className="canvas-card-title">未命名项目 {i + 1}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </main>
 
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>

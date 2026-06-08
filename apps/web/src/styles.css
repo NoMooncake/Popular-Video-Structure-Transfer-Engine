@@ -2007,17 +2007,52 @@ input {
 
 .pipeline-status {
   background: var(--panel);
-  padding: 16px;
+  padding: 16px 20px;
   border-radius: var(--radius);
   margin-bottom: 24px;
   border: 1px solid var(--line);
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+}
+
+.pipeline-status.status-error {
+  background: rgba(233, 77, 95, 0.08);
+  border-color: rgba(233, 77, 95, 0.3);
+}
+
+.status-icon-error {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--missing);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.status-content {
+  display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
+}
+
+.status-note {
+  color: var(--text-strong);
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 .error-text {
   color: var(--missing);
+  margin: 0;
+  font-size: 14px;
 }
 
 /* Canvas Card Hover State */
