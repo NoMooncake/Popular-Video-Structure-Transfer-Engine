@@ -2303,3 +2303,440 @@ input {
 .canvas-card:hover img {
   opacity: 1;
 }
+
+
+/* Migration View Styles */
+.workspace.page-migration {
+  background: #0a0a0a;
+}
+.migration-page-override {
+  height: 100vh;
+  overflow: auto;
+}
+.migration-view {
+  background: transparent;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 0 64px 64px;
+  width: min(100%, 1632px);
+  margin: 0 auto;
+}
+
+.migration-toolbar {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.migration-hint {
+  color: #a9a9a9;
+  font-size: 16px;
+}
+
+.pill-button {
+  background: #fe2c55;
+  border: none;
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 8px 24px;
+  transition: opacity 150ms;
+}
+
+.pill-button:hover {
+  opacity: 0.85;
+}
+
+.migration-matrix-container {
+  overflow-x: auto;
+  margin-top: 20px;
+}
+
+.migration-header {
+  color: #a9a9a9;
+  display: flex;
+  font-size: 16px;
+  margin-bottom: 24px;
+}
+
+.migration-header span {
+  text-align: center;
+}
+
+.migration-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.migration-row {
+  align-items: center;
+  border: 1px solid #333333;
+  border-radius: 12px;
+  display: flex;
+  min-height: 200px;
+  overflow: hidden;
+  transition: border-color 150ms;
+}
+
+.migration-row.selected {
+  border-color: #fe2c55;
+}
+
+.migration-cell {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  justify-content: center;
+  padding: 12px;
+  text-align: center;
+}
+
+.migration-cell.editable.selected {
+  background: rgba(41, 41, 41, 0.6);
+  border-radius: 8px;
+  margin: 4px;
+  height: calc(100% - 8px);
+}
+
+.migration-image {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.migration-input {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 16px;
+  padding: 8px;
+  text-align: center;
+  width: 100%;
+}
+
+.migration-textarea {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 16px;
+  height: 100px;
+  padding: 12px;
+  resize: vertical;
+  width: 100%;
+}
+
+.migration-input:focus,
+.migration-textarea:focus {
+  border-color: #fe2c55;
+  outline: none;
+}
+
+.migration-text {
+  font-size: 16px;
+}
+
+.migration-sub {
+  font-size: 12px;
+  vertical-align: super;
+}
+
+.migration-material-name {
+  font-size: 14px;
+  color: #ffffff;
+  margin-bottom: 8px;
+}
+
+.migration-material-desc {
+  color: #a9a9a9;
+  font-size: 13px;
+}
+
+/* === 结构迁移 matrix — exact Figma spec (frame 82:198 / component 156:814).
+   Reuses the analysis page shell (.figma-analysis-page) so the topbar matches
+   the finished 样例解析 page. Fixed-width table scrolls horizontally on narrow
+   screens (responsive skeleton untouched). === */
+
+/* Vertical scroll area inside the 100vh page shell */
+.migration-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: min(100%, 1728px);
+  margin: 0 auto;
+  padding: 0 0 64px;
+}
+
+.migration-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 0 64px;
+  margin: 8px 0 18px;
+}
+
+.migration-hint {
+  color: #dddddd;
+  font-size: 16px;
+  text-align: center;
+}
+
+/* Nav pills reuse the 样例解析 page "结构迁移 ›" button style (.figma-migration-button). */
+.migration-nav-button {
+  align-items: center;
+  background: #fe2c55;
+  border: 0;
+  border-radius: 999px;
+  color: #ffffff;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  gap: 4px;
+  height: 40px;
+  justify-content: center;
+  letter-spacing: -0.22px;
+  line-height: 1.5;
+  min-width: 120px;
+  padding: 0 16px 2px;
+  transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
+  white-space: nowrap;
+}
+
+.migration-nav-button:hover {
+  background: #e5264d;
+  box-shadow: 0 4px 16px rgba(254, 44, 85, 0.45);
+}
+
+.migration-nav-button:active {
+  transform: scale(0.96);
+}
+
+.migration-nav-button span[aria-hidden] {
+  align-items: center;
+  display: inline-flex;
+  font-family: Arial, sans-serif;
+  font-size: 28px;
+  height: 24px;
+  justify-content: center;
+  line-height: 1;
+  transform: translateY(-1px);
+  width: 24px;
+}
+
+/* Horizontal scroll for the fixed-width matrix */
+.migration-matrix-container {
+  overflow-x: auto;
+  padding: 0 64px;
+}
+
+.migration-matrix {
+  min-width: 1560px;
+}
+
+.migration-header {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 4px;
+}
+
+.migration-header .migration-col {
+  color: #ffffff;
+  font-size: 20px;
+  padding: 8px 12px;
+}
+
+.migration-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.migration-row {
+  align-items: stretch;
+  border: 1px solid #717375;
+  border-radius: 16px;
+  cursor: grab;
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+  padding-right: 12px;
+  transition: border-color 150ms;
+}
+
+.migration-row.selected {
+  border-color: #fe2c55;
+  cursor: default;
+}
+
+.migration-row.dragging {
+  opacity: 0.45;
+}
+
+.migration-row.drop-target {
+  border-color: #fe2c55;
+  border-style: dashed;
+}
+
+/* Cells: centered, fixed widths matching the Figma export */
+.migration-col {
+  align-items: center;
+  box-sizing: border-box;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  text-align: center;
+}
+
+.col-thumb {
+  flex: 0 0 312px;
+  padding: 0;
+}
+
+.col-duration {
+  flex: 0 0 80px;
+}
+
+.col-desc {
+  flex: 0 0 280px;
+  padding: 0 4px;
+}
+
+.col-material {
+  flex: 0 0 280px;
+  padding: 0 8px;
+}
+
+.col-voiceover {
+  flex: 0 0 450px;
+  padding: 0 4px;
+}
+
+.col-status {
+  flex: 0 0 110px;
+  padding: 0 4px;
+}
+
+/* Thumbnail 312×240 (defines row height) */
+.migration-thumb-img {
+  background: #5d5f61;
+  height: 240px;
+  width: 312px;
+}
+
+/* Editable cells get the gray fill only when the row is selected (Figma Variant2). */
+.migration-row.selected .col-duration,
+.migration-row.selected .col-voiceover {
+  background: rgba(93, 95, 97, 0.6);
+  border-radius: 8px;
+}
+
+.migration-duration-input {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 20px;
+  text-align: center;
+  width: 100%;
+}
+
+.migration-duration-input:focus {
+  outline: none;
+}
+
+.migration-voiceover-input {
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 20px;
+  line-height: 30px;
+  min-height: 90px;
+  resize: none;
+  text-align: center;
+  width: 100%;
+}
+
+.migration-voiceover-input:focus {
+  outline: none;
+}
+
+/* 分镜描述 (read-only) */
+.desc-tag {
+  align-items: flex-start;
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.desc-tag-name {
+  color: #ffffff;
+  font-size: 20px;
+}
+
+.desc-tag-index {
+  color: #ffffff;
+  font-size: 12px;
+}
+
+.desc-body {
+  color: #ffffff;
+  font-size: 20px;
+  line-height: 30px;
+}
+
+/* 我的素材: scroll inside the cell when overflowing, hide scrollbar */
+.material-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  width: 100%;
+}
+
+.material-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.material-name,
+.material-note {
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+/* 素材状态 (read-only plain text) */
+.status-text {
+  color: #ffffff;
+  font-size: 20px;
+}
+
+/* TTS button (shown only on the selected row) */
+.tts-button {
+  background: var(--theme, #fe2c55);
+  border: none;
+  border-radius: 6px;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 13px;
+  margin-top: 8px;
+  padding: 6px 10px;
+}
+
+.tts-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tts-button.success {
+  background: var(--matched, #34b77a);
+}

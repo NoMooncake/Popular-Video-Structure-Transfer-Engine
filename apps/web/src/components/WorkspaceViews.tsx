@@ -32,6 +32,7 @@ type WorkspaceViewsProps = {
   materialFiles: UploadedVideoFile[];
   onSelectBlock: (blockId: string) => void;
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
+  onReorderBlocks: (orderedIds: string[]) => void;
   onStepChange: (step: StepKey) => void;
   onWorkflowReady: (result: WorkflowRunResult) => void;
   sampleAnalysis?: SampleAnalysis;
@@ -191,6 +192,7 @@ export const WorkspaceViews = ({
   materialFiles,
   onSelectBlock,
   onUpdateBlock,
+  onReorderBlocks,
   onStepChange,
   onWorkflowReady,
   sampleAnalysis,
@@ -229,10 +231,11 @@ export const WorkspaceViews = ({
       <StructureMigrationView
         blocks={blocks}
         materialFiles={materialFiles}
-        onNext={() => onStepChange("gap-fill")}
         onUpdateBlock={onUpdateBlock}
+        onReorderBlocks={onReorderBlocks}
         onStepChange={onStepChange}
         projectName={projectName}
+        onProjectNameChange={onProjectNameChange}
       />
     );
   }
@@ -978,18 +981,41 @@ const FigmaSampleAnalysisView = ({
 const StructureMigrationView = ({
   blocks,
   materialFiles,
-  onNext,
   onUpdateBlock,
-  onStepChange
+  onReorderBlocks,
+  onStepChange,
+  projectName,
+  onProjectNameChange
 }: {
   blocks: CanvasBlock[];
   materialFiles: UploadedVideoFile[];
-  onNext: () => void;
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
+  onReorderBlocks: (orderedIds: string[]) => void;
   onStepChange: (step: StepKey) => void;
+  projectName?: string;
+  onProjectNameChange?: (name: string) => void;
 }) => {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [ttsStatus, setTtsStatus] = useState<Record<string, "idle" | "loading" | "success">>({});
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState(projectName ?? "");
+
+  const title = projectName ?? "未命名项目";
+
+  const statusLabel: Record<MatchStatus, string> = {
+    matched: "已匹配",
+    partial: "AI补全",
+    missing: "待补全"
+  };
+
+  const saveTitle = () => {
+    if (tempTitle.trim() && onProjectNameChange) {
+      onProjectNameChange(tempTitle.trim());
+    }
+    setIsEditingTitle(false);
+  };
 
   const handleTtsGenerate = (blockId: string) => {
     setTtsStatus((prev) => ({ ...prev, [blockId]: "loading" }));
@@ -998,195 +1024,228 @@ const StructureMigrationView = ({
     }, 1500);
   };
 
+  const handleDrop = (targetId: string) => {
+    if (!dragId || dragId === targetId) {
+      setDragId(null);
+      setDropTargetId(null);
+      return;
+    }
+    const ids = blocks.map((block) => block.id);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(targetId);
+    if (from === -1 || to === -1) {
+      setDragId(null);
+      setDropTargetId(null);
+      return;
+    }
+    ids.splice(to, 0, ids.splice(from, 1)[0]);
+    onReorderBlocks(ids);
+    setDragId(null);
+    setDropTargetId(null);
+  };
+
+  const stopDrag = (event: { stopPropagation: () => void }) => event.stopPropagation();
+
   return (
-    <div className="page-shell migration-page">
-      <CanvasTopBar
-        activeStep="migration"
-        onNext={onNext}
-        onStepChange={onStepChange}
-        subtitle="把样例结构映射到新素材，人工调整时长和旁白，并生成配音。分镜与状态为只读锁定。"
-        title="结构迁移"
-      />
+    <div className="figma-analysis-page migration-page">
+      <header className="figma-analysis-topbar">
+        <div className="figma-analysis-brand">
+          <span>迁镜</span>
+          {isEditingTitle ? (
+            <input
+              autoFocus
+              className="figma-edit-input"
+              value={tempTitle}
+              onChange={(event) => setTempTitle(event.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") saveTitle();
+                if (event.key === "Escape") {
+                  setIsEditingTitle(false);
+                  setTempTitle(title);
+                }
+              }}
+            />
+          ) : (
+            <>
+              <strong>{title}</strong>
+              <button
+                aria-label="编辑项目名称"
+                className="figma-edit-icon"
+                type="button"
+                onClick={() => {
+                  setTempTitle(title);
+                  setIsEditingTitle(true);
+                }}
+              >
+                ✎
+              </button>
+            </>
+          )}
+        </div>
+        <div className="figma-analysis-avatar" aria-hidden="true" />
+      </header>
 
-      <section className="migration-layout">
-        <div className="content-card migration-main">
-          <div className="section-heading">
-            <div>
-              <span className="eyebrow">Mapping</span>
-              <h2>迁移矩阵</h2>
-            </div>
-            <p>点击或编辑任一行以激活选中态，时长与旁白可编辑，其余属性只读锁定。</p>
-          </div>
-          <div className="table-scroll">
-            <table className="data-table migration-table">
-              <thead>
-                <tr>
-                  <th>时长 (可编辑)</th>
-                  <th>样例视频</th>
-                  <th>分镜描述</th>
-                  <th>我的素材</th>
-                  <th>旁白 (可编辑)</th>
-                  <th>素材状态</th>
-                  <th>迁移结果</th>
-                </tr>
-              </thead>
-              <tbody>
-                {blocks.map((block, index) => {
-                  const isSelected = selectedRowId === block.id;
-                  const currentTts = ttsStatus[block.id] ?? "idle";
-                  const voiceoverText = block.timeline?.voiceover ?? "";
-
-                  return (
-                    <tr
-                      key={block.id}
-                      className={`migration-row ${isSelected ? "selected-row" : ""}`}
-                      onClick={() => setSelectedRowId(block.id)}
-                    >
-                      {/* 时长: Editable */}
-                      <td className="editable-cell">
-                        <div className="input-wrapper">
-                          <input
-                            type="text"
-                            className="migration-input duration-input"
-                            value={block.timeRange}
-                            onChange={(e) => {
-                              onUpdateBlock({
-                                ...block,
-                                timeRange: e.target.value
-                              });
-                            }}
-                            placeholder="e.g. 0-3s"
-                          />
-                        </div>
-                      </td>
-
-                      {/* 样例视频: Readonly */}
-                      <td className="readonly-cell">
-                        <PlaceholderBlock label={`样例 ${index + 1}`} />
-                      </td>
-
-                      {/* 分镜描述: Locked Readonly */}
-                      <td className="readonly-cell locked">
-                        <div className="readonly-lock-badge">
-                          <strong>{readableSlot(block)}</strong>
-                          <span className="lock-icon">🔒 只读</span>
-                        </div>
-                        <span>{readableRule(block)}</span>
-                      </td>
-
-                      {/* 我的素材: Readonly */}
-                      <td className="readonly-cell">
-                        <PlaceholderBlock label={materialFiles[index]?.original_filename ?? `素材 ${index + 1}`} />
-                      </td>
-
-                      {/* 旁白: Editable */}
-                      <td className="editable-cell voiceover-cell">
-                        <div className="voiceover-container">
-                          <textarea
-                            className="migration-textarea voiceover-textarea"
-                            value={voiceoverText}
-                            onChange={(e) => {
-                              const updatedTimeline = block.timeline
-                                ? { ...block.timeline, voiceover: e.target.value }
-                                : {
-                                    item_id: `tl_${block.id}`,
-                                    slot_id: block.id,
-                                    time_range: block.timeRange,
-                                    slot_type: block.slot.slot_type,
-                                    content_goal: block.slot.content_goal,
-                                    visual_source: "user_material",
-                                    visual_description: "",
-                                    subtitle: e.target.value,
-                                    voiceover: e.target.value,
-                                    transition: "none"
-                                  };
-                              onUpdateBlock({
-                                ...block,
-                                timeline: updatedTimeline
-                              });
-                            }}
-                            placeholder="输入旁白文本..."
-                            rows={3}
-                          />
-                          <button
-                            type="button"
-                            className={`tts-button ${currentTts}`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleTtsGenerate(block.id);
-                            }}
-                            disabled={currentTts === "loading" || !voiceoverText}
-                          >
-                            {currentTts === "idle" && "生成语音 (TTS)"}
-                            {currentTts === "loading" && <span className="spinner">生成中...</span>}
-                            {currentTts === "success" && "✓ 语音就绪"}
-                          </button>
-                        </div>
-                      </td>
-
-                      {/* 素材状态: Locked Readonly */}
-                      <td className="readonly-cell locked">
-                        <div className="status-badge-wrapper">
-                          <StatusBadge status={block.status} />
-                          <small>{statusTextByStatus[block.status]}</small>
-                          <span className="lock-tag">🔒</span>
-                        </div>
-                      </td>
-
-                      {/* 迁移结果: Readonly */}
-                      <td className="readonly-cell">
-                        <PlaceholderBlock label={readableSource(block.timeline?.visual_source)} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+      <div className="migration-scroll">
+        <div className="migration-toolbar">
+          <button
+            type="button"
+            className="migration-nav-button migration-nav-back"
+            onClick={() => onStepChange("analysis")}
+          >
+            <span aria-hidden="true">‹</span>
+            <span>样例拆解</span>
+          </button>
+          <span className="migration-hint">拖动块来调整结构，点击块编辑节奏与旁白</span>
+          <button
+            type="button"
+            className="migration-nav-button migration-nav-forward"
+            onClick={() => onStepChange("gap-fill")}
+          >
+            <span>进入画布</span>
+            <span aria-hidden="true">›</span>
+          </button>
         </div>
 
-        <aside className="side-stack">
-          <section className="content-card">
-            <div className="section-heading compact">
-              <div>
-                <span className="eyebrow">Blueprint</span>
-                <h2>结构蓝图</h2>
-              </div>
+        <div className="migration-matrix-container">
+          <div className="migration-matrix">
+            <div className="migration-header">
+              <span className="migration-col col-thumb">迁移结果</span>
+              <span className="migration-col col-duration">时长</span>
+              <span className="migration-col col-desc">分镜描述</span>
+              <span className="migration-col col-material">我的素材</span>
+              <span className="migration-col col-voiceover">旁白</span>
+              <span className="migration-col col-status">素材状态</span>
             </div>
-            <div className="slot-list">
-              {blocks.map((block) => (
-                <div className="slot-item" key={block.id}>
-                  <span>{block.timeRange}</span>
-                  <strong>{readableSlot(block)}</strong>
-                  <StatusBadge status={block.status} />
-                </div>
-              ))}
-            </div>
-          </section>
 
-          <section className="content-card">
-            <div className="section-heading compact">
-              <div>
-                <span className="eyebrow">Gaps</span>
-                <h2>素材缺口诊断</h2>
-              </div>
+            <div className="migration-rows">
+              {blocks.map((block, index) => {
+                const isSelected = selectedRowId === block.id;
+                const currentTts = ttsStatus[block.id] ?? "idle";
+                const voiceoverText = block.timeline?.voiceover ?? "";
+                const materialName = materialFiles[index]?.original_filename ?? `素材 ${index + 1}`;
+                const materialNote = block.timeline?.visual_description || "00:00-00:03 裁切 + 加标题字";
+                const rowClass = [
+                  "migration-row",
+                  isSelected ? "selected" : "",
+                  dragId === block.id ? "dragging" : "",
+                  dropTargetId === block.id ? "drop-target" : ""
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+
+                return (
+                  <div
+                    key={block.id}
+                    className={rowClass}
+                    draggable={!isSelected}
+                    onDragStart={() => setDragId(block.id)}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      if (dropTargetId !== block.id) {
+                        setDropTargetId(block.id);
+                      }
+                    }}
+                    onDrop={() => handleDrop(block.id)}
+                    onDragEnd={() => {
+                      setDragId(null);
+                      setDropTargetId(null);
+                    }}
+                    onClick={() => setSelectedRowId(block.id)}
+                  >
+                    {/* 迁移结果: 缩略图（只读） */}
+                    <div className="migration-col col-thumb">
+                      <div className="migration-thumb-img" />
+                    </div>
+
+                    {/* 时长: 可编辑（选中时灰底） */}
+                    <div className="migration-col col-duration editable">
+                      <input
+                        type="text"
+                        className="migration-duration-input"
+                        value={block.timeRange}
+                        onMouseDown={stopDrag}
+                        onClick={stopDrag}
+                        onChange={(event) =>
+                          onUpdateBlock({ ...block, timeRange: event.target.value })
+                        }
+                        placeholder="3s"
+                      />
+                    </div>
+
+                    {/* 分镜描述: 只读纯文字 */}
+                    <div className="migration-col col-desc">
+                      <div className="desc-tag">
+                        <span className="desc-tag-name">{readableSlot(block)}</span>
+                        <span className="desc-tag-index">{index + 1}</span>
+                      </div>
+                      <div className="desc-body">{readableRule(block)}</div>
+                    </div>
+
+                    {/* 我的素材: 只读，过多时框内滚动 */}
+                    <div className="migration-col col-material">
+                      <div className="material-scroll">
+                        <div className="material-name">{materialName}</div>
+                        <div className="material-note">{materialNote}</div>
+                      </div>
+                    </div>
+
+                    {/* 旁白: 可编辑（选中时灰底）+ TTS（仅选中显示） */}
+                    <div className="migration-col col-voiceover editable">
+                      <textarea
+                        className="migration-voiceover-input"
+                        value={voiceoverText}
+                        onMouseDown={stopDrag}
+                        onClick={stopDrag}
+                        onChange={(event) => {
+                          const updatedTimeline = block.timeline
+                            ? { ...block.timeline, voiceover: event.target.value }
+                            : {
+                                item_id: `tl_${block.id}`,
+                                slot_id: block.id,
+                                time_range: block.timeRange,
+                                slot_type: block.slot.slot_type,
+                                content_goal: block.slot.content_goal,
+                                visual_source: "user_material",
+                                visual_description: "",
+                                subtitle: event.target.value,
+                                voiceover: event.target.value,
+                                transition: "none"
+                              };
+                          onUpdateBlock({ ...block, timeline: updatedTimeline });
+                        }}
+                        placeholder="输入旁白文本..."
+                        rows={2}
+                      />
+                      {isSelected ? (
+                        <button
+                          type="button"
+                          className={`tts-button ${currentTts}`}
+                          onMouseDown={stopDrag}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleTtsGenerate(block.id);
+                          }}
+                          disabled={currentTts === "loading" || !voiceoverText}
+                        >
+                          {currentTts === "idle" && "生成语音 (TTS)"}
+                          {currentTts === "loading" && "生成中..."}
+                          {currentTts === "success" && "✓ 语音就绪"}
+                        </button>
+                      ) : null}
+                    </div>
+
+                    {/* 素材状态: 只读纯文字 */}
+                    <div className="migration-col col-status">
+                      <span className="status-text">{statusLabel[block.status]}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-            <div className="gap-summary">
-              <MetricCard label="总缺口" value={`${gapReport.summary.total_gaps}`} />
-              <MetricCard label="阻塞缺口" value={`${gapReport.summary.blocking_gaps}`} />
-            </div>
-            <div className="gap-mini-list">
-              {gapReport.gaps.map((gap) => (
-                <article className="gap-mini-card" key={gap.gap_id}>
-                  <span className={`severity-dot ${gap.severity}`} />
-                  <strong>{slotLabelByType[gap.slot_type] ?? gap.slot_type}</strong>
-                  <p>{readableGapMissing(gap.gap_id, gap.missing)}</p>
-                </article>
-              ))}
-            </div>
-          </section>
-        </aside>
-      </section>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
@@ -1205,6 +1264,7 @@ const GapFillView = ({
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onStepChange: (step: StepKey) => void;
   selectedBlockId: string;
+  projectName?: string;
 }) => {
   return (
     <div className="page-shell gap-fill-page">
@@ -1256,6 +1316,7 @@ const GapDetailView = ({
   onNext: () => void;
   onStepChange: (step: StepKey) => void;
   selectedBlock: CanvasBlock;
+  projectName?: string;
 }) => {
   const gaps = selectedBlock.gap ? [selectedBlock.gap] : gapReport.gaps;
 
@@ -1327,6 +1388,7 @@ const DemoView = ({
 }: {
   blocks: CanvasBlock[];
   onStepChange: (step: StepKey) => void;
+  projectName?: string;
 }) => {
   return (
     <div className="page-shell demo-page">

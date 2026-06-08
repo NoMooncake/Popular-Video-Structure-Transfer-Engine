@@ -13,9 +13,9 @@ import type {
 
 export type WorkflowRunResult = {
   materialFiles: UploadedVideoFile[];
-  sampleAnalysis: SampleAnalysis;
-  sampleFile: UploadedVideoFile;
-  structureBlueprint: StructureBlueprint;
+  sampleAnalysis?: SampleAnalysis;
+  sampleFile?: UploadedVideoFile;
+  structureBlueprint?: StructureBlueprint;
 };
 
 export const App = () => {
@@ -47,6 +47,19 @@ export const App = () => {
     );
   };
 
+  const handleReorderBlocks = (orderedIds: string[]) => {
+    setBlocks((prev) => {
+      const byId = new Map(prev.map((block) => [block.id, block]));
+      const reordered = orderedIds
+        .map((id) => byId.get(id))
+        .filter((block): block is CanvasBlock => Boolean(block));
+      // Keep any block not present in orderedIds (safety) appended at the end.
+      const seen = new Set(orderedIds);
+      const remainder = prev.filter((block) => !seen.has(block.id));
+      return [...reordered, ...remainder];
+    });
+  };
+
   return (
     <AppShell>
       <main className={`workspace page-${activeStep}`}>
@@ -56,6 +69,7 @@ export const App = () => {
           materialFiles={workflowResult?.materialFiles ?? []}
           onSelectBlock={setSelectedBlockId}
           onUpdateBlock={handleUpdateBlock}
+          onReorderBlocks={handleReorderBlocks}
           onStepChange={setActiveStep}
           onWorkflowReady={setWorkflowResult}
           sampleAnalysis={workflowResult?.sampleAnalysis}
