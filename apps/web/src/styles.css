@@ -1923,17 +1923,6 @@ input {
   display: flex;
   gap: 24px;
   height: 340px; /* Fixed height to enable internal scrolling */
-  align-items: center; /* Center the plus icon vertically */
-}
-
-.upload-plus-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  color: var(--text-muted);
-  font-weight: 300;
-  user-select: none;
 }
 
 .upload-card-large {
@@ -2047,6 +2036,11 @@ input {
   background: var(--panel);
   margin-bottom: 16px;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--text-muted);
+  font-weight: 300;
 }
 
 .canvas-section {

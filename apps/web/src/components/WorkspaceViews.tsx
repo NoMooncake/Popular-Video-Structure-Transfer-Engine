@@ -472,15 +472,12 @@ const InputView = ({
                 </div>
               ) : (
                 <div className="upload-placeholder">
-                  <div className="icon-video"></div>
+                  <div className="icon-video">+</div>
                   <strong>参考素材</strong>
                   <span>添加你想分析的样例视频</span>
                 </div>
               )}
             </label>
-            
-            <div className="upload-plus-icon">+</div>
-
             <label className={`upload-card-large ${materialFiles.length > 0 ? 'has-media' : ''}`}>
               <input multiple type="file" accept="image/*,video/*,.txt,.md" onChange={updateMaterialFiles} />
               {materialFiles.length > 0 ? (
@@ -500,7 +497,7 @@ const InputView = ({
                 </div>
               ) : (
                 <div className="upload-placeholder">
-                  <div className="icon-materials"></div>
+                  <div className="icon-materials">+</div>
                   <strong>真实素材</strong>
                   <span>添加你的素材</span>
                 </div>
