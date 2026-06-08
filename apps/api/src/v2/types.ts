@@ -84,6 +84,7 @@ export type V2PipelineResult = {
   };
   stages: {
     reference_video_analyses: JsonObject[];
+    reference_analysis_tables: JsonObject[];
     user_material_analysis: JsonObject;
     fillable_architecture: JsonObject;
     material_coverage: V2MaterialCoverage;

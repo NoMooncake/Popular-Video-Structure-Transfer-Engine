@@ -7,6 +7,7 @@ import {
   findV2MaterialCandidateFrameFile,
   readV2MaterialCandidatePool
 } from "../services/v2MaterialCandidatePoolService.js";
+import { findV2ReferenceFrameFile } from "../v2/referenceFrames.js";
 import {
   assembleV2CanvasFinalVideo,
   generateV2CanvasGapVideo,
@@ -26,6 +27,7 @@ import {
   updateV2ScriptSlot
 } from "../services/v2ScriptCanvasService.js";
 import {
+  analyzeV2ReferenceVideos,
   assembleV2FinalVideo,
   findV2FinalAssemblyVideoFile,
   findV2GeneratedVideoReviewFile,
@@ -141,6 +143,30 @@ v2Routes.post("/pipeline/analyze", async (req, res) => {
       error: {
         code: "v2_pipeline_failed",
         message: getErrorMessage(error, "V2 pipeline 执行失败")
+      }
+    });
+  }
+});
+
+v2Routes.post("/reference/analyze", async (req, res) => {
+  try {
+    const result = await analyzeV2ReferenceVideos(req.body ?? {});
+    res.json(result);
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_reference_analysis_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_reference_analysis_failed",
+        message: getErrorMessage(error, "V2 样例分析执行失败")
       }
     });
   }
@@ -576,6 +602,22 @@ v2Routes.get("/material-candidate-pools/:candidatePoolId/frames/:filename", (req
       error: {
         code: "material_candidate_frame_not_found",
         message: "Material candidate frame not found"
+      }
+    });
+    return;
+  }
+
+  res.sendFile(framePath);
+});
+
+v2Routes.get("/reference-frames/:runId/:filename", (req, res) => {
+  const framePath = findV2ReferenceFrameFile(req.params.runId, req.params.filename);
+
+  if (!framePath) {
+    res.status(404).json({
+      error: {
+        code: "reference_frame_not_found",
+        message: "Reference frame not found"
       }
     });
     return;

@@ -10,6 +10,7 @@ type ApiProviderConfig = {
   apiPath: string;
   model?: string;
   apiKey?: string;
+  timeoutMs?: number;
   enabled: boolean;
 };
 
@@ -674,7 +675,7 @@ const requestProviderJson = async (
       "Content-Type": "application/json"
     },
     body: method === "POST" ? JSON.stringify(body || {}) : undefined,
-    signal: AbortSignal.timeout(120_000)
+    signal: AbortSignal.timeout(providerConfig.timeoutMs || 300_000)
   });
   const responseBody = (await response.json().catch(() => ({}))) as
     | ChatCompletionResponse

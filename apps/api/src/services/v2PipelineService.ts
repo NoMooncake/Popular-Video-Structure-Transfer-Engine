@@ -10,7 +10,10 @@ import {
   requestMultimodalJson,
   requestVideoGenerationTask
 } from "../v2/providers/apiJsonClient.js";
-import { collectV2ReferenceFramesFromVideos } from "../v2/referenceFrames.js";
+import {
+  collectV2ReferenceFramesFromVideos,
+  type V2ReferenceFrame
+} from "../v2/referenceFrames.js";
 import type {
   JsonObject,
   V2FinalAssemblyRequest,
@@ -256,12 +259,8 @@ const normalizeRequest = (payload: V2PipelineRequest): Required<V2PipelineReques
 
   if (referenceVideos.length === 0) {
     throw new V2PipelineInputError(
-      "At least one reference video is required; V2 is designed for two or three."
+      "At least one reference video is required."
     );
-  }
-
-  if (referenceVideos.length > 3) {
-    throw new V2PipelineInputError("V2 currently supports at most three reference videos");
   }
 
   return {
@@ -364,6 +363,334 @@ const collectReferenceImagesForGeneration = async (
 ): Promise<string[]> => {
   const frames = await collectV2ReferenceFramesFromVideos(videoRefs, maxFrames);
   return frames.map((frame) => frame.data_url);
+};
+
+const collectReferenceFramesByVideo = async (
+  videoRefs: V2VideoRef[],
+  framesPerVideo: number
+): Promise<V2ReferenceFrame[][]> => {
+  return Promise.all(
+    videoRefs.map((videoRef) => collectV2ReferenceFramesFromVideos([videoRef], framesPerVideo))
+  );
+};
+
+const getNonEmptyJsonObject = (...values: unknown[]): JsonObject => {
+  for (const value of values) {
+    const record = asJsonObject(value);
+    if (Object.keys(record).length > 0) {
+      return record;
+    }
+  }
+
+  return {};
+};
+
+const asJsonObjectArray = (value: unknown): JsonObject[] => {
+  return Array.isArray(value) ? value.map((item) => asJsonObject(item)) : [];
+};
+
+const normalizeTimeValueSeconds = (value: unknown): number | undefined => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  const clockMatch = trimmed.match(/^(?:(\d{1,2}):)?(\d{1,2})(?:\.(\d+))?$/u);
+  if (clockMatch) {
+    const minutes = Number(clockMatch[1] || 0);
+    const seconds = Number(`${clockMatch[2]}.${clockMatch[3] || 0}`);
+    const total = minutes * 60 + seconds;
+    return Number.isFinite(total) ? total : undefined;
+  }
+
+  const numericMatch = trimmed.match(/(\d+(?:\.\d+)?)/u);
+  if (!numericMatch) {
+    return undefined;
+  }
+
+  const numericValue = Number(numericMatch[1]);
+  return Number.isFinite(numericValue) ? numericValue : undefined;
+};
+
+const formatSecondsForTable = (value: number): string => {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+};
+
+const formatTableDuration = (startSeconds: number, endSeconds: number): string => {
+  return `${formatSecondsForTable(startSeconds)} - ${formatSecondsForTable(endSeconds)}s`;
+};
+
+const getRecordTimeRange = (
+  record: JsonObject,
+  index: number,
+  total: number,
+  targetDuration: number
+): { startSeconds: number; endSeconds: number } => {
+  const timeRange = asJsonObject(record.time_range);
+  const fallbackStart = (index / Math.max(1, total)) * targetDuration;
+  const fallbackEnd = ((index + 1) / Math.max(1, total)) * targetDuration;
+  const startSeconds =
+    normalizeTimeValueSeconds(record.start_seconds) ??
+    normalizeTimeValueSeconds(record.start_time) ??
+    normalizeTimeValueSeconds(timeRange.start_seconds) ??
+    normalizeTimeValueSeconds(timeRange.start) ??
+    fallbackStart;
+  const endSeconds =
+    normalizeTimeValueSeconds(record.end_seconds) ??
+    normalizeTimeValueSeconds(record.end_time) ??
+    normalizeTimeValueSeconds(timeRange.end_seconds) ??
+    normalizeTimeValueSeconds(timeRange.end) ??
+    fallbackEnd;
+
+  return {
+    startSeconds: Number(Math.max(0, startSeconds).toFixed(3)),
+    endSeconds: Number(Math.max(startSeconds, endSeconds).toFixed(3))
+  };
+};
+
+const findNearestReferenceFrame = (
+  frames: V2ReferenceFrame[],
+  targetSeconds: number
+): V2ReferenceFrame | undefined => {
+  return frames
+    .slice()
+    .sort(
+      (first, second) =>
+        Math.abs(first.time_seconds - targetSeconds) -
+        Math.abs(second.time_seconds - targetSeconds)
+    )[0];
+};
+
+const getReferenceAnalysisRoot = (analysis: JsonObject): JsonObject => {
+  const payload = asJsonObject(analysis.payload);
+
+  return getNonEmptyJsonObject(
+    analysis.reference_video_analysis,
+    payload.reference_video_analysis,
+    analysis.analysis,
+    payload.analysis,
+    analysis.result,
+    payload.result,
+    analysis
+  );
+};
+
+const getReferenceTimelineRecords = (analysis: JsonObject): JsonObject[] => {
+  const root = getReferenceAnalysisRoot(analysis);
+  const payload = asJsonObject(analysis.payload);
+  const candidates = [
+    root.slot_timeline,
+    root.timeline,
+    root.shot_timeline,
+    root.slots,
+    root.structure_slots,
+    root.analysis_table,
+    asJsonObject(root.analysis_table).rows,
+    payload.slot_timeline,
+    payload.timeline,
+    payload.shot_timeline,
+    payload.slots,
+    payload.structure_slots
+  ];
+
+  for (const candidate of candidates) {
+    const records = asJsonObjectArray(candidate);
+    if (records.length > 0) {
+      return records;
+    }
+  }
+
+  return [];
+};
+
+const splitReferenceContentLogic = (analysis: JsonObject): string[] => {
+  const root = getReferenceAnalysisRoot(analysis);
+  const payload = asJsonObject(analysis.payload);
+  const rawContentLogic =
+    normalizeOptionalString(root.content_logic) ||
+    normalizeOptionalString(payload.content_logic) ||
+    normalizeOptionalString(root.video_summary) ||
+    normalizeOptionalString(payload.video_summary);
+
+  if (!rawContentLogic) {
+    return [];
+  }
+
+  return rawContentLogic
+    .split(/\s*(?:->|→|，然后|随后|最后)\s*/u)
+    .map((item) => item.replace(/[。；;]+$/u, "").trim())
+    .filter(Boolean)
+    .slice(0, 8);
+};
+
+const getReferenceMigrationText = (
+  analysis: JsonObject,
+  record: JsonObject,
+  index: number
+): string => {
+  const root = getReferenceAnalysisRoot(analysis);
+  const patterns = [
+    ...normalizeStringArray(root.reusable_patterns),
+    ...normalizeStringArray(root.reusable_structure_patterns),
+    ...normalizeStringArray(asJsonObject(analysis.payload).reusable_patterns),
+    ...normalizeStringArray(asJsonObject(analysis.payload).reusable_structure_patterns)
+  ];
+
+  return normalizeReferenceMigrationPossibility(
+    normalizeOptionalString(record.migration_possibility) ||
+    normalizeOptionalString(record.transferable_rule) ||
+    normalizeOptionalString(record.reusable_rule) ||
+    normalizeOptionalString(record.analysis) ||
+    patterns[index] ||
+    normalizeOptionalString(root.persuasion_logic) ||
+    "可迁移为新视频中相同结构位置的画面、节奏和商业说服表达。"
+  );
+};
+
+const referenceSlotTitleByType: Record<string, string> = {
+  strong_hook: "强 Hook",
+  pain_point_scene: "痛点场景",
+  product_hero: "产品亮相",
+  selling_point_proof: "卖点证明",
+  usage_process: "使用过程",
+  effect_comparison: "效果对比",
+  cta: "行动引导"
+};
+
+const readableReferenceSlotTitle = (value: string | undefined): string | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  return referenceSlotTitleByType[value] || value;
+};
+
+const normalizeReferenceMigrationPossibility = (value: string): string => {
+  const normalized = value
+    .trim()
+    .replace(/^(?:高度可迁移|高可迁移|高|中|低)[。,.，、：:\s]*/u, "")
+    .trim();
+
+  return `高度可迁移。${normalized || "可迁移为新视频中相同结构位置的画面、节奏和商业说服表达。"}`;
+};
+
+const buildReferenceTableRow = (
+  analysis: JsonObject,
+  record: JsonObject,
+  frames: V2ReferenceFrame[],
+  index: number,
+  total: number,
+  targetDuration: number
+): JsonObject => {
+  const { startSeconds, endSeconds } = getRecordTimeRange(
+    record,
+    index,
+    total,
+    targetDuration
+  );
+  const nearestFrame = findNearestReferenceFrame(frames, (startSeconds + endSeconds) / 2);
+  const rawTitle =
+    normalizeOptionalString(record.title) ||
+    normalizeOptionalString(record.shot_title) ||
+    normalizeOptionalString(record.slot_name) ||
+    normalizeOptionalString(record.slot_type) ||
+    `分镜 ${index + 1}`;
+  const title = readableReferenceSlotTitle(rawTitle) || rawTitle;
+  const visualDescription =
+    normalizeOptionalString(record.visual_description) ||
+    normalizeOptionalString(record.description) ||
+    normalizeOptionalString(record.content) ||
+    title;
+  const copywriting = normalizeOptionalString(record.copywriting);
+  const description =
+    copywriting && copywriting !== "无"
+      ? `${visualDescription}\n文案：${copywriting}`
+      : visualDescription;
+
+  return {
+    row_id:
+      normalizeOptionalString(record.row_id) ||
+      normalizeOptionalString(record.shot_id) ||
+      normalizeOptionalString(record.slot_id) ||
+      `reference_row_${String(index + 1).padStart(2, "0")}`,
+    duration: formatTableDuration(startSeconds, endSeconds),
+    sample_video: nearestFrame
+      ? {
+          frame_id: nearestFrame.frame_id,
+          time_seconds: nearestFrame.time_seconds,
+          media: {
+            uri: nearestFrame.public_uri,
+            mime_type: nearestFrame.mime_type
+          }
+        }
+      : undefined,
+    shot_description: {
+      title,
+      description
+    },
+    migration_possibility: getReferenceMigrationText(analysis, record, index),
+    source_slot_type: normalizeOptionalString(record.slot_type)
+  };
+};
+
+const buildSummaryReferenceRows = (
+  analysis: JsonObject,
+  targetDuration: number
+): JsonObject[] => {
+  return splitReferenceContentLogic(analysis).map((description, index, items) => ({
+    row_id: `reference_summary_row_${String(index + 1).padStart(2, "0")}`,
+    start_seconds: Number(((index / Math.max(1, items.length)) * targetDuration).toFixed(3)),
+    end_seconds: Number(
+      (((index + 1) / Math.max(1, items.length)) * targetDuration).toFixed(3)
+    ),
+    title: description.split(/[：:]/u)[0] || `分镜 ${index + 1}`,
+    description
+  }));
+};
+
+export const buildV2ReferenceAnalysisTables = (
+  analyses: JsonObject[],
+  videoRefs: V2VideoRef[],
+  framesByVideo: V2ReferenceFrame[][],
+  targetDuration: number
+): JsonObject[] => {
+  return analyses.map((analysis, index) => {
+    const videoRef = videoRefs[index];
+    const frames = framesByVideo[index] || [];
+    const timelineRecords = getReferenceTimelineRecords(analysis);
+    const records =
+      timelineRecords.length > 0
+        ? timelineRecords
+        : buildSummaryReferenceRows(analysis, targetDuration);
+
+    return {
+      sample_index: index + 1,
+      file_id: videoRef?.file_id,
+      source_label: videoRef?.label,
+      columns: ["时长", "样例视频", "分镜描述", "迁移可能性"],
+      frame_count: frames.length,
+      frames: frames.map((frame) => ({
+        frame_id: frame.frame_id,
+        time_seconds: frame.time_seconds,
+        uri: frame.public_uri,
+        source_label: frame.source_label
+      })),
+      rows: records.map((record, rowIndex) =>
+        buildReferenceTableRow(
+          analysis,
+          record,
+          frames,
+          rowIndex,
+          records.length,
+          targetDuration
+        )
+      )
+    };
+  });
 };
 
 const sanitizeFallbackReason = (error: unknown): string => {
@@ -2598,14 +2925,20 @@ const makeFallbackImageToVideoResponse = (
   };
 };
 
-export const runV2Pipeline = async (
-  payload: V2PipelineRequest
-): Promise<V2PipelineResult> => {
-  const normalized = normalizeRequest(payload);
-  const targetDuration = Number(normalized.options.target_duration_seconds || 30);
-  const adaptiveSlotPlanningRules = getAdaptiveSlotPlanningRules(targetDuration);
-  const allowFallback = normalized.options.allow_fallback !== false;
-  const fallbackReasons: string[] = [];
+const runV2ReferenceAnalysisStage = async (
+  normalized: Required<V2PipelineRequest>,
+  targetDuration: number,
+  adaptiveSlotPlanningRules: JsonObject,
+  allowFallback: boolean
+): Promise<{
+  referenceVideoAnalyses: JsonObject[];
+  referenceAnalysisTables: JsonObject[];
+  fallbackReasons: string[];
+}> => {
+  const referenceFramesByVideo = await collectReferenceFramesByVideo(
+    normalized.reference_videos,
+    6
+  );
 
   const referenceAnalysisResults = await Promise.all(
     normalized.reference_videos.map((videoRef, index) =>
@@ -2616,11 +2949,16 @@ export const runV2Pipeline = async (
           target_duration_seconds: targetDuration,
           reference_index: index + 1,
           video: videoRef,
+          reference_frames: referenceFramesByVideo[index].map((frame) => ({
+            frame_id: frame.frame_id,
+            time_seconds: frame.time_seconds,
+            public_uri: frame.public_uri
+          })),
           reusable_slot_type_reference: commercialAdSlots.map((slot) => slot.slot_type),
           adaptive_slot_planning_rules: adaptiveSlotPlanningRules,
           material_understanding_policy: materialUnderstandingPolicy,
           instruction:
-            "阅读并理解这个商业广告样例视频。请用中文返回广告结构槽位、视觉/包装风格、说服逻辑、内容逻辑和可迁移模式。只把样例节奏当作可迁移参考，不要把用户后续成片节奏绑定为同一种快切/慢节奏类型。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
+            "阅读并理解这个商业广告样例视频。请同时参考 reference_frames，它们是按时间从该样例抽出的关键帧。必须用中文返回 reference_video_analysis.slot_timeline 数组，数组按时间顺序覆盖主要分镜段落；每段必须包含 slot_type、start_time、end_time、duration_seconds、visual_description、copywriting、analysis、migration_possibility，并尽量包含 frame_refs，引用最接近该段的 reference_frames.frame_id。请同时返回 visual_style、persuasion_logic、content_logic 和 reusable_patterns。只把样例节奏当作可迁移参考，不要把用户后续成片节奏绑定为同一种快切/慢节奏类型。reusable_slot_type_reference 只是可复用槽位类型参考，不代表新视频必须保留所有槽位。不要复制样例视频的具体内容。所有图片生成 prompt 和图生视频 prompt 必须中文。"
         },
         allowFallback,
         (reason) =>
@@ -2629,11 +2967,84 @@ export const runV2Pipeline = async (
     )
   );
   const referenceVideoAnalyses = referenceAnalysisResults.map((result) => result.output);
-  fallbackReasons.push(
-    ...referenceAnalysisResults
-      .map((result) => result.fallbackReason)
-      .filter((reason): reason is string => Boolean(reason))
+  const fallbackReasons = referenceAnalysisResults
+    .map((result) => result.fallbackReason)
+    .filter((reason): reason is string => Boolean(reason));
+  const referenceAnalysisTables = buildV2ReferenceAnalysisTables(
+    referenceVideoAnalyses,
+    normalized.reference_videos,
+    referenceFramesByVideo,
+    targetDuration
   );
+
+  return {
+    referenceVideoAnalyses,
+    referenceAnalysisTables,
+    fallbackReasons
+  };
+};
+
+export const analyzeV2ReferenceVideos = async (
+  payload: V2PipelineRequest
+): Promise<JsonObject> => {
+  const normalized = normalizeRequest(payload);
+  const targetDuration = Number(normalized.options.target_duration_seconds || 30);
+  const adaptiveSlotPlanningRules = getAdaptiveSlotPlanningRules(targetDuration);
+  const allowFallback = normalized.options.allow_fallback !== false;
+  const referenceStage = await runV2ReferenceAnalysisStage(
+    normalized,
+    targetDuration,
+    adaptiveSlotPlanningRules,
+    allowFallback
+  );
+
+  return {
+    id: `v2_reference_analysis_${Date.now()}`,
+    version: "2.0.0",
+    created_at: new Date().toISOString(),
+    source: {
+      type: "api_first_v2_reference_analysis",
+      multimodal_provider: config.providers.v2.multimodal.provider,
+      fallback_used: referenceStage.fallbackReasons.length > 0,
+      fallback_reason: referenceStage.fallbackReasons[0]
+    },
+    input: {
+      reference_video_count: normalized.reference_videos.length,
+      user_material_count: normalized.user_materials.length,
+      text_asset_count: normalized.text_assets.length
+    },
+    stages: {
+      reference_video_analyses: referenceStage.referenceVideoAnalyses,
+      reference_analysis_tables: referenceStage.referenceAnalysisTables
+    },
+    summary: {
+      status: "completed",
+      target_duration_seconds: targetDuration,
+      notes:
+        referenceStage.fallbackReasons.length > 0
+          ? "V2 样例分析已使用降级输出完成。"
+          : "V2 样例分析已完成，可直接用于样例解析页表格。"
+    }
+  };
+};
+
+export const runV2Pipeline = async (
+  payload: V2PipelineRequest
+): Promise<V2PipelineResult> => {
+  const normalized = normalizeRequest(payload);
+  const targetDuration = Number(normalized.options.target_duration_seconds || 30);
+  const adaptiveSlotPlanningRules = getAdaptiveSlotPlanningRules(targetDuration);
+  const allowFallback = normalized.options.allow_fallback !== false;
+  const fallbackReasons: string[] = [];
+  const referenceStage = await runV2ReferenceAnalysisStage(
+    normalized,
+    targetDuration,
+    adaptiveSlotPlanningRules,
+    allowFallback
+  );
+  const referenceVideoAnalyses = referenceStage.referenceVideoAnalyses;
+  const referenceAnalysisTables = referenceStage.referenceAnalysisTables;
+  fallbackReasons.push(...referenceStage.fallbackReasons);
 
   const userMaterialAnalysisResult = await callMultimodalWithFallback(
     "analyze_user_request_and_materials",
@@ -2667,6 +3078,7 @@ export const runV2Pipeline = async (
       material_understanding_policy: materialUnderstandingPolicy,
       user_request: normalized.user_request,
       reference_video_analyses: referenceVideoAnalyses,
+      reference_analysis_tables: referenceAnalysisTables,
       user_material_analysis: userMaterialAnalysis,
       instruction:
         "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。成片节奏和结构取舍必须优先服从用户需求、目标时长和信息密度；如果用户没有明确节奏要求，再把样例和素材作为弱参考。不要根据用户原始素材的长短或一镜到底形式直接判定成片节奏。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
@@ -2788,6 +3200,7 @@ export const runV2Pipeline = async (
     },
     stages: {
       reference_video_analyses: referenceVideoAnalyses,
+      reference_analysis_tables: referenceAnalysisTables,
       user_material_analysis: userMaterialAnalysis,
       fillable_architecture: fillableArchitecture,
       material_coverage: materialCoverage,

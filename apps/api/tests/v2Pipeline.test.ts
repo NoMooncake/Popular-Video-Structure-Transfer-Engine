@@ -12,6 +12,7 @@ import {
   assembleV2FinalVideo,
   attachProductionPromptsToMaterialCoverage,
   buildV2DeterministicMaterialCoverage,
+  buildV2ReferenceAnalysisTables,
   getAdaptiveSlotPlanningRules,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
@@ -1476,6 +1477,81 @@ test("v2 provider JSON extraction repairs common model JSON issues", () => {
     extractJsonObject('{"prompt":"第一行\n第二行"}', "test_json_newline").prompt,
     "第一行\n第二行"
   );
+});
+
+test("v2 reference analysis tables bind timeline rows to extracted frame URIs", () => {
+  const tables = buildV2ReferenceAnalysisTables(
+    [
+      {
+        reference_video_analysis: {
+          slot_timeline: [
+            {
+              slot_id: "ref_slot_01",
+              slot_type: "strong_hook",
+              start_time: "00:00",
+              end_time: "00:02",
+              visual_description: "冰镇产品强特写，水珠和冰块制造清爽感。",
+              migration_possibility: "可迁移为新广告的冰爽产品开场。"
+            },
+            {
+              slot_id: "ref_slot_02",
+              slot_type: "product_hero",
+              start_time: "00:02",
+              end_time: "00:05",
+              visual_description: "产品旋转展示，突出包装和质感。",
+              migration_possibility: "可迁移为新商品的主体亮相。"
+            }
+          ]
+        }
+      }
+    ],
+    [
+      {
+        file_id: "reference-file-id",
+        uri: "/tmp/reference.mp4",
+        role: "reference_sample",
+        label: "样例视频 1"
+      }
+    ],
+    [
+      [
+        {
+          frame_id: "reference_frame_01",
+          source_uri: "/tmp/reference.mp4",
+          source_label: "样例视频 1",
+          time_seconds: 1,
+          file_path: "/tmp/reference_01.jpg",
+          public_uri: "/api/v2/reference-frames/run/reference_01.jpg",
+          mime_type: "image/jpeg",
+          data_url: "data:image/jpeg;base64,aaa"
+        },
+        {
+          frame_id: "reference_frame_02",
+          source_uri: "/tmp/reference.mp4",
+          source_label: "样例视频 1",
+          time_seconds: 4,
+          file_path: "/tmp/reference_02.jpg",
+          public_uri: "/api/v2/reference-frames/run/reference_02.jpg",
+          mime_type: "image/jpeg",
+          data_url: "data:image/jpeg;base64,bbb"
+        }
+      ]
+    ],
+    20
+  );
+
+  assert.equal(tables.length, 1);
+  assert.deepEqual(tables[0]?.columns, ["时长", "样例视频", "分镜描述", "迁移可能性"]);
+  assert.equal(tables[0]?.file_id, "reference-file-id");
+
+  const rows = asRecordArray(tables[0]?.rows);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.duration, "0 - 2s");
+  assert.equal(asRecord(asRecord(rows[0]?.sample_video).media).uri, "/api/v2/reference-frames/run/reference_01.jpg");
+  assert.equal(asRecord(asRecord(rows[1]?.sample_video).media).uri, "/api/v2/reference-frames/run/reference_02.jpg");
+  assert.equal(asRecord(rows[0]?.shot_description).title, "强 Hook");
+  assert.equal(rows[0]?.migration_possibility, "高度可迁移。可迁移为新广告的冰爽产品开场。");
+  assert.equal(rows[1]?.migration_possibility, "高度可迁移。可迁移为新商品的主体亮相。");
 });
 
 test("GET /api/v2/status exposes 4 as the default image candidate count", async () => {
