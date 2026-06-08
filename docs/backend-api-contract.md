@@ -698,6 +698,148 @@ Response:
 }
 ```
 
+### `POST /api/v2/script-sessions`
+
+Creates a mutable script-page session from pipeline output or explicit slots. Each slot is treated as a backend material folder.
+
+Request:
+
+```json
+{
+  "target_duration_seconds": 7,
+  "user_request": {
+    "goal": "冰红茶宣传片",
+    "product_name": "冰红茶"
+  },
+  "slots": [
+    {
+      "slot_id": "slot_01",
+      "slot_type": "product_hero",
+      "slot_name": "产品亮相",
+      "duration_seconds": 2,
+      "shot_description": "冰红茶瓶身和冰块特写。",
+      "copy": "冰爽一下。",
+      "materials": [
+        {
+          "file_id": "uploaded-file-id",
+          "uri": "/api/upload/files/uploaded-file-id",
+          "label": "ice_tea_clip_01"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "session_id": "v2_script_uuid",
+  "target_duration_seconds": 7,
+  "slots": [
+    {
+      "slot_id": "slot_01",
+      "required_duration": 2,
+      "shot_description": "冰红茶瓶身和冰块特写。",
+      "voiceover_text": "冰爽一下。",
+      "material_folder_id": "slot_01_materials",
+      "editable_fields": ["required_duration", "voiceover_text", "material_ref"],
+      "locked_fields": ["shot_description", "visual", "packaging", "migration_result"],
+      "materials": []
+    }
+  ]
+}
+```
+
+### `PATCH /api/v2/script-sessions/:sessionId/slots/:slotId`
+
+Updates only script-page mutable fields.
+
+Allowed fields:
+
+- `required_duration` / `duration_seconds` / `duration`
+- `voiceover_text` / `copy`
+
+Locked fields such as `shot_description`, `visual`, `packaging`, and `slot_type` return `400 invalid_v2_script_slot_input`.
+
+### `POST /api/v2/script-sessions/:sessionId/slots/:slotId/materials`
+
+Assigns already uploaded files to one slot folder.
+
+```json
+{
+  "file_ids": ["uploaded-file-id"]
+}
+```
+
+The same material can be used only once in a slot folder. Different slots can still reference their own assigned material lists.
+
+### `POST /api/v2/script-sessions/:sessionId/slots/:slotId/materials/upload`
+
+Uploads one or more videos and assigns them to the target slot folder in one request.
+
+Content type: `multipart/form-data`
+
+| Field | Type | Required |
+| --- | --- | --- |
+| `files` | file[] | yes |
+
+### `POST /api/v2/canvas/revalidate`
+
+Recomputes material coverage when the user enters the canvas page. This is where edited slot durations become authoritative for matching.
+
+Request:
+
+```json
+{
+  "session_id": "v2_script_uuid",
+  "accepted_duration_short_slots": ["slot_02"]
+}
+```
+
+Response:
+
+```json
+{
+  "session_id": "v2_script_uuid",
+  "target_duration_seconds": 7,
+  "script_slots": [],
+  "material_segments": [
+    {
+      "segment_id": "slot_01_seg_01_01",
+      "source_material_id": "slot_01_material_01",
+      "assigned_slot_id": "slot_01",
+      "source_in_seconds": 0,
+      "source_out_seconds": 1.5,
+      "usable_duration_seconds": 1.5,
+      "segmentation_source": "deterministic_duration_split",
+      "status": "ready_for_multimodal_refinement"
+    }
+  ],
+  "material_coverage": {
+    "slot_coverage": []
+  },
+  "canvas_nodes": [
+    {
+      "slot_id": "slot_01",
+      "coverage_status": "fully_matched",
+      "required_duration": 2,
+      "matched_material_duration": 2,
+      "missing_duration": 0
+    }
+  ]
+}
+```
+
+Canvas status values remain:
+
+- `fully_matched`
+- `structure_complete_duration_short`
+- `material_insufficient`
+
+The current `material_segments` implementation is deterministic duration-based segmentation. It is a foundation for the later multimodal refinement step, not yet a model-refined shot boundary result.
+
 Common errors:
 
 - `400 pipeline_stage_failed`

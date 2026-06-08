@@ -36,9 +36,10 @@ export const normalizeV2TargetDurationSeconds = (value: unknown): number => {
 export class V2PipelineInputError extends Error {
   statusCode = 400;
 
-  constructor(message: string) {
+  constructor(message: string, statusCode = 400) {
     super(message);
     this.name = "V2PipelineInputError";
+    this.statusCode = statusCode;
   }
 }
 
@@ -2685,7 +2686,7 @@ export const runV2Pipeline = async (
       deterministic_material_coverage: baseMaterialCoverage,
       detailed_generation_prompt_requirements: detailedGenerationPromptRequirements,
       instruction:
-        "判断现有用户素材是否足够生成商业广告时，必须优先服从 deterministic_material_coverage：只要 materials_sufficient 为 false，就不能输出可直接成片，必须为未覆盖或时长不足槽位规划 AI 补全或补充素材。新的补全链路有三种：1. 默认可直接使用已有用户素材的抽帧截图 + 图生视频 prompt 生成视频；2. 用户上传相关图片后，用该图片 + 同一图生视频 prompt 生成视频；3. 用户选择先生成图片候选时，再输出图片生成 prompt，用户确认图片后用同一图生视频 prompt 生成视频。禁止规划纯文字直接生视频。请为每个需补全槽位优先返回详细的图生视频 prompt，并可选返回图片生成 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。所有图片生成 prompt 和图生视频 prompt 必须按 detailed_generation_prompt_requirements 中的章节组织，内容要像专业视频提示词一样详细。图片生成 prompt 要明确说明为同一槽位生成 4 张候选图供用户选择，且 4 张图必须是同一个具体主题、同一产品设定、同一场景逻辑下的四种变体，只能在构图、光线、景别、镜头角度或背景细节上有差异。不要用“例如 1/2/3/4”列出多个互斥主体或场景，避免模型把四张候选图生成成四个不同主题。特别注意产品和人物规则：如果用户素材里已有产品、包装、品牌视觉或主角人物，后续生成必须尽量还原它们，不能写“不要出现完整产品”“不要出现人物”等与用户素材冲突的负面约束；这类限制只能表达为“不要出现无关产品/无关人物/无关品牌”。如果用户素材里没有人物且槽位不强制人物出现，则不要凭空生成人物，优先展示产品、道具、场景、手部动作或包装画面；如果必须新增人物，需详细描述符合产品设定和目标人群的人物样貌、穿着、状态和动作。"
+        "判断现有用户素材是否足够生成商业广告时，必须优先服从 deterministic_material_coverage：只要 materials_sufficient 为 false，就不能输出可直接成片，必须为未覆盖或时长不足槽位规划 AI 补全。新的补全链路只有两种：1. 默认可直接使用已有用户素材的抽帧截图 + 图生视频 prompt 生成视频；2. 用户选择先生成图片候选时，再输出图片生成 prompt，用户确认图片后用同一图生视频 prompt 生成视频。补全弹窗不允许上传缺失素材；如果用户要补充真实素材，应回到脚本页上传到对应段落文件夹后再进入画布重算。禁止规划纯文字直接生视频。请为每个需补全槽位优先返回详细的图生视频 prompt，并可选返回图片生成 prompt。所有 prompt 必须描述新商品和新场景，不要复制样例视频内容。所有图片生成 prompt 和图生视频 prompt 必须按 detailed_generation_prompt_requirements 中的章节组织，内容要像专业视频提示词一样详细。图片生成 prompt 要明确说明为同一槽位生成 4 张候选图供用户选择，且 4 张图必须是同一个具体主题、同一产品设定、同一场景逻辑下的四种变体，只能在构图、光线、景别、镜头角度或背景细节上有差异。不要用“例如 1/2/3/4”列出多个互斥主体或场景，避免模型把四张候选图生成成四个不同主题。特别注意产品和人物规则：如果用户素材里已有产品、包装、品牌视觉或主角人物，后续生成必须尽量还原它们，不能写“不要出现完整产品”“不要出现人物”等与用户素材冲突的负面约束；这类限制只能表达为“不要出现无关产品/无关人物/无关品牌”。如果用户素材里没有人物且槽位不强制人物出现，则不要凭空生成人物，优先展示产品、道具、场景、手部动作或包装画面；如果必须新增人物，需详细描述符合产品设定和目标人群的人物样貌、穿着、状态和动作。"
     },
     allowFallback,
     (reason) =>
@@ -2783,7 +2784,7 @@ export const runV2Pipeline = async (
       notes:
         fallbackReasons.length > 0
           ? "V2 已使用降级输出完成。请确认真实 provider adapter 和密钥配置后，再将生成媒体视为真实结果。"
-          : "V2 API-first 链路已完成。需补全槽位可直接用已有素材抽帧调用图生视频；用户选择补充图片时，再生成或上传图片后调用同一图生视频 prompt。"
+          : "V2 API-first 链路已完成。需补全槽位可直接用已有素材抽帧调用图生视频；用户选择先生图时，再用确认图片调用同一图生视频 prompt。"
     }
   };
 };
