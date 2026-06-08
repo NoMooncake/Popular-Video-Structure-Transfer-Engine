@@ -893,6 +893,121 @@ const buildSegmentAwareMaterialCoverage = (
   };
 };
 
+const getCoverProductName = (session: V2ScriptSession): string => {
+  return (
+    normalizeOptionalString(session.user_request.product_name) ||
+    normalizeOptionalString(session.user_request.target_product) ||
+    normalizeOptionalString(session.user_request.target_topic) ||
+    normalizeOptionalString(session.user_request.goal) ||
+    "产品"
+  );
+};
+
+const getCoverRecommendedSegment = (
+  materialSegments: JsonObject[],
+  slotCoverage: JsonObject[]
+): JsonObject | undefined => {
+  const assignedSegmentIds = new Set(
+    slotCoverage.flatMap((coverage) =>
+      Array.isArray(coverage.assigned_segments)
+        ? coverage.assigned_segments
+            .map(asJsonObject)
+            .map((segment) => normalizeOptionalString(segment.segment_id))
+            .filter((segmentId): segmentId is string => Boolean(segmentId))
+        : []
+    )
+  );
+  const candidateSegments = materialSegments
+    .filter((segment) => {
+      const frames = Array.isArray(segment.frames) ? segment.frames : [];
+      return frames.length > 0;
+    })
+    .sort((left, right) => {
+      const leftAssigned = assignedSegmentIds.has(String(left.segment_id)) ? 1 : 0;
+      const rightAssigned = assignedSegmentIds.has(String(right.segment_id)) ? 1 : 0;
+      if (leftAssigned !== rightAssigned) {
+        return rightAssigned - leftAssigned;
+      }
+
+      return getNumber(right.quality_score, 0.5) - getNumber(left.quality_score, 0.5);
+    });
+
+  return candidateSegments[0];
+};
+
+const getCoverFrame = (segment: JsonObject | undefined): JsonObject | undefined => {
+  const frames = Array.isArray(segment?.frames) ? segment.frames.map(asJsonObject) : [];
+  if (frames.length === 0) {
+    return undefined;
+  }
+
+  return frames[Math.floor(frames.length / 2)];
+};
+
+const buildV2CoverPlan = (
+  session: V2ScriptSession,
+  materialSegments: JsonObject[],
+  segmentAwareMaterialCoverage: JsonObject
+): JsonObject => {
+  const productName = getCoverProductName(session);
+  const goal =
+    normalizeOptionalString(session.user_request.goal) ||
+    `${productName}商业广告`;
+  const slotCoverage = Array.isArray(segmentAwareMaterialCoverage.slot_coverage)
+    ? segmentAwareMaterialCoverage.slot_coverage.map(asJsonObject)
+    : [];
+  const coverSegment = getCoverRecommendedSegment(materialSegments, slotCoverage);
+  const coverFrame = getCoverFrame(coverSegment);
+  const firstSlot = session.slots[0];
+  const heroDescription =
+    normalizeOptionalString(coverSegment?.content_summary) ||
+    firstSlot?.shot_description ||
+    `${productName}核心视觉特写`;
+  const coverTitle =
+    normalizeOptionalString(session.user_request.cover_title) ||
+    `${productName}，一眼心动`;
+  const coverSubtitle =
+    normalizeOptionalString(session.user_request.cover_subtitle) ||
+    normalizeOptionalString(session.user_request.target_audience) ||
+    goal;
+  const copyOptions = [
+    coverTitle,
+    `${productName}，现在就想试`,
+    `${productName}高光时刻`,
+    `这一刻，记住${productName}`
+  ];
+
+  return {
+    cover_title: coverTitle,
+    cover_subtitle: coverSubtitle,
+    cover_copy_options: Array.from(new Set(copyOptions)).slice(0, 4),
+    visual_direction: `${heroDescription}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。`,
+    recommended_source: coverSegment
+      ? {
+          type: "material_segment",
+          slot_id: coverSegment.assigned_slot_id,
+          slot_type: coverSegment.assigned_slot_type,
+          segment_id: coverSegment.segment_id,
+          frame_id: coverFrame?.frame_id,
+          frame_uri: coverFrame?.uri
+        }
+      : {
+          type: "generated_cover_prompt"
+        },
+    cover_image_prompt: {
+      prompt_ref: "cover_image_prompt",
+      prompt_source: "deterministic_canvas_cover_plan",
+      prompt: [
+        `竖屏商业广告封面，主题是${productName}。`,
+        `核心画面：${heroDescription}。`,
+        "要求主体清晰、强视觉冲击、干净高对比、适合手机首屏浏览。",
+        `封面主标题文案：${coverTitle}。`,
+        "画面需要给标题文字预留空间，不要出现无关品牌、无关人物或杂乱背景。"
+      ].join("\n")
+    }
+  };
+};
+
 export const buildV2ScriptMaterialSegments = async (
   session: V2ScriptSession
 ): Promise<JsonObject[]> => {
@@ -944,6 +1059,11 @@ export const revalidateV2CanvasFromScript = async (
     materialCoverage as unknown as JsonObject,
     acceptedDurationShortSlots
   );
+  const coverPlan = buildV2CoverPlan(
+    session,
+    materialSegments.map(asJsonObject),
+    segmentAwareMaterialCoverage
+  );
 
   const revalidateResult = {
     session_id: session.session_id,
@@ -959,6 +1079,7 @@ export const revalidateV2CanvasFromScript = async (
     material_segments: materialSegments,
     material_coverage: segmentAwareMaterialCoverage,
     legacy_material_coverage: materialCoverage,
+    cover_plan: coverPlan,
     canvas_nodes: (Array.isArray(segmentAwareMaterialCoverage.slot_coverage)
       ? segmentAwareMaterialCoverage.slot_coverage.map(asJsonObject)
       : []

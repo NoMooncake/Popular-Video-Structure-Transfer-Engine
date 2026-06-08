@@ -1661,6 +1661,7 @@ test(
         nodes: Array<Record<string, unknown>>;
         edges: Array<Record<string, unknown>>;
       };
+      cover_plan: Record<string, unknown>;
     };
 
     assert.equal(shortRevalidateResponse.status, 200);
@@ -1671,6 +1672,16 @@ test(
       /^deterministic_fallback$/
     );
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(shortRevalidate.cover_plan.cover_title, "冰红茶，一眼心动");
+    assert.ok(Array.isArray(shortRevalidate.cover_plan.cover_copy_options));
+    assert.match(
+      String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
+      /冰红茶/
+    );
+    assert.match(
+      String(asRecord(shortRevalidate.cover_plan.recommended_source).frame_uri),
+      /^\/api\/v2\/material-candidate-pools\//
+    );
     assert.match(shortRevalidate.canvas_session_id, /^v2_canvas_/);
     assert.equal(
       shortRevalidate.canvas_session.canvas_session_id,

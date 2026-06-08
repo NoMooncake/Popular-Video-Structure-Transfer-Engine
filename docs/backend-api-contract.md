@@ -865,6 +865,29 @@ Response:
     ]
   },
   "script_slots": [],
+  "cover_plan": {
+    "cover_title": "冰红茶，一眼心动",
+    "cover_subtitle": "冰红茶宣传片",
+    "cover_copy_options": [
+      "冰红茶，一眼心动",
+      "冰红茶，现在就想试",
+      "冰红茶高光时刻"
+    ],
+    "visual_direction": "冰红茶瓶身和冰块特写。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。",
+    "recommended_source": {
+      "type": "material_segment",
+      "slot_id": "slot_01",
+      "slot_type": "product_hero",
+      "segment_id": "slot_01_seg_01_01",
+      "frame_id": "slot_01_seg_01_01_frame_002",
+      "frame_uri": "/api/v2/material-candidate-pools/v2_script_uuid_canvas_candidate_pool/frames/slot_01_seg_01_01_frame_002_0_5s.jpg"
+    },
+    "cover_image_prompt": {
+      "prompt_ref": "cover_image_prompt",
+      "prompt_source": "deterministic_canvas_cover_plan",
+      "prompt": "竖屏商业广告封面，主题是冰红茶..."
+    }
+  },
   "material_candidate_pool": {
     "candidate_pool_id": "v2_script_uuid_canvas_candidate_pool",
     "refinement": {
@@ -966,6 +989,7 @@ If the multimodal provider is unavailable, the API returns deterministic fallbac
 Canvas coverage uses the current script order, current slot durations, and the refined `material_segments` from each slot folder.
 `legacy_material_coverage` is included for debugging the older material-level calculation and should not drive the canvas UI.
 When `persist_canvas_session` is not false, this endpoint also persists an initial canvas session with script slot, material segment, missing material, and sequence nodes/edges.
+`cover_plan` is generated during this same canvas-entry analysis so the frontend can display final cover copy, visual direction, a recommended material frame, and a reusable cover image prompt without running another analysis step.
 The segment pacing policy is user-request-first; `material_segments` should not be read as a final fast/slow ad classification.
 
 ### `GET /api/v2/canvas-sessions/:canvasSessionId`
