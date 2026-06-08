@@ -745,46 +745,54 @@ const FigmaSampleAnalysisView = ({
         <span aria-hidden="true">›</span>
       </button>
 
-      <nav className="figma-sample-nav" aria-label="样例视频">
-        {(backendRows ? [0] : [1, 2, 3]).map((sampleNumber) => (
-          <button
-            className={backendRows || sampleNumber === activeSample ? "active" : ""}
-            key={sampleNumber}
-            onClick={() => setActiveSample(sampleNumber)}
-            type="button"
-          >
-            {backendRows ? "API" : sampleNumber}
-          </button>
-        ))}
-      </nav>
-
-      <main className="figma-analysis-table-wrap">
-        <div className="figma-analysis-table" role="table" aria-label="样例解析">
-          <div className="figma-analysis-row figma-analysis-head" role="row">
-            <div role="columnheader">时长</div>
-            <div role="columnheader">样例视频</div>
-            <div role="columnheader">分镜描述</div>
-            <div role="columnheader">迁移可能性</div>
-          </div>
-          {rows.map((row) => (
-            <div className="figma-analysis-row" key={`${activeSample}-${row.duration}`} role="row">
-              <div className="duration-cell" role="cell">
-                {row.duration}
-              </div>
-              <div className="sample-media-cell" role="cell">
-                <img alt="" src={row.image} />
-              </div>
-              <div className="shot-desc-cell" role="cell">
-                <strong>{row.shotTitle}</strong>
-                <span>{row.shotDescription}</span>
-              </div>
-              <div className="migration-possibility-cell" role="cell">
-                {row.migrationPossibility}
-              </div>
-            </div>
+      <div className="figma-analysis-content">
+        <nav className="figma-sample-nav" aria-label="样例视频">
+          {(backendRows ? [0] : [1, 2, 3]).map((sampleNumber) => (
+            <button
+              className={backendRows || sampleNumber === activeSample ? "active" : ""}
+              key={sampleNumber}
+              onClick={() => setActiveSample(sampleNumber)}
+              type="button"
+            >
+              {backendRows ? "API" : sampleNumber}
+            </button>
           ))}
-        </div>
-      </main>
+          <button className="add-sample-btn" type="button" aria-label="添加样例" onClick={() => {
+            // Mock upload click
+            alert("即将调起：uploadSampleVideo 添加新样例，完成后列表会增加新序号。");
+          }}>
+            +
+          </button>
+        </nav>
+
+        <main className="figma-analysis-table-wrap">
+          <div className="figma-analysis-table" role="table" aria-label="样例解析">
+            <div className="figma-analysis-row figma-analysis-head" role="row">
+              <div role="columnheader">时长</div>
+              <div role="columnheader">样例视频</div>
+              <div role="columnheader">分镜描述</div>
+              <div role="columnheader">迁移可能性</div>
+            </div>
+            {rows.map((row) => (
+              <div className="figma-analysis-row" key={`${activeSample}-${row.duration}`} role="row">
+                <div className="duration-cell" role="cell">
+                  {row.duration}
+                </div>
+                <div className="sample-media-cell" role="cell">
+                  <img alt="" src={row.image} />
+                </div>
+                <div className="shot-desc-cell" role="cell">
+                  <strong>{row.shotTitle}</strong>
+                  <span>{row.shotDescription}</span>
+                </div>
+                <div className="migration-possibility-cell" role="cell">
+                  {row.migrationPossibility}
+                </div>
+              </div>
+            ))}
+          </div>
+        </main>
+      </div>
     </div>
   );
 };
