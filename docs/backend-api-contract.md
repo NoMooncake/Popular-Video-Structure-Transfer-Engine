@@ -795,12 +795,15 @@ Content type: `multipart/form-data`
 ### `POST /api/v2/canvas/revalidate`
 
 Recomputes material coverage when the user enters the canvas page. This is where edited slot durations become authoritative for matching.
+This also builds a material candidate pool from the current slot folders.
 
 Request:
 
 ```json
 {
   "session_id": "v2_script_uuid",
+  "candidate_pool_id": "optional-stable-pool-id",
+  "extract_frames": true,
   "accepted_duration_short_slots": ["slot_02"]
 }
 ```
@@ -812,18 +815,38 @@ Response:
   "session_id": "v2_script_uuid",
   "target_duration_seconds": 7,
   "script_slots": [],
+  "material_candidate_pool": {
+    "candidate_pool_id": "v2_script_uuid_canvas_candidate_pool",
+    "summary": {
+      "material_count": 1,
+      "segment_count": 1,
+      "frame_count": 4,
+      "status": "candidate_pool_ready"
+    }
+  },
   "material_segments": [
     {
       "segment_id": "slot_01_seg_01_01",
+      "candidate_pool_id": "v2_script_uuid_canvas_candidate_pool",
       "source_material_id": "slot_01_material_01",
       "assigned_slot_id": "slot_01",
       "source_in_seconds": 0,
       "source_out_seconds": 1.5,
       "usable_duration_seconds": 1.5,
       "high_frequency_frame_timestamps_seconds": [0, 0.5, 1, 1.5],
+      "frames": [
+        {
+          "frame_id": "slot_01_seg_01_01_frame_001",
+          "time_seconds": 0,
+          "uri": "/api/v2/material-candidate-pools/v2_script_uuid_canvas_candidate_pool/frames/slot_01_seg_01_01_frame_001_0s.jpg",
+          "mime_type": "image/jpeg",
+          "extraction_status": "extracted"
+        }
+      ],
       "segmentation_source": "uniform_high_frequency_candidate_split",
       "pacing_inference_source": "user_request_first_material_pacing_not_authoritative",
-      "status": "ready_for_multimodal_refinement"
+      "status": "candidate_pool_ready",
+      "next_step": "multimodal_refinement"
     }
   ],
   "material_coverage": {
@@ -849,6 +872,58 @@ Canvas status values remain:
 
 The current `material_segments` implementation is deterministic duration-based segmentation. It is a foundation for the later multimodal refinement step, not yet a model-refined shot boundary result.
 The segment pacing policy is user-request-first; `material_segments` should not be read as a final fast/slow ad classification.
+
+### `POST /api/v2/material-candidate-pools/from-script-session`
+
+Builds only the material candidate pool from a script session, without recomputing canvas coverage.
+
+Request:
+
+```json
+{
+  "session_id": "v2_script_uuid",
+  "candidate_pool_id": "optional-stable-pool-id",
+  "extract_frames": true
+}
+```
+
+Response:
+
+```json
+{
+  "candidate_pool_id": "v2_script_uuid_candidate_pool",
+  "session_id": "v2_script_uuid",
+  "material_understanding_policy": {
+    "generated_structure_pacing": "user_request_first",
+    "source_material_pacing_is_authoritative": false,
+    "source_material_understanding": "uniform_high_frequency_candidate_frames_then_multimodal_refinement",
+    "segment_max_duration_seconds": 1.5,
+    "frame_interval_seconds": 0.5
+  },
+  "material_assets": [],
+  "material_segments": [],
+  "summary": {
+    "material_count": 0,
+    "segment_count": 0,
+    "frame_count": 0,
+    "status": "candidate_pool_ready"
+  }
+}
+```
+
+### `GET /api/v2/material-candidate-pools/:candidatePoolId`
+
+Reads a previously built material candidate pool JSON artifact.
+
+### `GET /api/v2/material-candidate-pools/:candidatePoolId/frames/:filename`
+
+Serves extracted candidate frame images referenced by `material_segments[].frames[].uri`.
+
+Notes:
+
+- Candidate segments are intentionally small and uniform. They are input candidates, not final edited clips.
+- Frame extraction is best-effort at exact logical timestamps. If an exact end timestamp cannot be decoded, backend may use a nearby/fallback frame while keeping the logical `time_seconds` for downstream model context.
+- The next stage should use these segments and frame URLs for multimodal refinement: content tags, split/merge decisions, exact source in/out, quality score, and usable slot types.
 
 Common errors:
 

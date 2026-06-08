@@ -1643,6 +1643,10 @@ test(
       })
     });
     const shortRevalidate = (await shortRevalidateResponse.json()) as {
+      material_candidate_pool: {
+        candidate_pool_id: string;
+        summary: Record<string, unknown>;
+      };
       material_segments: Array<Record<string, unknown>>;
       material_coverage: {
         slot_coverage: Array<Record<string, unknown>>;
@@ -1651,6 +1655,8 @@ test(
     };
 
     assert.equal(shortRevalidateResponse.status, 200);
+    assert.equal(shortRevalidate.material_candidate_pool.summary.segment_count, 1);
+    assert.equal(shortRevalidate.material_candidate_pool.summary.frame_count, 3);
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(shortRevalidate.material_coverage.slot_coverage[0]?.required_duration, 0.5);
     assert.equal(shortRevalidate.material_segments.length, 1);
@@ -1666,6 +1672,42 @@ test(
       shortRevalidate.material_segments[0]?.high_frequency_frame_timestamps_seconds,
       [0, 0.5, 1]
     );
+    const frames = asRecordArray(shortRevalidate.material_segments[0]?.frames);
+    assert.equal(frames.length, 3);
+    assert.match(String(frames[0]?.uri), /^\/api\/v2\/material-candidate-pools\//);
+    assert.equal(frames[0]?.extraction_status, "extracted");
+
+    const frameResponse = await fetch(`${baseUrl}${String(frames[0]?.uri)}`);
+    assert.equal(frameResponse.status, 200);
+    assert.match(frameResponse.headers.get("content-type") || "", /image\/jpeg/);
+
+    const poolResponse = await fetch(
+      `${baseUrl}/api/v2/material-candidate-pools/${shortRevalidate.material_candidate_pool.candidate_pool_id}`
+    );
+    const pool = (await poolResponse.json()) as {
+      summary: Record<string, unknown>;
+    };
+    assert.equal(poolResponse.status, 200);
+    assert.equal(pool.summary.frame_count, 3);
+
+    const directPoolResponse = await fetch(
+      `${baseUrl}/api/v2/material-candidate-pools/from-script-session`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          session_id: created.session_id,
+          candidate_pool_id: `${created.session_id}_direct_test_pool`
+        })
+      }
+    );
+    const directPool = (await directPoolResponse.json()) as {
+      summary: Record<string, unknown>;
+    };
+    assert.equal(directPoolResponse.status, 201);
+    assert.equal(directPool.summary.segment_count, 1);
 
     await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
       method: "PATCH",
