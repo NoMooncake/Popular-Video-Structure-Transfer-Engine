@@ -39,6 +39,8 @@ type WorkspaceViewsProps = {
   selectedBlock: CanvasBlock;
   selectedBlockId: string;
   structureBlueprint?: StructureBlueprint;
+  projectName: string;
+  onProjectNameChange: (name: string) => void;
 };
 
 const steps: Array<{
@@ -195,7 +197,9 @@ export const WorkspaceViews = ({
   sampleFile,
   selectedBlock,
   selectedBlockId,
-  structureBlueprint
+  structureBlueprint,
+  projectName,
+  onProjectNameChange
 }: WorkspaceViewsProps) => {
   if (activeStep === "input") {
     return (
@@ -214,6 +218,8 @@ export const WorkspaceViews = ({
         sampleAnalysis={sampleAnalysis}
         sampleFile={sampleFile}
         structureBlueprint={structureBlueprint}
+        projectName={projectName}
+        onProjectNameChange={onProjectNameChange}
       />
     );
   }
@@ -226,6 +232,7 @@ export const WorkspaceViews = ({
         onNext={() => onStepChange("gap-fill")}
         onUpdateBlock={onUpdateBlock}
         onStepChange={onStepChange}
+        projectName={projectName}
       />
     );
   }
@@ -239,6 +246,7 @@ export const WorkspaceViews = ({
         onUpdateBlock={onUpdateBlock}
         onStepChange={onStepChange}
         selectedBlockId={selectedBlockId}
+        projectName={projectName}
       />
     );
   }
@@ -249,11 +257,12 @@ export const WorkspaceViews = ({
         onNext={() => onStepChange("demo")}
         onStepChange={onStepChange}
         selectedBlock={selectedBlock}
+        projectName={projectName}
       />
     );
   }
 
-  return <DemoView blocks={blocks} onStepChange={onStepChange} />;
+  return <DemoView blocks={blocks} onStepChange={onStepChange} projectName={projectName} />;
 };
 
 type HeaderProps = {
@@ -263,6 +272,7 @@ type HeaderProps = {
   onStepChange: (step: StepKey) => void;
   subtitle: string;
   title: string;
+  projectName?: string;
 };
 
 const CanvasTopBar = ({
@@ -271,7 +281,8 @@ const CanvasTopBar = ({
   onNext,
   onStepChange,
   subtitle,
-  title
+  title,
+  projectName
 }: HeaderProps) => {
   return (
     <header className="page-header">
@@ -279,7 +290,7 @@ const CanvasTopBar = ({
         <div className="brand-block">
           <span className="brand-mark">迁镜</span>
           <div>
-            <p>AI 视频结构迁移工作台</p>
+            <p>{projectName ?? "AI 视频结构迁移工作台"}</p>
             <h1>{title}</h1>
           </div>
         </div>
@@ -761,20 +772,26 @@ const FigmaSampleAnalysisView = ({
   onNext,
   sampleAnalysis,
   sampleFile,
-  structureBlueprint
+  structureBlueprint,
+  projectName,
+  onProjectNameChange
 }: {
   onNext: () => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
   structureBlueprint?: StructureBlueprint;
+  projectName: string;
+  onProjectNameChange: (name: string) => void;
 }) => {
   const [activeSample, setActiveSample] = useState(2);
   const [extraSamples, setExtraSamples] = useState<ExtraSample[]>([]);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [tempTitle, setTempTitle] = useState(projectName);
   const addSampleInputRef = useRef<HTMLInputElement>(null);
   const backendRows = sampleAnalysis
     ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
     : null;
-  const sourceLabel = sampleFile?.original_filename ?? "口红广告";
+  const sourceLabel = projectName;
 
   const baseSampleCount = backendRows ? 1 : 3;
 
@@ -811,7 +828,7 @@ const FigmaSampleAnalysisView = ({
   // Determine which rows to show
   const getActiveRows = (): { rows: SampleAnalysisRow[] | null; loading: boolean; label: string } => {
     if (backendRows && activeSample === 0) {
-      return { rows: backendRows, loading: false, label: sourceLabel };
+      return { rows: backendRows, loading: false, label: sampleFile?.original_filename ?? "口红广告" };
     }
     const extraIdx = activeSample - baseSampleCount - 1;
     if (extraIdx >= 0 && extraIdx < extraSamples.length) {
@@ -825,21 +842,49 @@ const FigmaSampleAnalysisView = ({
     return {
       rows: sampleAnalysisTables[activeSample] ?? sampleAnalysisTables[1],
       loading: false,
-      label: sourceLabel
+      label: sampleFile?.original_filename ?? "口红广告"
     };
   };
 
   const active = getActiveRows();
+
+  const saveTitle = () => {
+    setIsEditingTitle(false);
+    if (tempTitle.trim()) {
+      onProjectNameChange(tempTitle.trim());
+    } else {
+      setTempTitle(projectName);
+    }
+  };
 
   return (
     <div className="figma-analysis-page">
       <header className="figma-analysis-topbar">
         <div className="figma-analysis-brand">
           <span>迁镜</span>
-          <strong>{sourceLabel}</strong>
-          <button aria-label="编辑项目名称" className="figma-edit-icon" type="button">
-            ✎
-          </button>
+          {isEditingTitle ? (
+            <input
+              autoFocus
+              className="figma-edit-input"
+              value={tempTitle}
+              onChange={(e) => setTempTitle(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveTitle();
+                if (e.key === "Escape") {
+                  setIsEditingTitle(false);
+                  setTempTitle(projectName);
+                }
+              }}
+            />
+          ) : (
+            <>
+              <strong>{projectName}</strong>
+              <button aria-label="编辑项目名称" className="figma-edit-icon" type="button" onClick={() => setIsEditingTitle(true)}>
+                ✎
+              </button>
+            </>
+          )}
         </div>
         <div className="figma-analysis-avatar" aria-hidden="true" />
       </header>

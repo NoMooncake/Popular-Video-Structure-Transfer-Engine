@@ -1315,14 +1315,41 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border: 0;
+  border-radius: 4px;
   padding: 0;
-  color: #ffffff;
+  color: #717375;
   background: transparent;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.figma-edit-icon:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.figma-edit-input {
+  background: #111111;
+  border: 1px solid #717375;
+  border-radius: 6px;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.5;
+  padding: 2px 8px;
+  width: 200px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.figma-edit-input:focus {
+  border-color: #fe2c55;
 }
 
 .figma-analysis-avatar {
@@ -1398,7 +1425,7 @@ input {
   flex-direction: column;
   gap: 16px;
   align-items: center;
-  padding-top: 20px;
+  justify-content: center;
 }
 
 .figma-sample-nav button {
@@ -1442,6 +1469,7 @@ input {
   font-size: 20px !important;
   font-weight: 400 !important;
   line-height: 30px !important;
+  padding-bottom: 2px !important; /* visually center the + sign */
 }
 
 .add-sample-btn:hover {

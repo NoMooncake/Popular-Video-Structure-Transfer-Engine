@@ -23,6 +23,7 @@ export const App = () => {
   const [selectedBlockId, setSelectedBlockId] = useState(fallbackCanvasBlocks[0]?.id ?? "");
   const [workflowResult, setWorkflowResult] = useState<WorkflowRunResult | null>(null);
   const [blocks, setBlocks] = useState<CanvasBlock[]>(fallbackCanvasBlocks);
+  const [projectName, setProjectName] = useState("未命名项目 01");
 
   useEffect(() => {
     if (workflowResult?.structureBlueprint) {
@@ -62,6 +63,8 @@ export const App = () => {
           selectedBlock={selectedBlock}
           selectedBlockId={selectedBlockId}
           structureBlueprint={workflowResult?.structureBlueprint}
+          projectName={projectName}
+          onProjectNameChange={setProjectName}
         />
       </main>
     </AppShell>
