@@ -1261,7 +1261,7 @@ input {
 
 /* Figma restoration: Sample Analysis / 样例解析 only */
 .workspace.page-analysis {
-  background: #2f2f2f;
+  background: #0a0a0a;
 }
 
 .figma-analysis-page {
@@ -1271,7 +1271,7 @@ input {
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background: #2f2f2f;
+  background: #0a0a0a;
   color: #ffffff;
   font-family: STSong, SimSun, "Songti SC", "Noto Serif CJK SC", serif;
   letter-spacing: -0.22px;
@@ -1285,7 +1285,7 @@ input {
   width: min(100%, 1632px);
   height: 74px;
   margin: 18px auto 0;
-  padding: 0 34px;
+  padding: 0 48px;
 }
 
 .figma-analysis-brand {
@@ -1406,18 +1406,28 @@ input {
   font-weight: 400;
   line-height: 1.5;
   letter-spacing: -0.22px;
+  cursor: pointer;
+  transition: background 0.2s;
 }
 
 .figma-sample-nav button.active {
   background: rgba(113, 115, 117, 0.5);
 }
 
+.add-sample-btn {
+  background: rgba(254, 44, 85, 0.75) !important;
+  color: #ffffff !important;
+  border-color: #fe2c55 !important;
+  font-size: 24px !important;
+  font-weight: 300 !important;
+}
+
 .figma-analysis-table-wrap {
-  width: min(1076px, calc(100vw - 300px));
-  margin: 79px auto 0;
+  flex: 1;
+  overflow-y: auto;
   overflow-x: auto;
-  overscroll-behavior-x: contain;
   padding-bottom: 28px;
+  padding-right: 20px;
 }
 
 .figma-analysis-table {
@@ -1426,6 +1436,7 @@ input {
   border: 1px solid #717375;
   border-radius: 16px;
   padding: 0 16px 8px;
+  margin: 0 auto;
 }
 
 .figma-analysis-row {
