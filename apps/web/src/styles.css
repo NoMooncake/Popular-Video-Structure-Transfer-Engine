@@ -1843,3 +1843,200 @@ input {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Input View Redesign */
+.input-page-redesign {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.simple-top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 56px;
+}
+
+.content-container {
+  display: flex;
+  flex-direction: column;
+  gap: 56px;
+  max-width: 800px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.hero-simple {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.hero-simple h2 {
+  font-size: 32px;
+  color: var(--text-strong);
+  margin: 0 0 12px 0;
+}
+
+.hero-simple p {
+  font-size: 16px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.prompt-box-wide {
+  position: relative;
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 16px;
+  border: 1px solid var(--line);
+  margin-bottom: 40px;
+}
+
+.prompt-box-wide textarea {
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-strong);
+  resize: none;
+  outline: none;
+  font-size: 16px;
+}
+
+.submit-arrow-btn {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--theme);
+  color: #fff;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: bold;
+}
+
+.upload-section-large {
+  display: flex;
+  gap: 24px;
+}
+
+.upload-card-large {
+  flex: 1;
+  background: var(--panel-soft);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s;
+}
+
+.upload-card-large:hover {
+  border-color: var(--theme);
+}
+
+.upload-card-large input[type="file"] {
+  display: none;
+}
+
+.upload-placeholder strong {
+  display: block;
+  font-size: 18px;
+  color: var(--text-strong);
+  margin-bottom: 8px;
+}
+
+.upload-placeholder span {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.icon-video, .icon-materials {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--panel);
+  margin-bottom: 16px;
+  display: inline-flex;
+}
+
+.canvas-section {
+  margin-top: 40px;
+}
+
+.canvas-section h3 {
+  font-size: 18px;
+  color: var(--text-strong);
+  margin-bottom: 24px;
+}
+
+.existing-canvases-scroll {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 16px;
+}
+
+.canvas-card {
+  min-width: 200px;
+  background: var(--panel);
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+
+.canvas-card img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+}
+
+.canvas-card-title {
+  padding: 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.pipeline-status {
+  background: var(--panel);
+  padding: 16px;
+  border-radius: var(--radius);
+  margin-bottom: 24px;
+  border: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.error-text {
+  color: var(--missing);
+}
+
+/* Canvas Card Hover State */
+.canvas-card {
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.canvas-card img {
+  opacity: 0.8;
+  transition: opacity 0.2s ease;
+}
+
+.canvas-card:hover {
+  border-color: var(--theme);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(254, 44, 85, 0.15);
+}
+
+.canvas-card:hover img {
+  opacity: 1;
+}
