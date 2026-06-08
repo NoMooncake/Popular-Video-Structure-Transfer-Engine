@@ -1285,7 +1285,7 @@ input {
   width: min(100%, 1632px);
   height: 74px;
   margin: 18px auto 0;
-  padding: 0 48px;
+  padding: 0 64px;
 }
 
 .figma-analysis-brand {
@@ -1364,22 +1364,23 @@ input {
 
 .figma-migration-button {
   position: absolute;
-  top: 105px;
-  right: max(48px, calc((100vw - 1632px) / 2));
+  top: 92px;
+  right: max(64px, calc((100vw - 1632px) / 2 + 64px));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-width: 140px;
-  height: 48px;
+  min-width: 120px;
+  height: 40px;
   border: 0;
   border-radius: 999px;
-  padding: 8px 12px;
+  padding: 0 16px;
+  padding-bottom: 2px;
   color: #ffffff;
   background: #fe2c55;
   font-family: inherit;
   font-size: 20px;
-  font-weight: 400;
+  font-weight: 700;
   line-height: 1.5;
   letter-spacing: -0.22px;
   z-index: 10;
@@ -1400,10 +1401,10 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   font-family: Arial, sans-serif;
-  font-size: 34px;
+  font-size: 28px;
   line-height: 1;
   transform: translateY(-1px);
 }
@@ -1505,6 +1506,17 @@ input {
   min-height: 240px;
 }
 
+.figma-analysis-row:not(.figma-analysis-head) {
+  border-radius: 8px;
+  transition: all 0.2s ease;
+}
+
+.figma-analysis-row:not(.figma-analysis-head):hover {
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateX(4px);
+  cursor: pointer;
+}
+
 .figma-analysis-head {
   min-height: 46px;
 }
@@ -1568,7 +1580,12 @@ input {
   font-size: 20px;
   font-weight: 400;
   line-height: 1.5;
+  transition: color 0.2s ease;
   white-space: nowrap;
+}
+
+.figma-analysis-row:not(.figma-analysis-head):hover .shot-desc-cell strong {
+  color: #FE2C55;
 }
 
 .shot-desc-cell span {
