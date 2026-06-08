@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { storageConfig } from "../config/storage.js";
+import { createV2CanvasSessionFromRevalidateResult } from "./v2CanvasSessionService.js";
 import { findUploadedVideoById, type UploadedVideoFile } from "./uploadService.js";
 import { buildV2MaterialCandidatePool } from "./v2MaterialCandidatePoolService.js";
 import {
@@ -944,7 +945,7 @@ export const revalidateV2CanvasFromScript = async (
     acceptedDurationShortSlots
   );
 
-  return {
+  const revalidateResult = {
     session_id: session.session_id,
     target_duration_seconds: session.target_duration_seconds,
     material_understanding_policy: {
@@ -984,5 +985,15 @@ export const revalidateV2CanvasFromScript = async (
       matching_source: coverage.matching_source,
       semantic_matching_used: coverage.semantic_matching_used
     }))
+  };
+  const canvasSession =
+    payload.persist_canvas_session === false
+      ? undefined
+      : createV2CanvasSessionFromRevalidateResult(revalidateResult);
+
+  return {
+    ...revalidateResult,
+    canvas_session: canvasSession,
+    canvas_session_id: canvasSession?.canvas_session_id
   };
 };

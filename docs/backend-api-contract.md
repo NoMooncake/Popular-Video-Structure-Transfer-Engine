@@ -824,6 +824,7 @@ Request:
   "extract_frames": true,
   "refine_segments": true,
   "use_multimodal_provider": true,
+  "persist_canvas_session": true,
   "accepted_duration_short_slots": ["slot_02"]
 }
 ```
@@ -834,6 +835,35 @@ Response:
 {
   "session_id": "v2_script_uuid",
   "target_duration_seconds": 7,
+  "canvas_session_id": "v2_canvas_uuid",
+  "canvas_session": {
+    "canvas_session_id": "v2_canvas_uuid",
+    "script_session_id": "v2_script_uuid",
+    "nodes": [
+      {
+        "node_id": "slot_01_slot",
+        "node_type": "script_slot",
+        "slot_id": "slot_01",
+        "display_order": 1,
+        "data": {}
+      },
+      {
+        "node_id": "slot_01_missing_material",
+        "node_type": "missing_material",
+        "slot_id": "slot_01",
+        "display_order": 1,
+        "data": {}
+      }
+    ],
+    "edges": [
+      {
+        "edge_id": "slot_01_slot_has_gap",
+        "source_node_id": "slot_01_slot",
+        "target_node_id": "slot_01_missing_material",
+        "edge_type": "has_gap"
+      }
+    ]
+  },
   "script_slots": [],
   "material_candidate_pool": {
     "candidate_pool_id": "v2_script_uuid_canvas_candidate_pool",
@@ -935,7 +965,43 @@ Canvas status values remain:
 If the multimodal provider is unavailable, the API returns deterministic fallback refinement fields with `refinement.status = "deterministic_fallback"`.
 Canvas coverage uses the current script order, current slot durations, and the refined `material_segments` from each slot folder.
 `legacy_material_coverage` is included for debugging the older material-level calculation and should not drive the canvas UI.
+When `persist_canvas_session` is not false, this endpoint also persists an initial canvas session with script slot, material segment, missing material, and sequence nodes/edges.
 The segment pacing policy is user-request-first; `material_segments` should not be read as a final fast/slow ad classification.
+
+### `GET /api/v2/canvas-sessions/:canvasSessionId`
+
+Reads a persisted canvas session.
+
+### `PATCH /api/v2/canvas-sessions/:canvasSessionId`
+
+Persists frontend canvas edits such as node positions and user-adjusted edges. This endpoint does not trigger generation.
+
+Request:
+
+```json
+{
+  "nodes": [
+    {
+      "node_id": "slot_01_slot",
+      "node_type": "script_slot",
+      "slot_id": "slot_01",
+      "position": {
+        "x": 120,
+        "y": 80
+      },
+      "data": {}
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "slot_01_to_slot_02",
+      "source_node_id": "slot_01_slot",
+      "target_node_id": "slot_02_slot",
+      "edge_type": "sequence"
+    }
+  ]
+}
+```
 
 ### `POST /api/v2/material-candidate-pools/from-script-session`
 

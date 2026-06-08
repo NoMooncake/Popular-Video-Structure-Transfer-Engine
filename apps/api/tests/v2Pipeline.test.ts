@@ -1655,6 +1655,12 @@ test(
         matching_source: string;
       };
       canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session_id: string;
+      canvas_session: {
+        canvas_session_id: string;
+        nodes: Array<Record<string, unknown>>;
+        edges: Array<Record<string, unknown>>;
+      };
     };
 
     assert.equal(shortRevalidateResponse.status, 200);
@@ -1665,6 +1671,57 @@ test(
       /^deterministic_fallback$/
     );
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.match(shortRevalidate.canvas_session_id, /^v2_canvas_/);
+    assert.equal(
+      shortRevalidate.canvas_session.canvas_session_id,
+      shortRevalidate.canvas_session_id
+    );
+    assert.ok(
+      shortRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "script_slot"
+      )
+    );
+    assert.ok(
+      shortRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "material_segment"
+      )
+    );
+    const savedCanvasResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${shortRevalidate.canvas_session_id}`
+    );
+    const savedCanvas = (await savedCanvasResponse.json()) as {
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+    assert.equal(savedCanvasResponse.status, 200);
+    assert.equal(savedCanvas.nodes.length, shortRevalidate.canvas_session.nodes.length);
+    const updatedCanvasResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${shortRevalidate.canvas_session_id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          nodes: [
+            {
+              ...savedCanvas.nodes[0],
+              position: {
+                x: 120,
+                y: 80
+              }
+            },
+            ...savedCanvas.nodes.slice(1)
+          ],
+          edges: savedCanvas.edges
+        })
+      }
+    );
+    const updatedCanvas = (await updatedCanvasResponse.json()) as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(updatedCanvasResponse.status, 200);
+    assert.deepEqual(asRecord(updatedCanvas.nodes[0]?.position), { x: 120, y: 80 });
     assert.equal(shortRevalidate.material_coverage.matching_source, "refined_material_segments");
     assert.equal(shortRevalidate.material_coverage.slot_coverage[0]?.required_duration, 0.5);
     assert.equal(
