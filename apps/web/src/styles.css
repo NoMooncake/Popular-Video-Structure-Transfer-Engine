@@ -1374,19 +1374,20 @@ input {
   display: flex;
   flex: 1;
   overflow: hidden;
-  width: min(100%, 1728px);
+  width: min(100%, 1632px);
   margin: 0 auto;
   position: relative;
+  padding-top: 50px;
 }
 
 .figma-sample-nav {
-  position: absolute;
-  left: 58px;
-  top: 406px; /* 498px - 74px topbar - 18px top margin */
+  width: 80px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
   align-items: center;
+  padding-top: 20px;
 }
 
 .figma-sample-nav button {
@@ -1422,14 +1423,11 @@ input {
 }
 
 .figma-analysis-table-wrap {
-  position: absolute;
-  left: 366px;
-  top: 97px; /* 171px - 74px topbar */
-  right: 0;
-  bottom: 0;
+  flex: 1;
   overflow-y: auto;
   overflow-x: auto;
   padding-bottom: 28px;
+  padding-right: 20px;
 }
 
 .figma-analysis-table {
@@ -1438,6 +1436,7 @@ input {
   border: 1px solid #717375;
   border-radius: 16px;
   padding: 0 16px 8px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -1474,6 +1473,7 @@ input {
 
 .duration-cell {
   width: 80px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1483,6 +1483,7 @@ input {
 
 .sample-media-cell {
   width: 300px;
+  flex-shrink: 0;
   height: 240px;
   padding: 8px;
 }
@@ -1496,6 +1497,7 @@ input {
 
 .shot-desc-cell {
   width: 280px;
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1521,6 +1523,7 @@ input {
 
 .migration-possibility-cell {
   width: 360px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: center;
