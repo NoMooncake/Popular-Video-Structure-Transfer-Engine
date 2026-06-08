@@ -1772,6 +1772,123 @@ test(
 );
 
 test(
+  "v2 script slot order is persisted before canvas revalidation",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const hookFileId = createUploadedTestVideo(1);
+    const ctaFileId = createUploadedTestVideo(1);
+
+    const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_request: {
+          goal: "6 秒冰红茶广告"
+        },
+        target_duration_seconds: 2,
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "hook",
+            duration_seconds: 1,
+            shot_description: "开场冰块冲击。",
+            materials: [
+              {
+                material_id: "hook_clip",
+                file_id: hookFileId,
+                uri: `/api/upload/files/${hookFileId}`
+              }
+            ]
+          },
+          {
+            slot_id: "slot_02",
+            slot_type: "cta",
+            duration_seconds: 1,
+            shot_description: "结尾饮用动作。",
+            materials: [
+              {
+                material_id: "cta_clip",
+                file_id: ctaFileId,
+                uri: `/api/upload/files/${ctaFileId}`
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const created = (await createResponse.json()) as {
+      session_id: string;
+      slots: Array<Record<string, unknown>>;
+    };
+    assert.equal(createResponse.status, 201);
+    assert.deepEqual(
+      created.slots.map((slot) => slot.slot_id),
+      ["slot_01", "slot_02"]
+    );
+    assert.deepEqual(
+      created.slots.map((slot) => slot.display_order),
+      [1, 2]
+    );
+
+    const reorderResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slot-order`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_ids: ["slot_02", "slot_01"]
+        })
+      }
+    );
+    const reordered = (await reorderResponse.json()) as {
+      slots: Array<Record<string, unknown>>;
+    };
+    assert.equal(reorderResponse.status, 200);
+    assert.deepEqual(
+      reordered.slots.map((slot) => slot.slot_id),
+      ["slot_02", "slot_01"]
+    );
+    assert.deepEqual(
+      reordered.slots.map((slot) => slot.display_order),
+      [1, 2]
+    );
+
+    const revalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        extract_frames: false
+      })
+    });
+    const revalidated = (await revalidateResponse.json()) as {
+      script_slots: Array<Record<string, unknown>>;
+      canvas_nodes: Array<Record<string, unknown>>;
+      material_segments: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(revalidateResponse.status, 200);
+    assert.deepEqual(
+      revalidated.script_slots.map((slot) => slot.slot_id),
+      ["slot_02", "slot_01"]
+    );
+    assert.deepEqual(
+      revalidated.canvas_nodes.map((node) => node.slot_id),
+      ["slot_02", "slot_01"]
+    );
+    assert.equal(revalidated.material_segments[0]?.assigned_slot_id, "slot_02");
+    assert.equal(revalidated.material_segments[0]?.script_order_index, 0);
+    assert.equal(revalidated.material_segments[0]?.display_order, 1);
+  }
+);
+
+test(
   "POST /api/v2/generation/image-to-video can use an existing material frame",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {

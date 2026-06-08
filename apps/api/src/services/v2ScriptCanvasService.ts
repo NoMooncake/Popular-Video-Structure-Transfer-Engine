@@ -24,6 +24,7 @@ export type V2ScriptSlot = {
   slot_id: string;
   slot_type: string;
   slot_name?: string;
+  display_order: number;
   required_duration: number;
   original_required_duration?: number;
   shot_description: string;
@@ -301,6 +302,7 @@ const normalizeScriptSlot = (
     slot_id: slotId,
     slot_type: slotType,
     slot_name: slotName,
+    display_order: index + 1,
     required_duration: requiredDuration,
     original_required_duration: requiredDuration,
     shot_description: shotDescription,
@@ -351,6 +353,59 @@ const getMutableSessionSlot = (
   }
 
   return slot;
+};
+
+const normalizeSlotOrderIds = (payload: JsonObject): string[] => {
+  const slotIds = payload.slot_ids ?? payload.ordered_slot_ids;
+  if (!Array.isArray(slotIds)) {
+    throw new V2PipelineInputError("slot_ids must include every script slot in final order");
+  }
+
+  return slotIds.map((slotId, index) => {
+    const normalizedSlotId = normalizeOptionalString(slotId);
+    if (!normalizedSlotId) {
+      throw new V2PipelineInputError(`slot_ids[${index}] is invalid`);
+    }
+
+    return normalizedSlotId;
+  });
+};
+
+export const reorderV2ScriptSlots = (
+  sessionId: string,
+  payload: JsonObject
+): V2ScriptSession => {
+  const session = getV2ScriptSession(sessionId);
+  const orderedSlotIds = normalizeSlotOrderIds(payload);
+  if (orderedSlotIds.length !== session.slots.length) {
+    throw new V2PipelineInputError("slot_ids must include every script slot exactly once");
+  }
+
+  const uniqueSlotIds = new Set(orderedSlotIds);
+  if (uniqueSlotIds.size !== orderedSlotIds.length) {
+    throw new V2PipelineInputError("slot_ids contains duplicate script slots");
+  }
+
+  const slotById = new Map(session.slots.map((slot) => [slot.slot_id, slot]));
+  const unknownSlotId = orderedSlotIds.find((slotId) => !slotById.has(slotId));
+  if (unknownSlotId) {
+    throw new V2PipelineInputError(`script slot not found in session: ${unknownSlotId}`, 404);
+  }
+
+  session.slots = orderedSlotIds.map((slotId, index) => {
+    const slot = slotById.get(slotId);
+    if (!slot) {
+      throw new V2PipelineInputError(`script slot not found in session: ${slotId}`, 404);
+    }
+
+    return {
+      ...slot,
+      display_order: index + 1
+    };
+  });
+  session.updated_at = new Date().toISOString();
+
+  return saveScriptSession(session);
 };
 
 export const updateV2ScriptSlot = (
@@ -543,10 +598,12 @@ const makeCoverageRequest = (
 };
 
 const makeCoverageArchitecture = (session: V2ScriptSession): JsonObject => ({
-  slots: session.slots.map((slot) => ({
+  slots: session.slots.map((slot, index) => ({
     slot_id: slot.slot_id,
     slot_type: slot.slot_type,
     slot_name: slot.slot_name,
+    script_order_index: index,
+    display_order: slot.display_order ?? index + 1,
     duration_seconds: slot.required_duration,
     visual_direction: slot.shot_description,
     copy_direction: slot.voiceover_text,
@@ -626,9 +683,13 @@ export const revalidateV2CanvasFromScript = async (
     material_candidate_pool: materialCandidatePool,
     material_segments: materialSegments,
     material_coverage: materialCoverage,
-    canvas_nodes: materialCoverage.slot_coverage.map((coverage) => ({
+    canvas_nodes: materialCoverage.slot_coverage.map((coverage, index) => ({
       slot_id: coverage.slot_id,
       slot_type: coverage.slot_type,
+      script_order_index: index,
+      display_order:
+        session.slots.find((slot) => slot.slot_id === coverage.slot_id)?.display_order ??
+        index + 1,
       label: coverage.frontend_coverage_label,
       coverage_status: coverage.frontend_coverage_status,
       required_duration: coverage.required_duration,

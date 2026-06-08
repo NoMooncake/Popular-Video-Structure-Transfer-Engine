@@ -747,6 +747,7 @@ Response:
   "slots": [
     {
       "slot_id": "slot_01",
+      "display_order": 1,
       "required_duration": 2,
       "shot_description": "冰红茶瓶身和冰块特写。",
       "voiceover_text": "冰爽一下。",
@@ -769,6 +770,22 @@ Allowed fields:
 - `voiceover_text` / `copy`
 
 Locked fields such as `shot_description`, `visual`, `packaging`, and `slot_type` return `400 invalid_v2_script_slot_input`.
+
+### `PATCH /api/v2/script-sessions/:sessionId/slot-order`
+
+Persists the final script-page paragraph order after the user moves rows up or down.
+The canvas revalidation step and material candidate pool use this saved order.
+
+Request:
+
+```json
+{
+  "slot_ids": ["slot_02", "slot_01", "slot_03"]
+}
+```
+
+`slot_ids` must include every slot in the session exactly once. Missing, duplicate, or unknown slot ids return `400 invalid_v2_script_slot_order_input`.
+The response is the updated script session. Each slot receives `display_order` starting from `1`.
 
 ### `POST /api/v2/script-sessions/:sessionId/slots/:slotId/materials`
 
@@ -796,6 +813,7 @@ Content type: `multipart/form-data`
 
 Recomputes material coverage when the user enters the canvas page. This is where edited slot durations become authoritative for matching.
 This also builds a material candidate pool from the current slot folders.
+Script-page uploads are not segmented when uploaded; they are processed here using the current slot duration and the saved final slot order.
 
 Request:
 
@@ -830,6 +848,8 @@ Response:
       "candidate_pool_id": "v2_script_uuid_canvas_candidate_pool",
       "source_material_id": "slot_01_material_01",
       "assigned_slot_id": "slot_01",
+      "script_order_index": 0,
+      "display_order": 1,
       "source_in_seconds": 0,
       "source_out_seconds": 1.5,
       "usable_duration_seconds": 1.5,
@@ -855,6 +875,8 @@ Response:
   "canvas_nodes": [
     {
       "slot_id": "slot_01",
+      "script_order_index": 0,
+      "display_order": 1,
       "coverage_status": "fully_matched",
       "required_duration": 2,
       "matched_material_duration": 2,
