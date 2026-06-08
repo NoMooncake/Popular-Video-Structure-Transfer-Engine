@@ -472,7 +472,12 @@ const InputView = ({
                 </div>
               ) : (
                 <div className="upload-placeholder">
-                  <div className="icon-video">+</div>
+                  <div className="icon-video">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect width="20" height="16" x="2" y="4" rx="2" ry="2" />
+                      <path d="M10 8l6 4-6 4V8z" />
+                    </svg>
+                  </div>
                   <strong>参考素材</strong>
                   <span>添加你想分析的样例视频</span>
                 </div>
@@ -497,7 +502,13 @@ const InputView = ({
                 </div>
               ) : (
                 <div className="upload-placeholder">
-                  <div className="icon-materials">+</div>
+                  <div className="icon-materials">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+                      <circle cx="8.5" cy="8.5" r="1.5" />
+                      <path d="M21 15l-5-5L5 21" />
+                    </svg>
+                  </div>
                   <strong>真实素材</strong>
                   <span>添加你的素材</span>
                 </div>
