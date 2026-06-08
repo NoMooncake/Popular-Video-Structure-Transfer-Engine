@@ -8,6 +8,7 @@ import {
   readV2MaterialCandidatePool
 } from "../services/v2MaterialCandidatePoolService.js";
 import {
+  assembleV2CanvasFinalVideo,
   generateV2CanvasGapVideo,
   generateV2CanvasImageCandidates,
   getV2CanvasSession,
@@ -484,6 +485,29 @@ v2Routes.post(
     }
   }
 );
+
+v2Routes.post("/canvas-sessions/:canvasSessionId/final-video", async (req, res) => {
+  try {
+    res.json(await assembleV2CanvasFinalVideo(req.params.canvasSessionId, req.body ?? {}));
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_canvas_final_assembly_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_canvas_final_assembly_failed",
+        message: getErrorMessage(error, "V2 画布最终成片合成失败")
+      }
+    });
+  }
+});
 
 v2Routes.post("/material-candidate-pools/from-script-session", async (req, res) => {
   try {

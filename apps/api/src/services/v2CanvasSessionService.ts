@@ -5,6 +5,7 @@ import path from "node:path";
 import { storageConfig } from "../config/storage.js";
 import { findUploadedVideoById } from "./uploadService.js";
 import {
+  assembleV2FinalVideo,
   generateV2ImageCandidates,
   generateV2ImageToVideo,
   reviewAndTrimV2GeneratedVideo,
@@ -682,6 +683,152 @@ export const reviewAndTrimV2CanvasGeneratedVideo = async (
     generated_video_node: generatedVideoNode,
     trim_result: trimResult,
     usable_video_uri: trimmedVideoUri || videoUri
+  };
+};
+
+const getOrderedSlotNodes = (session: V2CanvasSession): V2CanvasNode[] => {
+  const slotNodes = session.nodes.filter((node) => node.node_type === "script_slot");
+  const slotNodeById = new Map(slotNodes.map((node) => [node.node_id, node]));
+  const sequenceEdges = session.edges.filter((edge) => edge.edge_type === "sequence");
+  const incomingSequenceTargets = new Set(sequenceEdges.map((edge) => edge.target_node_id));
+  const firstSlotNode =
+    slotNodes.find((node) => !incomingSequenceTargets.has(node.node_id)) || slotNodes[0];
+  const orderedNodes: V2CanvasNode[] = [];
+  const seen = new Set<string>();
+  let currentNode: V2CanvasNode | undefined = firstSlotNode;
+
+  while (currentNode && !seen.has(currentNode.node_id)) {
+    const activeNode: V2CanvasNode = currentNode;
+    orderedNodes.push(activeNode);
+    seen.add(activeNode.node_id);
+    const nextEdge: V2CanvasEdge | undefined = sequenceEdges.find(
+      (edge) => edge.source_node_id === activeNode.node_id
+    );
+    currentNode = nextEdge ? slotNodeById.get(nextEdge.target_node_id) : undefined;
+  }
+
+  const missingNodes = slotNodes
+    .filter((node) => !seen.has(node.node_id))
+    .sort((left, right) => getNumber(left.display_order) - getNumber(right.display_order));
+
+  return [...orderedNodes, ...missingNodes];
+};
+
+const getMaterialSegmentAssemblySlots = (
+  session: V2CanvasSession,
+  slotNode: V2CanvasNode
+): JsonObject[] => {
+  const materialEdges = session.edges.filter(
+    (edge) => edge.target_node_id === slotNode.node_id && edge.edge_type === "fills_slot"
+  );
+
+  return materialEdges
+    .map((edge) =>
+      session.nodes.find(
+        (node) => node.node_id === edge.source_node_id && node.node_type === "material_segment"
+      )
+    )
+    .filter((node): node is V2CanvasNode => Boolean(node))
+    .sort(
+      (left, right) =>
+        getNumber(left.data.source_in_seconds) - getNumber(right.data.source_in_seconds)
+    )
+    .map((node) => ({
+      slot_id: slotNode.slot_id,
+      slot_type: normalizeOptionalString(slotNode.data.slot_type),
+      video_uri: node.data.uri,
+      duration_seconds:
+        getNumber(node.data.matched_material_duration) ||
+        getNumber(node.data.usable_duration_seconds) ||
+        getNumber(slotNode.data.required_duration),
+      start_seconds: getNumber(node.data.source_in_seconds)
+    }))
+    .filter((slot) => normalizeOptionalString(slot.video_uri));
+};
+
+const getGeneratedVideoAssemblySlots = (
+  session: V2CanvasSession,
+  slotNode: V2CanvasNode
+): JsonObject[] => {
+  const missingEdges = session.edges.filter(
+    (edge) => edge.source_node_id === slotNode.node_id && edge.edge_type === "has_gap"
+  );
+  const missingNodeIds = new Set(missingEdges.map((edge) => edge.target_node_id));
+  const generatedEdges = session.edges.filter(
+    (edge) =>
+      missingNodeIds.has(edge.target_node_id) && edge.edge_type === "generated_video_to_gap"
+  );
+
+  return generatedEdges
+    .map((edge) =>
+      session.nodes.find(
+        (node) => node.node_id === edge.source_node_id && node.node_type === "generated_video"
+      )
+    )
+    .filter((node): node is V2CanvasNode => Boolean(node))
+    .map((node) => {
+      const trimResult = asJsonObject(node.data.trim_result);
+      const trimRecommendation = asJsonObject(trimResult.trim_recommendation);
+      return {
+        slot_id: slotNode.slot_id,
+        slot_type: normalizeOptionalString(slotNode.data.slot_type),
+        video_uri:
+          normalizeOptionalString(node.data.usable_video_uri) ||
+          getGeneratedVideoUri(node.data),
+        duration_seconds:
+          getNumber(trimRecommendation.recommended_duration_seconds) ||
+          getNumber(slotNode.data.missing_duration) ||
+          getNumber(slotNode.data.required_duration),
+        start_seconds: 0
+      };
+    })
+    .filter((slot) => normalizeOptionalString(slot.video_uri));
+};
+
+export const assembleV2CanvasFinalVideo = async (
+  canvasSessionId: string,
+  payload: JsonObject
+): Promise<JsonObject> => {
+  const session = getV2CanvasSession(canvasSessionId);
+  const assemblySlots = getOrderedSlotNodes(session).flatMap((slotNode) => [
+    ...getMaterialSegmentAssemblySlots(session, slotNode),
+    ...getGeneratedVideoAssemblySlots(session, slotNode)
+  ]);
+  if (assemblySlots.length === 0) {
+    throw new V2PipelineInputError("canvas session has no connected video nodes to assemble");
+  }
+
+  const result = await assembleV2FinalVideo({
+    slots: assemblySlots.map((slot) => ({
+      slot_id: normalizeOptionalString(slot.slot_id),
+      slot_type: normalizeOptionalString(slot.slot_type),
+      video_uri: normalizeOptionalString(slot.video_uri) || "",
+      duration_seconds: getNumber(slot.duration_seconds),
+      start_seconds: getNumber(slot.start_seconds)
+    })),
+    target_duration_seconds:
+      payload.target_duration_seconds === undefined
+        ? undefined
+        : getNumber(payload.target_duration_seconds),
+    resolution: normalizeOptionalString(payload.resolution),
+    fps: payload.fps === undefined ? undefined : getNumber(payload.fps),
+    background_color: normalizeOptionalString(payload.background_color),
+    allow_loop_short_clips: payload.allow_loop_short_clips !== false
+  });
+
+  session.source = {
+    ...session.source,
+    last_assembly_id: result.assembly_id,
+    last_final_video_url: result.final_video_url,
+    last_assembled_at: new Date().toISOString()
+  };
+  session.updated_at = new Date().toISOString();
+  saveCanvasSession(session);
+
+  return {
+    canvas_session: session,
+    assembly_slots: assemblySlots,
+    final_assembly: result
   };
 };
 

@@ -1956,11 +1956,34 @@ test(
     const completedRevalidate = (await completedRevalidateResponse.json()) as {
       canvas_nodes: Array<Record<string, unknown>>;
       material_segments: Array<Record<string, unknown>>;
+      canvas_session_id: string;
     };
     assert.equal(completedRevalidateResponse.status, 200);
     assert.equal(completedRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(completedRevalidate.material_segments.length, 2);
     assert.equal(asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).length, 2);
+
+    const canvasAssemblyResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${completedRevalidate.canvas_session_id}/final-video`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          target_duration_seconds: 2,
+          resolution: "360x640",
+          fps: 12
+        })
+      }
+    );
+    const canvasAssembly = (await canvasAssemblyResponse.json()) as {
+      assembly_slots: Array<Record<string, unknown>>;
+      final_assembly: Record<string, unknown>;
+    };
+    assert.equal(canvasAssemblyResponse.status, 200);
+    assert.equal(canvasAssembly.assembly_slots.length, 2);
+    assert.match(String(canvasAssembly.final_assembly.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
   }
 );
 

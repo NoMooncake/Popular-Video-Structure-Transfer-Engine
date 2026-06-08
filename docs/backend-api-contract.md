@@ -1074,6 +1074,26 @@ Request:
 
 Response includes the updated `canvas_session`, the updated `generated_video_node`, `trim_result`, and `usable_video_uri`.
 
+### `POST /api/v2/canvas-sessions/:canvasSessionId/final-video`
+
+Builds final assembly slots from the current canvas session and calls ffmpeg final assembly.
+The backend follows `sequence` edges between `script_slot` nodes, then uses connected `material_segment` nodes and trimmed `generated_video` nodes for each slot.
+Original clip audio is muted by the ffmpeg assembly layer. Final BGM remains `pending_provider_integration`.
+
+Request:
+
+```json
+{
+  "target_duration_seconds": 8,
+  "resolution": "720x1280",
+  "fps": 24,
+  "background_color": "black",
+  "allow_loop_short_clips": true
+}
+```
+
+Response includes `assembly_slots` and the existing `final_assembly` payload with `final_video_url`.
+
 ### `POST /api/v2/material-candidate-pools/from-script-session`
 
 Builds only the material candidate pool from a script session, without recomputing canvas coverage.
