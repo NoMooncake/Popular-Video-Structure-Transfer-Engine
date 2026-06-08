@@ -7,8 +7,8 @@ import type {
   CanvasBlock,
   GapItem,
   GapReport,
-  Keyframe,
   MatchStatus,
+  SampleAnalysis,
   StructureBlueprint,
   TimelineItem,
   TimelinePlan
@@ -17,10 +17,6 @@ import type {
 export const structureBlueprint = structureBlueprintJson as StructureBlueprint;
 export const gapReport = gapReportJson as GapReport;
 export const timelinePlan = timelinePlanJson as TimelinePlan;
-
-type SampleAnalysis = {
-  keyframes: Keyframe[];
-};
 
 export const sampleAnalysis = sampleAnalysisJson as SampleAnalysis;
 
@@ -49,7 +45,7 @@ const formatTimeRange = (timeRange: CanvasBlock["slot"]["time_range"]): string =
   return `${timeRange.start_seconds}-${timeRange.end_seconds}s`;
 };
 
-export const canvasBlocks: CanvasBlock[] = structureBlueprint.slots.map((slot) => ({
+export const createCanvasBlocks = (blueprint: StructureBlueprint): CanvasBlock[] => blueprint.slots.map((slot) => ({
   id: slot.slot_id,
   label: slot.slot_type,
   timeRange: formatTimeRange(slot.time_range),
@@ -58,6 +54,8 @@ export const canvasBlocks: CanvasBlock[] = structureBlueprint.slots.map((slot) =
   gap: gapBySlotId.get(slot.slot_id),
   timeline: timelineBySlotId.get(slot.slot_id)
 }));
+
+export const canvasBlocks: CanvasBlock[] = createCanvasBlocks(structureBlueprint);
 
 export const steps = [
   {

@@ -1564,3 +1564,282 @@ input {
     margin-left: 16px;
   }
 }
+
+/* ShotSwift Premium Workspace Modifications */
+
+/* Selected row highlight in Migration Table */
+.migration-table tbody tr.migration-row {
+  transition: all 0.25s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.migration-table tbody tr.migration-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.migration-table tbody tr.selected-row {
+  background: var(--theme-soft) !important;
+  outline: 2px solid var(--theme);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  transform: scale(1.002);
+  position: relative;
+  z-index: 2;
+}
+
+/* Contrast editable vs readonly cells */
+.editable-cell {
+  background: rgba(255, 255, 255, 0.01);
+  position: relative;
+}
+
+.readonly-cell {
+  color: var(--text-muted);
+  opacity: 0.85;
+}
+
+.readonly-cell.locked {
+  background: rgba(0, 0, 0, 0.15);
+  color: #7f7f7f;
+}
+
+.readonly-cell.locked strong {
+  color: #a0a0a0 !important;
+}
+
+.readonly-lock-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.lock-icon {
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.lock-tag {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-top: 4px;
+}
+
+.status-badge-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+/* Inputs & Textareas */
+.migration-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #111111;
+  color: var(--text-strong);
+  font-size: 14px;
+  text-align: center;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.migration-input:focus {
+  border-color: var(--theme);
+  outline: none;
+  box-shadow: 0 0 8px var(--theme-soft);
+  background: #161616;
+}
+
+.voiceover-cell {
+  min-width: 280px;
+}
+
+.voiceover-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.migration-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #111111;
+  color: var(--text-strong);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.migration-textarea:focus {
+  border-color: var(--theme);
+  outline: none;
+  box-shadow: 0 0 8px var(--theme-soft);
+  background: #161616;
+}
+
+/* TTS Button Styling */
+.tts-button {
+  align-self: flex-end;
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(254, 44, 85, 0.4);
+  background: var(--theme-soft);
+  color: var(--theme);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+}
+
+.tts-button:hover:not(:disabled) {
+  background: var(--theme);
+  color: #ffffff;
+  border-color: var(--theme);
+}
+
+.tts-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tts-button.loading {
+  background: #2a2a2a;
+  border-color: #3b3b3b;
+  color: var(--text-muted);
+}
+
+.tts-button.success {
+  background: rgba(52, 183, 122, 0.15);
+  border-color: var(--matched);
+  color: var(--matched);
+}
+
+/* Spinner animation for TTS Button */
+.spinner {
+  display: inline-block;
+  animation: pulse 1s infinite alternate;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+/* Modal Styling for InputView */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal-content {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  width: 90%;
+  max-width: 400px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  animation: modalFadeIn 0.2s ease-out forwards;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text-strong);
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 24px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.close-btn:hover {
+  color: var(--theme);
+}
+
+.modal-body {
+  padding: 24px 20px;
+}
+
+.modal-body p {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.modal-footer {
+  padding: 16px 20px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+/* Upload Preview */
+.upload-card.has-media {
+  background: #111;
+  border-color: var(--theme-soft);
+  padding: 16px;
+}
+
+.upload-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.file-name {
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: bold;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -32,15 +32,50 @@ export type Keyframe = {
   };
 };
 
+export type TimeRange = {
+  start_seconds: number;
+  end_seconds: number;
+  relative_start_percent: number;
+  relative_end_percent: number;
+};
+
+export type SampleShot = {
+  shot_id: string;
+  time_range: TimeRange;
+  keyframe_refs: string[];
+  visual_tags: string[];
+  description: string;
+  confidence: number;
+};
+
+export type SampleAnalysis = {
+  id: string;
+  video: {
+    duration_seconds: number;
+    width: number;
+    height: number;
+    resolution: string;
+    aspect_ratio: string;
+    fps: number;
+    codec: string;
+    format: string;
+    path?: string;
+    cover_frame: {
+      uri: string;
+      mime_type: string;
+      width: number;
+      height: number;
+    };
+  };
+  shot_count: number;
+  shots: SampleShot[];
+  keyframes: Keyframe[];
+};
+
 export type StructureSlot = {
   slot_id: string;
   slot_type: string;
-  time_range: string | {
-    start_seconds: number;
-    end_seconds: number;
-    relative_start_percent: number;
-    relative_end_percent: number;
-  };
+  time_range: string | TimeRange;
   content_goal: string;
   rhythm: "slow" | "medium" | "fast" | "mixed";
   required_materials: Array<{

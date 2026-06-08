@@ -1,28 +1,92 @@
-import type { StructureBlueprint, UploadResponse } from "../types";
+import type { SampleAnalysis, StructureBlueprint, UploadResponse } from "../types";
 
 type ApiErrorBody = {
   error?: {
+    code?: string;
     message?: string;
+    stage?: string;
   };
 };
 
-const getErrorMessage = (body: unknown, fallback: string): string => {
+export class ApiRequestError extends Error {
+  code?: string;
+  stage?: string;
+  status: number;
+
+  constructor({
+    code,
+    message,
+    stage,
+    status
+  }: {
+    code?: string;
+    message: string;
+    stage?: string;
+    status: number;
+  }) {
+    super(stage ? `${stage}: ${message}` : message);
+    this.name = "ApiRequestError";
+    this.code = code;
+    this.stage = stage;
+    this.status = status;
+  }
+}
+
+const parseJsonBody = async (response: Response): Promise<unknown> => {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return {
+      error: {
+        message: text
+      }
+    };
+  }
+};
+
+const getError = (body: unknown, fallback: string) => {
   if (!body || typeof body !== "object" || !("error" in body)) {
-    return fallback;
+    return {
+      message: fallback
+    };
   }
 
   const errorBody = body as ApiErrorBody;
-  return errorBody.error?.message || fallback;
+  return {
+    code: errorBody.error?.code,
+    message: errorBody.error?.message || fallback,
+    stage: errorBody.error?.stage
+  };
 };
 
 const toJson = async <T>(response: Response): Promise<T> => {
-  const body = (await response.json()) as unknown;
+  const body = await parseJsonBody(response);
 
   if (!response.ok) {
-    throw new Error(getErrorMessage(body, `Request failed with ${response.status}`));
+    throw new ApiRequestError({
+      ...getError(body, `Request failed with ${response.status}`),
+      status: response.status
+    });
   }
 
   return body as T;
+};
+
+export const uploadSampleVideo = async (file: File): Promise<UploadResponse> => {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  return toJson<UploadResponse>(
+    await fetch("/api/upload/video", {
+      method: "POST",
+      body: formData
+    })
+  );
 };
 
 export const uploadSampleVideos = async (files: File[]): Promise<UploadResponse> => {
@@ -40,8 +104,22 @@ export const uploadSampleVideos = async (files: File[]): Promise<UploadResponse>
   );
 };
 
-export const analyzeSampleVideo = async <T>(fileId: string): Promise<T> => {
-  return toJson<T>(
+export const uploadMaterialFiles = async (files: File[]): Promise<UploadResponse> => {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("files", file);
+  }
+
+  return toJson<UploadResponse>(
+    await fetch("/api/upload/videos", {
+      method: "POST",
+      body: formData
+    })
+  );
+};
+
+export const analyzeSampleVideo = async (fileId: string): Promise<SampleAnalysis> => {
+  return toJson<SampleAnalysis>(
     await fetch("/api/sample/analyze", {
       method: "POST",
       headers: {
@@ -55,7 +133,12 @@ export const analyzeSampleVideo = async <T>(fileId: string): Promise<T> => {
 };
 
 export const extractStructureBlueprint = async (
-  sampleAnalysis: unknown
+  sampleAnalysis: SampleAnalysis,
+  options: {
+    category?: string;
+    useMock?: boolean;
+    vertical?: string;
+  } = {}
 ): Promise<StructureBlueprint> => {
   return toJson<StructureBlueprint>(
     await fetch("/api/structure/extract", {
@@ -65,8 +148,9 @@ export const extractStructureBlueprint = async (
       },
       body: JSON.stringify({
         sample_analysis: sampleAnalysis,
-        vertical: "seeding_de_seeding",
-        category: "pet_food"
+        vertical: options.vertical ?? "seeding_de_seeding",
+        category: options.category ?? "pet_food",
+        use_mock: options.useMock ?? false
       })
     })
   );

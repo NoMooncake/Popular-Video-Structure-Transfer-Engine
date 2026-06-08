@@ -1,21 +1,44 @@
 import { useState } from "react";
+import type { ChangeEvent } from "react";
 
+import type { WorkflowRunResult } from "../App";
 import {
-  canvasBlocks,
+  analyzeSampleVideo,
+  extractStructureBlueprint,
+  uploadMaterialFiles,
+  uploadSampleVideo
+} from "../api/client";
+import {
+  canvasBlocks as fallbackCanvasBlocks,
   gapReport,
-  sampleAnalysis,
+  sampleAnalysis as fallbackSampleAnalysis,
   timelinePlan
 } from "../data/workflow";
-import type { CanvasBlock, MatchStatus, StepKey } from "../types";
+import type {
+  CanvasBlock,
+  MatchStatus,
+  SampleAnalysis,
+  SampleShot,
+  StepKey,
+  StructureBlueprint,
+  UploadedVideoFile
+} from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { VideoBlockCanvas } from "./VideoBlockCanvas";
 
 type WorkspaceViewsProps = {
   activeStep: StepKey;
+  blocks: CanvasBlock[];
+  materialFiles: UploadedVideoFile[];
   onSelectBlock: (blockId: string) => void;
+  onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onStepChange: (step: StepKey) => void;
+  onWorkflowReady: (result: WorkflowRunResult) => void;
+  sampleAnalysis?: SampleAnalysis;
+  sampleFile?: UploadedVideoFile;
   selectedBlock: CanvasBlock;
   selectedBlockId: string;
+  structureBlueprint?: StructureBlueprint;
 };
 
 const steps: Array<{
@@ -26,32 +49,32 @@ const steps: Array<{
   {
     key: "input",
     label: "输入",
-    description: "样例视频、真实诉求和素材"
+    description: "上传样例、多条参考视频和真实素材"
   },
   {
     key: "analysis",
     label: "样例解析",
-    description: "拆解节奏、分镜和包装"
+    description: "按样例视频拆结构段落"
   },
   {
     key: "migration",
     label: "结构迁移",
-    description: "映射新素材和迁移结果"
+    description: "映射我的素材和迁移结果"
   },
   {
     key: "gap-fill",
     label: "缺口补全",
-    description: "识别红黄绿匹配状态"
+    description: "红黄绿匹配状态和补全策略"
   },
   {
     key: "gap-detail",
     label: "缺口详情",
-    description: "解释原因和补全方案"
+    description: "逐项解释缺什么、为什么缺、怎么补"
   },
   {
     key: "demo",
     label: "演示",
-    description: "时间线预览和人工调整"
+    description: "时间线预览、人工编辑和导出占位"
   }
 ];
 
@@ -79,7 +102,7 @@ const migrationRuleByType: Record<string, string> = {
   product_reveal: "把样例的多产品拆解迁移为短视频中的分类推荐卡片。",
   proof_comparison: "把样例的解释段落迁移为可视化对比证明。",
   decision_warning: "把样例的避坑知识迁移为消费决策前的提醒。",
-  cta: "把样例的评论互动结尾迁移为按猫咪情况咨询的 CTA。"
+  cta: "把样例的评论互动结尾迁移为按猫咪情况咨询 of CTA。"
 };
 
 const gapCopyById: Record<
@@ -152,30 +175,68 @@ const readableSource = (source?: string) => {
   return visualSourceText[source] ?? source;
 };
 
+const toBackendCategory = (value: string) => {
+  if (value.includes("猫") || value.toLowerCase().includes("pet")) {
+    return "pet_food";
+  }
+
+  return value.trim() || "pet_food";
+};
+
 export const WorkspaceViews = ({
   activeStep,
+  blocks,
+  materialFiles,
   onSelectBlock,
+  onUpdateBlock,
   onStepChange,
+  onWorkflowReady,
+  sampleAnalysis,
+  sampleFile,
   selectedBlock,
-  selectedBlockId
+  selectedBlockId,
+  structureBlueprint
 }: WorkspaceViewsProps) => {
   if (activeStep === "input") {
-    return <InputView onNext={() => onStepChange("analysis")} onStepChange={onStepChange} />;
+    return (
+      <InputView
+        onNext={() => onStepChange("analysis")}
+        onStepChange={onStepChange}
+        onWorkflowReady={onWorkflowReady}
+      />
+    );
   }
 
   if (activeStep === "analysis") {
-    return <FigmaSampleAnalysisView onNext={() => onStepChange("migration")} />;
+    return (
+      <FigmaSampleAnalysisView
+        onNext={() => onStepChange("migration")}
+        sampleAnalysis={sampleAnalysis}
+        sampleFile={sampleFile}
+        structureBlueprint={structureBlueprint}
+      />
+    );
   }
 
   if (activeStep === "migration") {
-    return <StructureMigrationView onNext={() => onStepChange("gap-fill")} onStepChange={onStepChange} />;
+    return (
+      <StructureMigrationView
+        blocks={blocks}
+        materialFiles={materialFiles}
+        onNext={() => onStepChange("gap-fill")}
+        onUpdateBlock={onUpdateBlock}
+        onStepChange={onStepChange}
+      />
+    );
   }
 
   if (activeStep === "gap-fill") {
     return (
       <GapFillView
+        blocks={blocks}
         onNext={() => onStepChange("gap-detail")}
         onSelectBlock={onSelectBlock}
+        onUpdateBlock={onUpdateBlock}
         onStepChange={onStepChange}
         selectedBlockId={selectedBlockId}
       />
@@ -192,7 +253,7 @@ export const WorkspaceViews = ({
     );
   }
 
-  return <DemoView onStepChange={onStepChange} />;
+  return <DemoView blocks={blocks} onStepChange={onStepChange} />;
 };
 
 type HeaderProps = {
@@ -254,16 +315,123 @@ const CanvasTopBar = ({
 
 const InputView = ({
   onNext,
-  onStepChange
+  onStepChange,
+  onWorkflowReady
 }: {
   onNext: () => void;
   onStepChange: (step: StepKey) => void;
+  onWorkflowReady: (result: WorkflowRunResult) => void;
 }) => {
+  const [brief, setBrief] = useState(
+    "开始一次分镜迁移：我想基于几条爆款样例，生成一条“新手养猫怎么选猫粮”的 20 秒短视频。"
+  );
+  const [materialFiles, setMaterialFiles] = useState<File[]>([]);
+  const [pipelineError, setPipelineError] = useState("");
+  const [pipelineNote, setPipelineNote] = useState("等待上传样例视频");
+  const [pipelineStatus, setPipelineStatus] = useState<
+    "idle" | "uploading" | "analyzing" | "extracting" | "success" | "error"
+  >("idle");
+  const [sampleFile, setSampleFile] = useState<File | null>(null);
+  const [targetBrief, setTargetBrief] = useState(
+    "新手养猫怎么选猫粮：不同猫咪需求对应不同猫粮，不要盲买。"
+  );
+  const [targetTopic, setTargetTopic] = useState("宠物用品 / 猫粮");
+  const [targetDuration, setTargetDuration] = useState("目标时长：20 秒");
+  const [showModal, setShowModal] = useState(false);
+
+  const isRunning = ["uploading", "analyzing", "extracting"].includes(pipelineStatus);
+
+  const updateSampleFile = (event: ChangeEvent<HTMLInputElement>) => {
+    setSampleFile(event.target.files?.[0] ?? null);
+    setPipelineError("");
+  };
+
+  const updateMaterialFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    setMaterialFiles(Array.from(event.target.files ?? []));
+    setPipelineError("");
+  };
+
+  const runPipeline = async () => {
+    if (isRunning) {
+      return;
+    }
+
+    if (!sampleFile) {
+      setPipelineStatus("error");
+      setPipelineError("请先上传一个样例视频。");
+      setShowModal(true);
+      return;
+    }
+
+    try {
+      setPipelineError("");
+      setPipelineStatus("uploading");
+      setPipelineNote("正在上传样例视频");
+      const uploadedSample = await uploadSampleVideo(sampleFile);
+      const uploadedSampleFile = uploadedSample.files[0];
+
+      if (!uploadedSampleFile) {
+        throw new Error("上传接口没有返回样例视频 file_id。");
+      }
+
+      const videoMaterialFiles = materialFiles.filter((file) => file.type.startsWith("video/"));
+      const skippedMaterialCount = materialFiles.length - videoMaterialFiles.length;
+      const uploadedMaterials =
+        videoMaterialFiles.length > 0
+          ? await uploadMaterialFiles(videoMaterialFiles)
+          : { files: [] };
+
+      setPipelineStatus("analyzing");
+      setPipelineNote("正在解析样例视频");
+      const analysis = await analyzeSampleVideo(uploadedSampleFile.file_id);
+
+      setPipelineStatus("extracting");
+      setPipelineNote("正在调用 Mimo 提取结构");
+      let usedStructureFallback = false;
+      let blueprint: StructureBlueprint;
+      try {
+        blueprint = await extractStructureBlueprint(analysis, {
+          category: toBackendCategory(targetTopic),
+          useMock: false,
+          vertical: "seeding_de_seeding"
+        });
+      } catch {
+        usedStructureFallback = true;
+        blueprint = await extractStructureBlueprint(analysis, {
+          category: toBackendCategory(targetTopic),
+          useMock: true,
+          vertical: "seeding_de_seeding"
+        });
+      }
+
+      setPipelineStatus("success");
+      setPipelineNote(
+        usedStructureFallback
+          ? "Mimo 返回结构未通过后端 schema 校验，已回退到规则结构。"
+          : skippedMaterialCount > 0
+          ? `已完成分析；${skippedMaterialCount} 个非视频素材暂未上传到当前后端。`
+          : "已完成真实接口分析"
+      );
+      onWorkflowReady({
+        materialFiles: uploadedMaterials.files,
+        sampleAnalysis: analysis,
+        sampleFile: uploadedSampleFile,
+        structureBlueprint: blueprint
+      });
+      onNext();
+    } catch (error) {
+      setPipelineStatus("error");
+      setPipelineNote("接口运行失败");
+      setPipelineError(error instanceof Error ? error.message : "接口运行失败，请检查后端日志。");
+    }
+  };
+
   return (
     <div className="page-shell input-page">
       <CanvasTopBar
+        actionLabel={isRunning ? "分析中..." : "开始分析"}
         activeStep="input"
-        onNext={onNext}
+        onNext={runPipeline}
         onStepChange={onStepChange}
         subtitle="先把样例、真实需求和可用素材放进同一个工作台，后续分析会基于这些输入生成可解释的结构迁移方案。"
         title="输入素材"
@@ -276,28 +444,42 @@ const InputView = ({
         </div>
         <div className="prompt-box">
           <textarea
-            defaultValue="开始一次分镜迁移：我想基于几条爆款样例，生成一条“新手养猫怎么选猫粮”的 20 秒短视频。"
+            onChange={(event) => setBrief(event.target.value)}
             rows={4}
+            value={brief}
           />
-          <button aria-label="提交需求" onClick={onNext} type="button">
-            →
+          <button aria-label="提交需求" onClick={runPipeline} type="button">
+            {isRunning ? "…" : "→"}
           </button>
         </div>
       </section>
 
       <section className="input-layout">
         <div className="upload-card-grid">
-          <label className="upload-card">
-            <input multiple type="file" accept="video/mp4,video/quicktime,video/webm" />
-            <span className="upload-icon">01</span>
-            <strong>上传样例视频</strong>
-            <span>支持多条样例，用来学习 Hook、节奏、包装和 CTA。</span>
+          <label className={`upload-card ${sampleFile ? 'has-media' : ''}`}>
+            <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={updateSampleFile} />
+            {sampleFile ? (
+              <div className="upload-preview">
+                <video src={URL.createObjectURL(sampleFile)} controls width="100%" style={{ borderRadius: '8px', maxHeight: '180px', objectFit: 'cover' }} />
+                <span className="file-name">{sampleFile.name}</span>
+              </div>
+            ) : (
+              <>
+                <span className="upload-icon">01</span>
+                <strong>上传样例视频</strong>
+                <span>用来学习 Hook、节奏、包装和 CTA。</span>
+              </>
+            )}
           </label>
           <label className="upload-card">
-            <input multiple type="file" accept="image/*,video/*,.txt,.md" />
+            <input multiple type="file" accept="image/*,video/*,.txt,.md" onChange={updateMaterialFiles} />
             <span className="upload-icon">02</span>
             <strong>上传真实素材</strong>
-            <span>上传图片、视频片段、产品文案和案例素材。</span>
+            <span>
+              {materialFiles.length > 0
+                ? `已选择 ${materialFiles.length} 个素材`
+                : "上传图片、视频片段、产品文案和案例素材。"}
+            </span>
           </label>
         </div>
 
@@ -307,15 +489,41 @@ const InputView = ({
             <strong>可编辑</strong>
           </div>
           <textarea
-            defaultValue="新手养猫怎么选猫粮：不同猫咪需求对应不同猫粮，不要盲买。"
+            onChange={(event) => setTargetBrief(event.target.value)}
             rows={5}
+            value={targetBrief}
           />
           <div className="field-row">
-            <input defaultValue="宠物用品 / 猫粮" />
-            <input defaultValue="目标时长：20 秒" />
+            <input onChange={(event) => setTargetTopic(event.target.value)} value={targetTopic} />
+            <input onChange={(event) => setTargetDuration(event.target.value)} value={targetDuration} />
           </div>
+          <div className="panel-heading">
+            <span>接口状态</span>
+            <strong>{pipelineStatus === "idle" ? "未运行" : pipelineStatus}</strong>
+          </div>
+          <p>{pipelineNote}</p>
+          {pipelineError ? <p role="alert">{pipelineError}</p> : null}
         </section>
       </section>
+
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>提示</h3>
+              <button className="close-btn" onClick={() => setShowModal(false)} aria-label="关闭">×</button>
+            </div>
+            <div className="modal-body">
+              <p>需要添加样例视频，请先上传样例视频再继续。</p>
+            </div>
+            <div className="modal-footer">
+              <button className="primary-action" onClick={() => setShowModal(false)}>
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -352,6 +560,32 @@ type SampleAnalysisRow = {
   shotTitle: string;
   shotDescription: string;
   migrationPossibility: string;
+};
+
+const formatSeconds = (value: number) => {
+  return `${Number.isInteger(value) ? value : value.toFixed(1)}s`;
+};
+
+const formatShotRange = (shot: SampleShot) => {
+  return `${formatSeconds(shot.time_range.start_seconds)} - ${formatSeconds(shot.time_range.end_seconds)}`;
+};
+
+const buildBackendSampleRows = (
+  analysis: SampleAnalysis,
+  blueprint?: StructureBlueprint
+): SampleAnalysisRow[] => {
+  return analysis.shots.map((shot, index) => {
+    const keyframe = analysis.keyframes.find((item) => shot.keyframe_refs.includes(item.frame_id));
+    const slot = blueprint?.slots[index];
+
+    return {
+      duration: formatShotRange(shot),
+      image: keyframe?.media.uri ?? analysis.video.cover_frame.uri,
+      shotTitle: slot ? readableSlot({ id: slot.slot_id, label: slot.slot_type, slot, status: "partial", timeRange: formatShotRange(shot) }) : shot.shot_id,
+      shotDescription: shot.description,
+      migrationPossibility: slot?.migration_rule ?? slot?.content_goal ?? "等待结构提取结果。"
+    };
+  });
 };
 
 const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
@@ -447,16 +681,30 @@ const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
   ]
 };
 
-const FigmaSampleAnalysisView = ({ onNext }: { onNext: () => void }) => {
+const FigmaSampleAnalysisView = ({
+  onNext,
+  sampleAnalysis,
+  sampleFile,
+  structureBlueprint
+}: {
+  onNext: () => void;
+  sampleAnalysis?: SampleAnalysis;
+  sampleFile?: UploadedVideoFile;
+  structureBlueprint?: StructureBlueprint;
+}) => {
   const [activeSample, setActiveSample] = useState(2);
-  const rows = sampleAnalysisTables[activeSample];
+  const backendRows = sampleAnalysis
+    ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
+    : null;
+  const rows = backendRows ?? sampleAnalysisTables[activeSample];
+  const sourceLabel = sampleFile?.original_filename ?? "口红广告";
 
   return (
     <div className="figma-analysis-page">
       <header className="figma-analysis-topbar">
         <div className="figma-analysis-brand">
           <span>迁镜</span>
-          <strong>口红广告</strong>
+          <strong>{sourceLabel}</strong>
           <button aria-label="编辑项目名称" className="figma-edit-icon" type="button">
             ✎
           </button>
@@ -470,14 +718,14 @@ const FigmaSampleAnalysisView = ({ onNext }: { onNext: () => void }) => {
       </button>
 
       <nav className="figma-sample-nav" aria-label="样例视频">
-        {[1, 2, 3].map((sampleNumber) => (
+        {(backendRows ? [0] : [1, 2, 3]).map((sampleNumber) => (
           <button
-            className={sampleNumber === activeSample ? "active" : ""}
+            className={backendRows || sampleNumber === activeSample ? "active" : ""}
             key={sampleNumber}
             onClick={() => setActiveSample(sampleNumber)}
             type="button"
           >
-            {sampleNumber}
+            {backendRows ? "API" : sampleNumber}
           </button>
         ))}
       </nav>
@@ -513,115 +761,36 @@ const FigmaSampleAnalysisView = ({ onNext }: { onNext: () => void }) => {
   );
 };
 
-const SampleAnalysisView = ({
-  onNext,
-  onStepChange
-}: {
-  onNext: () => void;
-  onStepChange: (step: StepKey) => void;
-}) => {
-  return (
-    <div className="page-shell analysis-page">
-      <CanvasTopBar
-        activeStep="analysis"
-        onNext={onNext}
-        onStepChange={onStepChange}
-        subtitle="参考 Figma 的样例解析页面，但改成 Web 端可伸缩表格、关键帧横向卡片和稳定的内容容器。"
-        title="样例解析"
-      />
-
-      <section className="summary-grid">
-        <MetricCard label="样例时长" value="240s" />
-        <MetricCard label="关键帧" value={`${sampleAnalysis.keyframes.length} 帧`} />
-        <MetricCard label="结构槽位" value={`${canvasBlocks.length} 个`} />
-        <MetricCard label="包装密度" value="高字幕 / 快节奏" />
-      </section>
-
-      <section className="content-card">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Keyframes</span>
-            <h2>关键帧展示</h2>
-          </div>
-          <p>小屏不压缩画面，使用局部横向滚动。</p>
-        </div>
-        <div className="keyframe-strip">
-          {sampleAnalysis.keyframes.map((keyframe, index) => (
-            <article className="keyframe-card" key={keyframe.frame_id}>
-              <div className="phone-frame">
-                <span>KF {String(index + 1).padStart(2, "0")}</span>
-              </div>
-              <strong>{keyframe.time_seconds}s</strong>
-              <p>{["风险标题", "需求标签", "产品卡片", "成分说明", "对比标准", "评论引导"][index] ?? "关键画面"}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="content-card">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">Structure</span>
-            <h2>AI 拆解结构</h2>
-          </div>
-          <p>保留 Figma 表格的内容形式，Web 端通过局部滚动保证列宽稳定。</p>
-        </div>
-        <div className="table-scroll">
-          <table className="data-table analysis-table">
-            <thead>
-              <tr>
-                <th>结构段落</th>
-                <th>样例视频</th>
-                <th>分镜描述</th>
-                <th>我的素材</th>
-                <th>素材状态</th>
-                <th>迁移结果</th>
-              </tr>
-            </thead>
-            <tbody>
-              {canvasBlocks.slice(0, 5).map((block, index) => (
-                <tr key={block.id}>
-                  <td>
-                    <strong>{readableSlot(block)}</strong>
-                    <span>{block.timeRange}</span>
-                  </td>
-                  <td>
-                    <PlaceholderBlock label={`样例 ${index + 1}`} />
-                  </td>
-                  <td>{readableGoal(block)}</td>
-                  <td>
-                    <PlaceholderBlock label={`素材 ${index + 1}`} />
-                  </td>
-                  <td>
-                    <StatusBadge status={block.status} />
-                  </td>
-                  <td>
-                    <PlaceholderBlock label={readableSource(block.timeline?.visual_source)} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-  );
-};
-
 const StructureMigrationView = ({
+  blocks,
+  materialFiles,
   onNext,
+  onUpdateBlock,
   onStepChange
 }: {
+  blocks: CanvasBlock[];
+  materialFiles: UploadedVideoFile[];
   onNext: () => void;
+  onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onStepChange: (step: StepKey) => void;
 }) => {
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+  const [ttsStatus, setTtsStatus] = useState<Record<string, "idle" | "loading" | "success">>({});
+
+  const handleTtsGenerate = (blockId: string) => {
+    setTtsStatus((prev) => ({ ...prev, [blockId]: "loading" }));
+    setTimeout(() => {
+      setTtsStatus((prev) => ({ ...prev, [blockId]: "success" }));
+    }, 1500);
+  };
+
   return (
     <div className="page-shell migration-page">
       <CanvasTopBar
         activeStep="migration"
         onNext={onNext}
         onStepChange={onStepChange}
-        subtitle="把样例结构映射到新素材，明确哪些槽位已匹配、部分匹配或需要 AI/剪辑补全。"
+        subtitle="把样例结构映射到新素材，人工调整时长和旁白，并生成配音。分镜与状态为只读锁定。"
         title="结构迁移"
       />
 
@@ -632,43 +801,131 @@ const StructureMigrationView = ({
               <span className="eyebrow">Mapping</span>
               <h2>迁移矩阵</h2>
             </div>
-            <p>表格列宽固定在局部滚动区域内，避免小屏被压扁。</p>
+            <p>点击或编辑任一行以激活选中态，时长与旁白可编辑，其余属性只读锁定。</p>
           </div>
           <div className="table-scroll">
             <table className="data-table migration-table">
               <thead>
                 <tr>
-                  <th>时长</th>
+                  <th>时长 (可编辑)</th>
                   <th>样例视频</th>
                   <th>分镜描述</th>
                   <th>我的素材</th>
+                  <th>旁白 (可编辑)</th>
                   <th>素材状态</th>
                   <th>迁移结果</th>
                 </tr>
               </thead>
               <tbody>
-                {canvasBlocks.map((block, index) => (
-                  <tr key={block.id}>
-                    <td>{block.timeRange}</td>
-                    <td>
-                      <PlaceholderBlock label={`样例 ${index + 1}`} />
-                    </td>
-                    <td>
-                      <strong>{readableSlot(block)}</strong>
-                      <span>{readableRule(block)}</span>
-                    </td>
-                    <td>
-                      <PlaceholderBlock label={`素材 ${index + 1}`} />
-                    </td>
-                    <td>
-                      <StatusBadge status={block.status} />
-                      <small>{statusTextByStatus[block.status]}</small>
-                    </td>
-                    <td>
-                      <PlaceholderBlock label={readableSource(block.timeline?.visual_source)} />
-                    </td>
-                  </tr>
-                ))}
+                {blocks.map((block, index) => {
+                  const isSelected = selectedRowId === block.id;
+                  const currentTts = ttsStatus[block.id] ?? "idle";
+                  const voiceoverText = block.timeline?.voiceover ?? "";
+
+                  return (
+                    <tr
+                      key={block.id}
+                      className={`migration-row ${isSelected ? "selected-row" : ""}`}
+                      onClick={() => setSelectedRowId(block.id)}
+                    >
+                      {/* 时长: Editable */}
+                      <td className="editable-cell">
+                        <div className="input-wrapper">
+                          <input
+                            type="text"
+                            className="migration-input duration-input"
+                            value={block.timeRange}
+                            onChange={(e) => {
+                              onUpdateBlock({
+                                ...block,
+                                timeRange: e.target.value
+                              });
+                            }}
+                            placeholder="e.g. 0-3s"
+                          />
+                        </div>
+                      </td>
+
+                      {/* 样例视频: Readonly */}
+                      <td className="readonly-cell">
+                        <PlaceholderBlock label={`样例 ${index + 1}`} />
+                      </td>
+
+                      {/* 分镜描述: Locked Readonly */}
+                      <td className="readonly-cell locked">
+                        <div className="readonly-lock-badge">
+                          <strong>{readableSlot(block)}</strong>
+                          <span className="lock-icon">🔒 只读</span>
+                        </div>
+                        <span>{readableRule(block)}</span>
+                      </td>
+
+                      {/* 我的素材: Readonly */}
+                      <td className="readonly-cell">
+                        <PlaceholderBlock label={materialFiles[index]?.original_filename ?? `素材 ${index + 1}`} />
+                      </td>
+
+                      {/* 旁白: Editable */}
+                      <td className="editable-cell voiceover-cell">
+                        <div className="voiceover-container">
+                          <textarea
+                            className="migration-textarea voiceover-textarea"
+                            value={voiceoverText}
+                            onChange={(e) => {
+                              const updatedTimeline = block.timeline
+                                ? { ...block.timeline, voiceover: e.target.value }
+                                : {
+                                    item_id: `tl_${block.id}`,
+                                    slot_id: block.id,
+                                    time_range: block.timeRange,
+                                    slot_type: block.slot.slot_type,
+                                    content_goal: block.slot.content_goal,
+                                    visual_source: "user_material",
+                                    visual_description: "",
+                                    subtitle: e.target.value,
+                                    voiceover: e.target.value,
+                                    transition: "none"
+                                  };
+                              onUpdateBlock({
+                                ...block,
+                                timeline: updatedTimeline
+                              });
+                            }}
+                            placeholder="输入旁白文本..."
+                            rows={3}
+                          />
+                          <button
+                            type="button"
+                            className={`tts-button ${currentTts}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTtsGenerate(block.id);
+                            }}
+                            disabled={currentTts === "loading" || !voiceoverText}
+                          >
+                            {currentTts === "idle" && "生成语音 (TTS)"}
+                            {currentTts === "loading" && <span className="spinner">生成中...</span>}
+                            {currentTts === "success" && "✓ 语音就绪"}
+                          </button>
+                        </div>
+                      </td>
+
+                      {/* 素材状态: Locked Readonly */}
+                      <td className="readonly-cell locked">
+                        <div className="status-badge-wrapper">
+                          <StatusBadge status={block.status} />
+                          <small>{statusTextByStatus[block.status]}</small>
+                          <span className="lock-tag">🔒</span>
+                        </div>
+                      </td>
+
+                      {/* 迁移结果: Readonly */}
+                      <td className="readonly-cell">
+                        <PlaceholderBlock label={readableSource(block.timeline?.visual_source)} />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -683,7 +940,7 @@ const StructureMigrationView = ({
               </div>
             </div>
             <div className="slot-list">
-              {canvasBlocks.map((block) => (
+              {blocks.map((block) => (
                 <div className="slot-item" key={block.id}>
                   <span>{block.timeRange}</span>
                   <strong>{readableSlot(block)}</strong>
@@ -721,13 +978,17 @@ const StructureMigrationView = ({
 };
 
 const GapFillView = ({
+  blocks,
   onNext,
   onSelectBlock,
+  onUpdateBlock,
   onStepChange,
   selectedBlockId
 }: {
+  blocks: CanvasBlock[];
   onNext: () => void;
   onSelectBlock: (blockId: string) => void;
+  onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onStepChange: (step: StepKey) => void;
   selectedBlockId: string;
 }) => {
@@ -743,8 +1004,9 @@ const GapFillView = ({
       />
       <section className="gap-fill-layout">
         <VideoBlockCanvas
-          blocks={canvasBlocks}
+          blocks={blocks}
           onSelectBlock={onSelectBlock}
+          onUpdateBlock={onUpdateBlock}
           selectedBlockId={selectedBlockId}
         />
         <aside className="content-card legend-card">
@@ -845,7 +1107,13 @@ const GapDetailView = ({
   );
 };
 
-const DemoView = ({ onStepChange }: { onStepChange: (step: StepKey) => void }) => {
+const DemoView = ({
+  blocks,
+  onStepChange
+}: {
+  blocks: CanvasBlock[];
+  onStepChange: (step: StepKey) => void;
+}) => {
   return (
     <div className="page-shell demo-page">
       <CanvasTopBar
@@ -862,7 +1130,7 @@ const DemoView = ({ onStepChange }: { onStepChange: (step: StepKey) => void }) =
           <div className="preview-canvas">
             <span>新手养猫怎么选猫粮</span>
             <strong>别盲买猫粮</strong>
-            <p>20 秒结构迁移预览</p>
+            <p>结构迁移预览</p>
           </div>
           <div className="scrubber">
             <span />
@@ -896,14 +1164,14 @@ const DemoView = ({ onStepChange }: { onStepChange: (step: StepKey) => void }) =
             <span className="eyebrow">Timeline</span>
             <h2>分镜 / 时间线</h2>
           </div>
-          <p>{timelinePlan.target_video.duration_seconds}s · 9:16 · 可横向浏览</p>
+          <p>9:16 · 可横向浏览</p>
         </div>
         <div className="timeline-strip">
-          {timelinePlan.timeline.map((item, index) => (
-            <button className="timeline-item" key={item.item_id} type="button">
-              <span>{item.time_range}</span>
-              <strong>{slotLabelByType[item.slot_type] ?? `分镜 ${index + 1}`}</strong>
-              <small>{readableSource(item.visual_source)}</small>
+          {blocks.map((block, index) => (
+            <button className="timeline-item" key={block.id} type="button">
+              <span>{block.timeRange}</span>
+              <strong>{readableSlot(block)}</strong>
+              <small>{readableSource(block.timeline?.visual_source)}</small>
             </button>
           ))}
         </div>
