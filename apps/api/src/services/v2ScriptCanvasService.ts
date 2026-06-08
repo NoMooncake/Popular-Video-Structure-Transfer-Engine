@@ -571,6 +571,11 @@ const getSlotMaterialRefs = (session: V2ScriptSession): V2VideoRef[] => {
 const getSlotMaterialLabels = (slot: V2ScriptSlot): string[] =>
   slot.materials.map((material) => material.label || material.material_id);
 
+const getNumber = (value: unknown, fallback = 0): number => {
+  const numericValue = Number(value);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+};
+
 const makeCoverageRequest = (
   session: V2ScriptSession,
   acceptedDurationShortSlots: string[] = []
@@ -626,6 +631,267 @@ const makeCoverageMaterialAnalysis = (session: V2ScriptSession): JsonObject => (
   )
 });
 
+const getSlotCoverageKey = (slotId: string, slotType: string): string[] => [
+  slotId,
+  slotType
+];
+
+const isAcceptedDurationShortSlot = (
+  acceptedSlots: Set<string>,
+  slotId: string,
+  slotType: string
+): boolean => acceptedSlots.has(slotId) || acceptedSlots.has(slotType);
+
+const getSegmentFinalDuration = (segment: JsonObject): number => {
+  const finalIn = getNumber(segment.final_source_in_seconds, getNumber(segment.source_in_seconds));
+  const finalOut = getNumber(
+    segment.final_source_out_seconds,
+    getNumber(segment.source_out_seconds)
+  );
+  const finalDuration = finalOut - finalIn;
+  if (finalDuration > 0) {
+    return Number(finalDuration.toFixed(3));
+  }
+
+  return getNumber(segment.usable_duration_seconds);
+};
+
+const isSegmentUsableForSlot = (segment: JsonObject, slot: V2ScriptSlot): boolean => {
+  if (normalizeOptionalString(segment.assigned_slot_id) === slot.slot_id) {
+    return true;
+  }
+
+  const usableSlotTypes = normalizeStringArray(segment.usable_slot_types);
+  return usableSlotTypes.includes(slot.slot_type) || usableSlotTypes.includes(slot.slot_id);
+};
+
+const makeSegmentAssignment = (
+  segment: JsonObject,
+  matchedDuration: number
+): JsonObject => ({
+  segment_id: segment.segment_id,
+  source_material_id: segment.source_material_id,
+  file_id: segment.file_id,
+  uri: segment.uri,
+  source_in_seconds: segment.final_source_in_seconds ?? segment.source_in_seconds,
+  source_out_seconds: segment.final_source_out_seconds ?? segment.source_out_seconds,
+  matched_material_duration: matchedDuration,
+  quality_score: segment.quality_score,
+  visual_tags: segment.visual_tags,
+  usable_slot_types: segment.usable_slot_types,
+  content_summary: segment.content_summary,
+  frames: segment.frames,
+  refinement_source: segment.refinement_source,
+  refinement_status: segment.refinement_status
+});
+
+const makeDirectVideoReferenceMaterialsFromSegments = (
+  assignedSegments: JsonObject[],
+  candidateSegments: JsonObject[]
+): JsonObject[] => {
+  const sourceSegments = assignedSegments.length > 0 ? assignedSegments : candidateSegments;
+
+  return sourceSegments.map((segment) => ({
+    segment_id: segment.segment_id,
+    source_material_id: segment.source_material_id,
+    file_id: segment.file_id,
+    uri: segment.uri,
+    source_in_seconds: segment.source_in_seconds,
+    source_out_seconds: segment.source_out_seconds,
+    matched_material_duration: segment.matched_material_duration,
+    quality_score: segment.quality_score,
+    content_summary: segment.content_summary,
+    frames: segment.frames
+  }));
+};
+
+const buildSegmentAwareMaterialCoverage = (
+  session: V2ScriptSession,
+  materialSegments: JsonObject[],
+  baseCoverage: JsonObject,
+  acceptedDurationShortSlots: string[]
+): JsonObject => {
+  const acceptedSlots = new Set(acceptedDurationShortSlots);
+  const baseSlotCoverage = Array.isArray(baseCoverage.slot_coverage)
+    ? baseCoverage.slot_coverage.map(asJsonObject)
+    : [];
+  const baseCoverageByKey = new Map<string, JsonObject>();
+  for (const coverage of baseSlotCoverage) {
+    const slotId = normalizeOptionalString(coverage.slot_id);
+    const slotType = normalizeOptionalString(coverage.slot_type);
+    for (const key of getSlotCoverageKey(slotId || "", slotType || "")) {
+      if (key) {
+        baseCoverageByKey.set(key, coverage);
+      }
+    }
+  }
+
+  const slotCoverage = session.slots.map((slot) => {
+    const base =
+      baseCoverageByKey.get(slot.slot_id) ||
+      baseCoverageByKey.get(slot.slot_type) ||
+      {};
+    const candidateSegments = materialSegments
+      .filter((segment) => isSegmentUsableForSlot(asJsonObject(segment), slot))
+      .map(asJsonObject)
+      .sort(
+        (left, right) =>
+          getNumber(right.quality_score, 0.5) - getNumber(left.quality_score, 0.5)
+      );
+    let requiredRemaining = slot.required_duration;
+    const assignedSegments: JsonObject[] = [];
+
+    for (const segment of candidateSegments) {
+      if (requiredRemaining <= 0) {
+        break;
+      }
+
+      const segmentDuration = getSegmentFinalDuration(segment);
+      if (segmentDuration <= 0) {
+        continue;
+      }
+
+      const matchedDuration = Number(Math.min(requiredRemaining, segmentDuration).toFixed(3));
+      assignedSegments.push(makeSegmentAssignment(segment, matchedDuration));
+      requiredRemaining = Number((requiredRemaining - matchedDuration).toFixed(3));
+    }
+
+    const matchedMaterialDuration = Number(
+      assignedSegments
+        .reduce((total, segment) => total + getNumber(segment.matched_material_duration), 0)
+        .toFixed(3)
+    );
+    const coverageStatus =
+      matchedMaterialDuration >= slot.required_duration
+        ? "covered"
+        : matchedMaterialDuration > 0
+          ? "partial"
+          : "missing";
+    const durationShortAccepted =
+      coverageStatus === "partial" &&
+      isAcceptedDurationShortSlot(acceptedSlots, slot.slot_id, slot.slot_type);
+    const frontendCoverageStatus =
+      coverageStatus === "covered" || durationShortAccepted
+        ? "fully_matched"
+        : coverageStatus === "partial"
+          ? "structure_complete_duration_short"
+          : "material_insufficient";
+    const missingDuration = Number(
+      Math.max(0, slot.required_duration - matchedMaterialDuration).toFixed(3)
+    );
+    const directVideoReferenceMaterials = makeDirectVideoReferenceMaterialsFromSegments(
+      assignedSegments,
+      candidateSegments
+    );
+    const availableGenerationPaths =
+      frontendCoverageStatus === "fully_matched"
+        ? []
+        : [
+            ...(directVideoReferenceMaterials.length > 0
+              ? ["direct_video_from_material_frame"]
+              : []),
+            "generate_image_then_video"
+          ];
+    const availableUserActions =
+      frontendCoverageStatus === "structure_complete_duration_short"
+        ? [
+            "accept_current_material_as_sufficient",
+            ...(availableGenerationPaths.includes("direct_video_from_material_frame")
+              ? ["generate_direct_video_from_material_frame"]
+              : []),
+            "generate_image_then_video"
+          ]
+        : frontendCoverageStatus === "material_insufficient"
+          ? [
+              ...(availableGenerationPaths.includes("direct_video_from_material_frame")
+                ? ["generate_direct_video_from_material_frame"]
+                : []),
+              "generate_image_then_video"
+            ]
+          : durationShortAccepted
+            ? ["reopen_ai_completion"]
+            : [];
+    const gapReason =
+      frontendCoverageStatus === "fully_matched"
+        ? undefined
+        : matchedMaterialDuration > 0
+          ? `已匹配 ${matchedMaterialDuration}s，但该段需要 ${slot.required_duration}s。`
+          : "该段文件夹内没有可用素材片段。";
+
+    return {
+      ...base,
+      slot_id: slot.slot_id,
+      slot_type: slot.slot_type,
+      slot_name: slot.slot_name,
+      required_duration: slot.required_duration,
+      matched_material_duration: matchedMaterialDuration,
+      coverage_status: coverageStatus,
+      frontend_coverage_status: frontendCoverageStatus,
+      frontend_coverage_label:
+        frontendCoverageStatus === "fully_matched"
+          ? "完全匹配"
+          : frontendCoverageStatus === "structure_complete_duration_short"
+            ? "结构完整，但时长不足"
+            : "素材不够",
+      missing_duration: missingDuration,
+      ai_completion_required_duration:
+        frontendCoverageStatus === "fully_matched"
+          ? 0
+          : missingDuration || slot.required_duration,
+      assigned_segments: assignedSegments,
+      matched_material_segments: assignedSegments,
+      candidate_material_segments: candidateSegments,
+      assigned_materials: assignedSegments,
+      matched_materials: assignedSegments,
+      needs_ai_completion: frontendCoverageStatus !== "fully_matched",
+      gap_reason: gapReason,
+      available_generation_paths: availableGenerationPaths,
+      available_user_actions: availableUserActions,
+      direct_video_reference_materials: directVideoReferenceMaterials,
+      user_duration_short_decision: durationShortAccepted
+        ? "accepted_as_sufficient"
+        : coverageStatus === "partial"
+          ? "pending"
+          : "not_applicable",
+      matching_source: "refined_material_segments",
+      semantic_matching_used: candidateSegments.some(
+        (segment) => segment.refinement_source === "multimodal_provider"
+      )
+    };
+  });
+  const fullyMatched = slotCoverage.every(
+    (coverage) => coverage.frontend_coverage_status === "fully_matched"
+  );
+
+  return {
+    ...baseCoverage,
+    materials_sufficient: fullyMatched,
+    requires_ai_completion: !fullyMatched,
+    target_duration_seconds: session.target_duration_seconds,
+    total_known_material_duration_seconds: Number(
+      materialSegments
+        .reduce((total, segment) => total + getSegmentFinalDuration(asJsonObject(segment)), 0)
+        .toFixed(3)
+    ),
+    material_assets: baseCoverage.material_assets,
+    slot_coverage: slotCoverage,
+    matching_source: "refined_material_segments",
+    summary: {
+      slot_count: slotCoverage.length,
+      fully_matched_count: slotCoverage.filter(
+        (coverage) => coverage.frontend_coverage_status === "fully_matched"
+      ).length,
+      duration_short_count: slotCoverage.filter(
+        (coverage) =>
+          coverage.frontend_coverage_status === "structure_complete_duration_short"
+      ).length,
+      material_insufficient_count: slotCoverage.filter(
+        (coverage) => coverage.frontend_coverage_status === "material_insufficient"
+      ).length
+    }
+  };
+};
+
 export const buildV2ScriptMaterialSegments = async (
   session: V2ScriptSession
 ): Promise<JsonObject[]> => {
@@ -671,6 +937,12 @@ export const revalidateV2CanvasFromScript = async (
     makeCoverageArchitecture(session),
     makeCoverageMaterialAnalysis(session)
   );
+  const segmentAwareMaterialCoverage = buildSegmentAwareMaterialCoverage(
+    session,
+    materialSegments.map(asJsonObject),
+    materialCoverage as unknown as JsonObject,
+    acceptedDurationShortSlots
+  );
 
   return {
     session_id: session.session_id,
@@ -684,8 +956,12 @@ export const revalidateV2CanvasFromScript = async (
     script_slots: session.slots,
     material_candidate_pool: materialCandidatePool,
     material_segments: materialSegments,
-    material_coverage: materialCoverage,
-    canvas_nodes: materialCoverage.slot_coverage.map((coverage, index) => ({
+    material_coverage: segmentAwareMaterialCoverage,
+    legacy_material_coverage: materialCoverage,
+    canvas_nodes: (Array.isArray(segmentAwareMaterialCoverage.slot_coverage)
+      ? segmentAwareMaterialCoverage.slot_coverage.map(asJsonObject)
+      : []
+    ).map((coverage, index) => ({
       slot_id: coverage.slot_id,
       slot_type: coverage.slot_type,
       script_order_index: index,
@@ -701,7 +977,12 @@ export const revalidateV2CanvasFromScript = async (
       recommended_video_prompt: coverage.recommended_video_prompt,
       recommended_aigc_prompt: coverage.recommended_aigc_prompt,
       available_generation_paths: coverage.available_generation_paths,
-      direct_video_reference_materials: coverage.direct_video_reference_materials
+      direct_video_reference_materials: coverage.direct_video_reference_materials,
+      assigned_segments: coverage.assigned_segments,
+      matched_material_segments: coverage.matched_material_segments,
+      candidate_material_segments: coverage.candidate_material_segments,
+      matching_source: coverage.matching_source,
+      semantic_matching_used: coverage.semantic_matching_used
     }))
   };
 };

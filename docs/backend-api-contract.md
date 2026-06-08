@@ -887,8 +887,28 @@ Response:
     }
   ],
   "material_coverage": {
-    "slot_coverage": []
+    "matching_source": "refined_material_segments",
+    "slot_coverage": [
+      {
+        "slot_id": "slot_01",
+        "frontend_coverage_status": "fully_matched",
+        "required_duration": 2,
+        "matched_material_duration": 2,
+        "missing_duration": 0,
+        "assigned_segments": [
+          {
+            "segment_id": "slot_01_seg_01_01",
+            "source_material_id": "slot_01_material_01",
+            "source_in_seconds": 0,
+            "source_out_seconds": 1.5,
+            "matched_material_duration": 1.5
+          }
+        ],
+        "matching_source": "refined_material_segments"
+      }
+    ]
   },
+  "legacy_material_coverage": {},
   "canvas_nodes": [
     {
       "slot_id": "slot_01",
@@ -897,7 +917,9 @@ Response:
       "coverage_status": "fully_matched",
       "required_duration": 2,
       "matched_material_duration": 2,
-      "missing_duration": 0
+      "missing_duration": 0,
+      "assigned_segments": [],
+      "matching_source": "refined_material_segments"
     }
   ]
 }
@@ -911,6 +933,8 @@ Canvas status values remain:
 
 `material_segments` starts from deterministic high-frequency candidate splitting, then attempts multimodal refinement when `refine_segments` is true.
 If the multimodal provider is unavailable, the API returns deterministic fallback refinement fields with `refinement.status = "deterministic_fallback"`.
+Canvas coverage uses the current script order, current slot durations, and the refined `material_segments` from each slot folder.
+`legacy_material_coverage` is included for debugging the older material-level calculation and should not drive the canvas UI.
 The segment pacing policy is user-request-first; `material_segments` should not be read as a final fast/slow ad classification.
 
 ### `POST /api/v2/material-candidate-pools/from-script-session`

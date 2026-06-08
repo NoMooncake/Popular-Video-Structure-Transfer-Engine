@@ -1652,6 +1652,7 @@ test(
       material_segments: Array<Record<string, unknown>>;
       material_coverage: {
         slot_coverage: Array<Record<string, unknown>>;
+        matching_source: string;
       };
       canvas_nodes: Array<Record<string, unknown>>;
     };
@@ -1664,7 +1665,18 @@ test(
       /^deterministic_fallback$/
     );
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(shortRevalidate.material_coverage.matching_source, "refined_material_segments");
     assert.equal(shortRevalidate.material_coverage.slot_coverage[0]?.required_duration, 0.5);
+    assert.equal(
+      shortRevalidate.material_coverage.slot_coverage[0]?.matching_source,
+      "refined_material_segments"
+    );
+    assert.equal(
+      asRecordArray(shortRevalidate.material_coverage.slot_coverage[0]?.assigned_segments)
+        .length,
+      1
+    );
+    assert.equal(asRecordArray(shortRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
     assert.equal(shortRevalidate.material_segments.length, 1);
     assert.equal(
       shortRevalidate.material_segments[0]?.segmentation_source,
@@ -1753,6 +1765,7 @@ test(
       "structure_complete_duration_short"
     );
     assert.equal(longRevalidate.canvas_nodes[0]?.missing_duration, 1);
+    assert.equal(asRecordArray(longRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
 
     const addMaterialResponse = await fetch(
       `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01/materials`,
@@ -1785,6 +1798,7 @@ test(
     assert.equal(completedRevalidateResponse.status, 200);
     assert.equal(completedRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(completedRevalidate.material_segments.length, 2);
+    assert.equal(asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).length, 2);
   }
 );
 
