@@ -6,7 +6,7 @@ import {
   analyzeSampleVideo,
   extractStructureBlueprint,
   uploadMaterialFiles,
-  uploadSampleVideo
+  uploadSampleVideos
 } from "../api/client";
 import {
   canvasBlocks as fallbackCanvasBlocks,
@@ -331,14 +331,14 @@ const InputView = ({
   const [pipelineStatus, setPipelineStatus] = useState<
     "idle" | "uploading" | "analyzing" | "extracting" | "success" | "error"
   >("idle");
-  const [sampleFile, setSampleFile] = useState<File | null>(null);
+  const [sampleFiles, setSampleFiles] = useState<File[]>([]);
   const [targetTopic] = useState("宠物用品 / 猫粮"); // Kept for backend call
   const [showModal, setShowModal] = useState(false);
 
   const isRunning = ["uploading", "analyzing", "extracting"].includes(pipelineStatus);
 
-  const updateSampleFile = (event: ChangeEvent<HTMLInputElement>) => {
-    setSampleFile(event.target.files?.[0] ?? null);
+  const updateSampleFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    setSampleFiles(Array.from(event.target.files ?? []));
     setPipelineError("");
   };
 
@@ -352,9 +352,9 @@ const InputView = ({
       return;
     }
 
-    if (!sampleFile) {
+    if (sampleFiles.length === 0) {
       setPipelineStatus("error");
-      setPipelineError("请先上传一个样例视频。");
+      setPipelineError("请先上传至少一个样例视频。");
       setShowModal(true);
       return;
     }
@@ -363,7 +363,7 @@ const InputView = ({
       setPipelineError("");
       setPipelineStatus("uploading");
       setPipelineNote("正在上传样例视频");
-      const uploadedSample = await uploadSampleVideo(sampleFile);
+      const uploadedSample = await uploadSampleVideos(sampleFiles);
       const uploadedSampleFile = uploadedSample.files[0];
 
       if (!uploadedSampleFile) {
@@ -463,12 +463,16 @@ const InputView = ({
           )}
 
           <div className="upload-section-large">
-            <label className={`upload-card-large ${sampleFile ? 'has-media' : ''}`}>
-              <input type="file" accept="video/mp4,video/quicktime,video/webm" onChange={updateSampleFile} />
-              {sampleFile ? (
-                <div className="upload-preview-large">
-                  <video src={URL.createObjectURL(sampleFile)} controls width="100%" />
-                  <span className="file-name">{sampleFile.name}</span>
+            <label className={`upload-card-large ${sampleFiles.length > 0 ? 'has-media' : ''}`}>
+              <input multiple type="file" accept="video/mp4,video/quicktime,video/webm" onChange={updateSampleFiles} />
+              {sampleFiles.length > 0 ? (
+                <div className="materials-list">
+                  {sampleFiles.map((file, i) => (
+                    <div key={i} className="material-item-preview">
+                       <video src={URL.createObjectURL(file)} />
+                       <span className="file-name">{file.name}</span>
+                    </div>
+                  ))}
                 </div>
               ) : (
                 <div className="upload-placeholder">
