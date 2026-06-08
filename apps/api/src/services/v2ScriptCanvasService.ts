@@ -585,9 +585,19 @@ const buildSegmentForMaterial = async (
 
   const metadata = await parseVideoMetadata(localPath);
   const duration = metadata.duration_seconds;
-  const maxSegmentDuration = duration <= 8 ? 1.5 : duration <= 20 ? 2.5 : 3.5;
+  const maxSegmentDuration = 1.5;
   const segmentCount = Math.max(1, Math.ceil(duration / maxSegmentDuration));
   const segmentDuration = duration / segmentCount;
+  const highFrequencyFrameInterval = 0.5;
+  const highFrequencyFrameTimestamps = Array.from(
+    {
+      length: Math.max(1, Math.ceil(duration / highFrequencyFrameInterval) + 1)
+    },
+    (_value, frameIndex) =>
+      Number(
+        Math.min(duration, frameIndex * highFrequencyFrameInterval).toFixed(3)
+      )
+  );
 
   return Array.from({ length: segmentCount }, (_value, segmentIndex) => {
     const sourceIn = Number((segmentIndex * segmentDuration).toFixed(3));
@@ -595,6 +605,9 @@ const buildSegmentForMaterial = async (
       Math.min(duration, sourceIn + segmentDuration).toFixed(3)
     );
     const mid = Number(((sourceIn + sourceOut) / 2).toFixed(3));
+    const candidateFrameTimestamps = highFrequencyFrameTimestamps.filter(
+      (timestamp) => timestamp >= sourceIn && timestamp <= sourceOut
+    );
 
     return {
       segment_id: `${slot.slot_id}_seg_${String(materialIndex + 1).padStart(2, "0")}_${String(segmentIndex + 1).padStart(2, "0")}`,
@@ -607,7 +620,12 @@ const buildSegmentForMaterial = async (
       source_out_seconds: sourceOut,
       usable_duration_seconds: Number((sourceOut - sourceIn).toFixed(3)),
       representative_frame_timestamps_seconds: [sourceIn, mid, sourceOut],
-      segmentation_source: "deterministic_duration_split",
+      high_frequency_frame_timestamps_seconds:
+        candidateFrameTimestamps.length > 0
+          ? candidateFrameTimestamps
+          : [sourceIn, mid, sourceOut],
+      segmentation_source: "uniform_high_frequency_candidate_split",
+      pacing_inference_source: "user_request_first_material_pacing_not_authoritative",
       status: "ready_for_multimodal_refinement"
     };
   });
@@ -651,6 +669,12 @@ export const revalidateV2CanvasFromScript = async (
   return {
     session_id: session.session_id,
     target_duration_seconds: session.target_duration_seconds,
+    material_understanding_policy: {
+      generated_structure_pacing: "user_request_first",
+      source_material_pacing_is_authoritative: false,
+      source_material_understanding:
+        "uniform_high_frequency_candidate_frames_then_multimodal_refinement"
+    },
     script_slots: session.slots,
     material_segments: materialSegments,
     material_coverage: materialCoverage,

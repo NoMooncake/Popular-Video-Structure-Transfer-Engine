@@ -1436,8 +1436,17 @@ test("v2 target duration keeps a 10 second user request", () => {
 test("v2 adaptive slot planning asks short videos to merge modules", () => {
   assert.equal(getAdaptiveSlotPlanningRules(7).target_slot_count_range, "3-5");
   assert.match(String(getAdaptiveSlotPlanningRules(7).rule), /不能机械拆成7个模块/);
+  assert.match(String(getAdaptiveSlotPlanningRules(7).rule), /用户需求/);
   assert.equal(getAdaptiveSlotPlanningRules(12).target_slot_count_range, "4-6");
+  assert.match(
+    String(getAdaptiveSlotPlanningRules(12).rule),
+    /不要把用户原始素材的镜头长短当作成片节奏结论/
+  );
   assert.equal(getAdaptiveSlotPlanningRules(20).target_slot_count_range, "6-7");
+  assert.match(
+    String(getAdaptiveSlotPlanningRules(20).rule),
+    /不能单独决定最终广告节奏/
+  );
 });
 
 test("v2 provider JSON extraction repairs common model JSON issues", () => {
@@ -1647,7 +1656,15 @@ test(
     assert.equal(shortRevalidate.material_segments.length, 1);
     assert.equal(
       shortRevalidate.material_segments[0]?.segmentation_source,
-      "deterministic_duration_split"
+      "uniform_high_frequency_candidate_split"
+    );
+    assert.equal(
+      shortRevalidate.material_segments[0]?.pacing_inference_source,
+      "user_request_first_material_pacing_not_authoritative"
+    );
+    assert.deepEqual(
+      shortRevalidate.material_segments[0]?.high_frequency_frame_timestamps_seconds,
+      [0, 0.5, 1]
     );
 
     await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
