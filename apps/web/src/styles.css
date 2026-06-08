@@ -1356,6 +1356,17 @@ input {
   line-height: 1.5;
   letter-spacing: -0.22px;
   z-index: 10;
+  cursor: pointer;
+  transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
+}
+
+.figma-migration-button:hover {
+  background: #e5264d;
+  box-shadow: 0 4px 16px rgba(254, 44, 85, 0.45);
+}
+
+.figma-migration-button:active {
+  transform: scale(0.96);
 }
 
 .figma-migration-button span:last-child {
@@ -1398,28 +1409,45 @@ input {
   height: 30px;
   border: 1px solid #5d5f61;
   border-radius: 8px;
-  padding: 10px;
+  padding: 0;
   color: #ffffff;
   background: transparent;
   font-family: inherit;
   font-size: 20px;
   font-weight: 400;
-  line-height: 1.5;
+  line-height: 30px;
   letter-spacing: -0.22px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, border-color 0.2s, transform 0.15s;
+}
+
+.figma-sample-nav button:hover {
+  background: rgba(113, 115, 117, 0.35);
+  border-color: #8a8c8e;
+}
+
+.figma-sample-nav button:active {
+  transform: scale(0.92);
 }
 
 .figma-sample-nav button.active {
   background: rgba(113, 115, 117, 0.5);
+  border-color: #8a8c8e;
 }
 
 .add-sample-btn {
   background: rgba(254, 44, 85, 0.75) !important;
   color: #ffffff !important;
   border-color: #fe2c55 !important;
-  font-size: 24px !important;
-  font-weight: 300 !important;
+  font-size: 20px !important;
+  font-weight: 400 !important;
+  line-height: 30px !important;
+}
+
+.add-sample-btn:hover {
+  background: rgba(254, 44, 85, 1) !important;
+  border-color: #ff4d6d !important;
+  box-shadow: 0 0 12px rgba(254, 44, 85, 0.4);
 }
 
 .figma-analysis-table-wrap {
@@ -1570,16 +1598,23 @@ input {
     margin: 16px 16px 0 auto;
   }
 
+  .figma-analysis-content {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
   .figma-sample-nav {
-    position: static;
+    width: auto;
     flex-direction: row;
-    width: fit-content;
-    margin: 24px 0 0 16px;
+    padding-top: 0;
+    padding: 16px 16px 0;
+    justify-content: flex-start;
   }
 
   .figma-analysis-table-wrap {
     width: calc(100vw - 32px);
-    margin-top: 24px;
+    margin: 16px auto 0;
+    padding-right: 0;
   }
 }
 

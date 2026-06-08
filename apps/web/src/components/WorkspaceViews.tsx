@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import type { ChangeEvent } from "react";
 
 import type { WorkflowRunResult } from "../App";
@@ -729,11 +729,25 @@ const FigmaSampleAnalysisView = ({
   structureBlueprint?: StructureBlueprint;
 }) => {
   const [activeSample, setActiveSample] = useState(2);
+  const [extraSamples, setExtraSamples] = useState<{ name: string }[]>([]);
+  const addSampleInputRef = useRef<HTMLInputElement>(null);
   const backendRows = sampleAnalysis
     ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
     : null;
   const rows = backendRows ?? sampleAnalysisTables[activeSample];
   const sourceLabel = sampleFile?.original_filename ?? "口红广告";
+
+  const baseSampleCount = backendRows ? 1 : 3;
+  const totalSamples = baseSampleCount + extraSamples.length;
+
+  const handleAddSample = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const newSamples = Array.from(files).map((f) => ({ name: f.name }));
+    setExtraSamples((prev) => [...prev, ...newSamples]);
+    setActiveSample(totalSamples + 1); // jump to first new sample
+    e.target.value = ""; // reset so same file can be re-selected
+  };
 
   return (
     <div className="figma-analysis-page">
@@ -753,6 +767,15 @@ const FigmaSampleAnalysisView = ({
         <span aria-hidden="true">›</span>
       </button>
 
+      {/* Hidden file input for adding new sample videos */}
+      <input
+        ref={addSampleInputRef}
+        type="file"
+        accept="video/mp4,video/quicktime,video/webm"
+        style={{ display: 'none' }}
+        onChange={handleAddSample}
+      />
+
       <div className="figma-analysis-content">
         <nav className="figma-sample-nav" aria-label="样例视频">
           {(backendRows ? [0] : [1, 2, 3]).map((sampleNumber) => (
@@ -765,10 +788,22 @@ const FigmaSampleAnalysisView = ({
               {backendRows ? "API" : sampleNumber}
             </button>
           ))}
-          <button className="add-sample-btn" type="button" aria-label="添加样例" onClick={() => {
-            // Mock upload click
-            alert("即将调起：uploadSampleVideo 添加新样例，完成后列表会增加新序号。");
-          }}>
+          {extraSamples.map((_, i) => (
+            <button
+              className={activeSample === baseSampleCount + i + 1 ? "active" : ""}
+              key={`extra-${i}`}
+              onClick={() => setActiveSample(baseSampleCount + i + 1)}
+              type="button"
+            >
+              {baseSampleCount + i + 1}
+            </button>
+          ))}
+          <button
+            className="add-sample-btn"
+            type="button"
+            aria-label="添加样例"
+            onClick={() => addSampleInputRef.current?.click()}
+          >
             +
           </button>
         </nav>
