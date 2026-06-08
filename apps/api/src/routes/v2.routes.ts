@@ -12,6 +12,7 @@ import {
   addV2ScriptSlotMaterials,
   createV2ScriptSession,
   getV2ScriptSession,
+  reorderV2ScriptSlots,
   revalidateV2CanvasFromScript,
   updateV2ScriptSlot
 } from "../services/v2ScriptCanvasService.js";
@@ -201,6 +202,29 @@ v2Routes.patch("/script-sessions/:sessionId/slots/:slotId", (req, res) => {
       error: {
         code: "v2_script_slot_update_failed",
         message: getErrorMessage(error, "V2 脚本段落更新失败")
+      }
+    });
+  }
+});
+
+v2Routes.patch("/script-sessions/:sessionId/slot-order", (req, res) => {
+  try {
+    res.json(reorderV2ScriptSlots(req.params.sessionId, req.body ?? {}));
+  } catch (error) {
+    if (error instanceof V2PipelineInputError) {
+      res.status(error.statusCode).json({
+        error: {
+          code: "invalid_v2_script_slot_order_input",
+          message: error.message
+        }
+      });
+      return;
+    }
+
+    res.status(getStatusCode(error)).json({
+      error: {
+        code: "v2_script_slot_order_update_failed",
+        message: getErrorMessage(error, "V2 脚本段落顺序更新失败")
       }
     });
   }

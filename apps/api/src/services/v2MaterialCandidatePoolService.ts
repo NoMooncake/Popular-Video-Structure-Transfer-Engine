@@ -215,13 +215,16 @@ const buildMaterialSegments = async (
   const materialAssets: JsonObject[] = [];
   const materialSegments: JsonObject[] = [];
 
-  for (const slot of session.slots) {
+  for (const [slotIndex, slot] of session.slots.entries()) {
+    const displayOrder = slot.display_order ?? slotIndex + 1;
     for (const [materialIndex, material] of slot.materials.entries()) {
       if (!material.file_id) {
         materialAssets.push({
           material_id: material.material_id,
           assigned_slot_id: slot.slot_id,
           assigned_slot_type: slot.slot_type,
+          script_order_index: slotIndex,
+          display_order: displayOrder,
           uri: material.uri,
           label: material.label,
           read_status: "skipped_missing_file_id"
@@ -236,6 +239,8 @@ const buildMaterialSegments = async (
           file_id: material.file_id,
           assigned_slot_id: slot.slot_id,
           assigned_slot_type: slot.slot_type,
+          script_order_index: slotIndex,
+          display_order: displayOrder,
           uri: material.uri,
           label: material.label,
           read_status: "skipped_local_file_unresolved"
@@ -252,6 +257,8 @@ const buildMaterialSegments = async (
         label: material.label,
         assigned_slot_id: slot.slot_id,
         assigned_slot_type: slot.slot_type,
+        script_order_index: slotIndex,
+        display_order: displayOrder,
         local_path_resolved: true,
         metadata,
         high_frequency_frame_interval_seconds: highFrequencyFrameIntervalSeconds,
@@ -297,6 +304,8 @@ const buildMaterialSegments = async (
           uri: material.uri,
           assigned_slot_id: slot.slot_id,
           assigned_slot_type: slot.slot_type,
+          script_order_index: slotIndex,
+          display_order: displayOrder,
           source_in_seconds: range.source_in_seconds,
           source_out_seconds: range.source_out_seconds,
           usable_duration_seconds: range.usable_duration_seconds,
