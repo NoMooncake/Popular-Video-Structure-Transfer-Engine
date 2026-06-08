@@ -1527,6 +1527,192 @@ test("POST /api/v2/generation/image-to-video rejects text-only video generation"
 });
 
 test(
+  "v2 script session saves edited duration and canvas revalidates against slot materials",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const firstFileId = createUploadedTestVideo(1);
+    const secondFileId = createUploadedTestVideo(1);
+
+    const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_request: {
+          goal: "冰红茶宣传片",
+          product_name: "冰红茶"
+        },
+        target_duration_seconds: 2,
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "product_hero",
+            slot_name: "产品亮相",
+            duration_seconds: 2,
+            shot_description: "冰红茶瓶身和冰块特写。",
+            copy: "冰爽一下。",
+            materials: [
+              {
+                material_id: "ice_tea_clip_01",
+                file_id: firstFileId,
+                uri: `/api/upload/files/${firstFileId}`,
+                label: "ice_tea_clip_01"
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const created = (await createResponse.json()) as {
+      session_id: string;
+      slots: Array<{
+        slot_id: string;
+        required_duration: number;
+        shot_description: string;
+      }>;
+    };
+
+    assert.equal(createResponse.status, 201);
+    assert.equal(created.slots[0]?.required_duration, 2);
+    assert.equal(created.slots[0]?.shot_description, "冰红茶瓶身和冰块特写。");
+
+    const lockedResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          shot_description: "用户试图修改分镜"
+        })
+      }
+    );
+    const lockedBody = (await lockedResponse.json()) as {
+      error: {
+        code: string;
+        message: string;
+      };
+    };
+    assert.equal(lockedResponse.status, 400);
+    assert.equal(lockedBody.error.code, "invalid_v2_script_slot_input");
+    assert.match(lockedBody.error.message, /locked/);
+
+    const updateResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          required_duration: 0.5,
+          voiceover_text: "清凉马上回来。"
+        })
+      }
+    );
+    const updated = (await updateResponse.json()) as {
+      target_duration_seconds: number;
+      slots: Array<{
+        required_duration: number;
+        voiceover_text: string;
+      }>;
+    };
+    assert.equal(updateResponse.status, 200);
+    assert.equal(updated.target_duration_seconds, 0.5);
+    assert.equal(updated.slots[0]?.required_duration, 0.5);
+    assert.equal(updated.slots[0]?.voiceover_text, "清凉马上回来。");
+
+    const shortRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id
+      })
+    });
+    const shortRevalidate = (await shortRevalidateResponse.json()) as {
+      material_segments: Array<Record<string, unknown>>;
+      material_coverage: {
+        slot_coverage: Array<Record<string, unknown>>;
+      };
+      canvas_nodes: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(shortRevalidateResponse.status, 200);
+    assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(shortRevalidate.material_coverage.slot_coverage[0]?.required_duration, 0.5);
+    assert.equal(shortRevalidate.material_segments.length, 1);
+    assert.equal(
+      shortRevalidate.material_segments[0]?.segmentation_source,
+      "deterministic_duration_split"
+    );
+
+    await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        required_duration: 2
+      })
+    });
+
+    const longRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id
+      })
+    });
+    const longRevalidate = (await longRevalidateResponse.json()) as {
+      canvas_nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(longRevalidateResponse.status, 200);
+    assert.equal(
+      longRevalidate.canvas_nodes[0]?.coverage_status,
+      "structure_complete_duration_short"
+    );
+    assert.equal(longRevalidate.canvas_nodes[0]?.missing_duration, 1);
+
+    const addMaterialResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01/materials`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          file_ids: [secondFileId]
+        })
+      }
+    );
+    assert.equal(addMaterialResponse.status, 201);
+
+    const completedRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id
+      })
+    });
+    const completedRevalidate = (await completedRevalidateResponse.json()) as {
+      canvas_nodes: Array<Record<string, unknown>>;
+      material_segments: Array<Record<string, unknown>>;
+    };
+    assert.equal(completedRevalidateResponse.status, 200);
+    assert.equal(completedRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(completedRevalidate.material_segments.length, 2);
+  }
+);
+
+test(
   "POST /api/v2/generation/image-to-video can use an existing material frame",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {
