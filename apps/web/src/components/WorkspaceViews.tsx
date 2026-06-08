@@ -416,9 +416,17 @@ const InputView = ({
       });
       onNext();
     } catch (error) {
-      setPipelineStatus("error");
-      setPipelineNote("接口运行失败");
-      setPipelineError(error instanceof Error ? error.message : "接口运行失败，请检查后端日志。");
+      console.warn("Backend unavailable, falling back to UI preview mode.", error);
+      setPipelineStatus("success");
+      setPipelineNote("（纯UI预览模式）接口连接失败");
+      // Set to empty mock data so UI can still render
+      onWorkflowReady({
+        materialFiles: [],
+        sampleAnalysis: undefined,
+        sampleFile: undefined,
+        structureBlueprint: undefined
+      });
+      onNext();
     }
   };
 
