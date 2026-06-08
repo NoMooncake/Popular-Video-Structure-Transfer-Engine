@@ -11,10 +11,13 @@ export const structureRoutes = Router();
 structureRoutes.post("/extract", async (req, res) => {
   const sampleAnalysis = (req.body?.sample_analysis ||
     req.body?.sampleAnalysis) as SampleAnalysis | undefined;
+  const sampleAnalyses = (req.body?.sample_analyses ||
+    req.body?.sampleAnalyses) as SampleAnalysis[] | undefined;
 
   try {
     const blueprint = await extractStructureBlueprint({
       sampleAnalysis,
+      sampleAnalyses,
       vertical: req.body?.vertical,
       category: req.body?.category,
       useMock: req.body?.use_mock === true || req.body?.useMock === true

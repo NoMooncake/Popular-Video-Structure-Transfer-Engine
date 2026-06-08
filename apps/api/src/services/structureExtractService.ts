@@ -73,6 +73,7 @@ export type StructureBlueprint = {
 
 export type StructureExtractionInput = {
   sampleAnalysis?: SampleAnalysis;
+  sampleAnalyses?: SampleAnalysis[];
   vertical?: string;
   category?: string;
   useMock?: boolean;
@@ -135,6 +136,33 @@ const getDuration = (sampleAnalysis?: SampleAnalysis): number => {
   return sampleAnalysis?.video.duration_seconds || 20;
 };
 
+const getPrimarySampleAnalysis = (
+  sampleAnalysis: SampleAnalysis | undefined,
+  sampleAnalyses: SampleAnalysis[] | undefined
+): SampleAnalysis | undefined => {
+  return sampleAnalysis || sampleAnalyses?.[0];
+};
+
+const normalizeSampleAnalyses = (
+  sampleAnalysis: SampleAnalysis | undefined,
+  sampleAnalyses: SampleAnalysis[] | undefined
+): SampleAnalysis[] => {
+  const analyses = [
+    ...(sampleAnalysis ? [sampleAnalysis] : []),
+    ...(Array.isArray(sampleAnalyses) ? sampleAnalyses : [])
+  ];
+  const seen = new Set<string>();
+
+  return analyses.filter((analysis) => {
+    if (!analysis?.id || seen.has(analysis.id)) {
+      return false;
+    }
+
+    seen.add(analysis.id);
+    return true;
+  });
+};
+
 const getRange = (
   durationSeconds: number,
   startPercent: number,
@@ -184,11 +212,47 @@ const getSourceRef = (sampleAnalysis?: SampleAnalysis): string => {
   return sampleAnalysis?.id || "mock_sample_analysis";
 };
 
+const getSourceRefs = (sampleAnalyses: SampleAnalysis[]): string => {
+  return sampleAnalyses.length > 0
+    ? sampleAnalyses.map((analysis) => analysis.id).join(",")
+    : "mock_sample_analysis";
+};
+
+const getCombinedEvidence = (
+  sampleAnalyses: SampleAnalysis[],
+  slotIndex: number
+): string[] => {
+  if (sampleAnalyses.length === 0) {
+    return ["mock sample structure for seeding/de-seeding vertical"];
+  }
+
+  return sampleAnalyses.flatMap((analysis, index) => {
+    const keyframe = analysis.keyframes[slotIndex];
+    const shot = analysis.shots[slotIndex];
+    const evidence = [
+      `sample_${index + 1}_analysis: ${analysis.id}`,
+      `sample_${index + 1}_transcript_summary: ${analysis.transcript.summary}`
+    ];
+
+    if (keyframe) {
+      evidence.push(
+        `sample_${index + 1}_keyframe: ${keyframe.frame_id} at ${keyframe.time_seconds}s`
+      );
+    }
+
+    if (shot) {
+      evidence.push(`sample_${index + 1}_shot: ${shot.shot_id}`);
+    }
+
+    return evidence;
+  });
+};
+
 const loadStructurePrompt = (): string => {
   return fs.readFileSync(promptPath, "utf-8");
 };
 
-const compactSampleAnalysis = (sampleAnalysis: SampleAnalysis): unknown => {
+const compactSampleAnalysis = (sampleAnalysis: SampleAnalysis): LooseRecord => {
   return {
     id: sampleAnalysis.id,
     video: sampleAnalysis.video,
@@ -215,6 +279,13 @@ const compactSampleAnalysis = (sampleAnalysis: SampleAnalysis): unknown => {
   };
 };
 
+const compactSampleAnalyses = (sampleAnalyses: SampleAnalysis[]): unknown[] => {
+  return sampleAnalyses.map((sampleAnalysis, index) => ({
+    sample_index: index + 1,
+    ...compactSampleAnalysis(sampleAnalysis)
+  }));
+};
+
 const extractJsonObject = (content: string): unknown => {
   const fencedJson = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/u);
   const rawJson = fencedJson?.[1] || content;
@@ -234,7 +305,7 @@ const extractJsonObject = (content: string): unknown => {
 
 const normalizeLlmBlueprint = (
   rawBlueprint: unknown,
-  sampleAnalysis: SampleAnalysis,
+  sampleAnalyses: SampleAnalysis[],
   vertical: string,
   category: string
 ): StructureBlueprint => {
@@ -242,9 +313,16 @@ const normalizeLlmBlueprint = (
     throw new StructureExtractionLlmError("LLM response JSON was not an object");
   }
 
-  const sourceRef = getSourceRef(sampleAnalysis);
+  const primarySampleAnalysis = sampleAnalyses[0];
+  const sourceRef = getSourceRefs(sampleAnalyses);
   const blueprint = rawBlueprint as Partial<StructureBlueprint> & LooseRecord;
-  const fallbackSlots = buildFallbackSlots(sampleAnalysis.video.duration_seconds, sampleAnalysis);
+  const fallbackSlots = buildFallbackSlots(
+    primarySampleAnalysis.video.duration_seconds,
+    primarySampleAnalysis
+  ).map((slot, index) => ({
+    ...slot,
+    source_evidence: getCombinedEvidence(sampleAnalyses, index)
+  }));
   const rawSlots = Array.isArray(blueprint.slots) ? blueprint.slots : [];
   const normalizedSlots =
     rawSlots.length > 0
@@ -272,7 +350,7 @@ const normalizeLlmBlueprint = (
     slots: normalizedSlots,
     global_rhythm: normalizeGlobalRhythm(
       blueprint.global_rhythm,
-      sampleAnalysis.video.duration_seconds
+      primarySampleAnalysis.video.duration_seconds
     ),
     packaging_summary: normalizePackagingSummary(blueprint.packaging_summary)
   } as StructureBlueprint;
@@ -519,7 +597,7 @@ const normalizePackagingSummary = (
 };
 
 const callDoubaoStructureExtraction = async (
-  sampleAnalysis: SampleAnalysis,
+  sampleAnalyses: SampleAnalysis[],
   vertical: string,
   category: string
 ): Promise<StructureBlueprint> => {
@@ -551,7 +629,7 @@ const callDoubaoStructureExtraction = async (
     const response = await requestDoubaoChatCompletion(
       attempt,
       apiKey,
-      sampleAnalysis,
+      sampleAnalyses,
       vertical,
       category
     );
@@ -571,7 +649,7 @@ const callDoubaoStructureExtraction = async (
 const requestDoubaoChatCompletion = async (
   attempt: LlmRequestAttempt,
   apiKey: string,
-  sampleAnalysis: SampleAnalysis,
+  sampleAnalyses: SampleAnalysis[],
   vertical: string,
   category: string
 ): Promise<{ blueprint: StructureBlueprint; error?: never } | { blueprint?: never; error: string }> => {
@@ -594,7 +672,11 @@ const requestDoubaoChatCompletion = async (
           content: JSON.stringify({
             vertical,
             category,
-            sample_analysis: compactSampleAnalysis(sampleAnalysis)
+            sample_count: sampleAnalyses.length,
+            sample_analysis: compactSampleAnalysis(sampleAnalyses[0]),
+            sample_analyses: compactSampleAnalyses(sampleAnalyses),
+            instruction:
+              "请综合所有 sample_analyses 的结构、节奏、分镜和包装规律生成一个可迁移结构，不要只参考第一个样例。"
           })
         }
       ],
@@ -625,7 +707,7 @@ const requestDoubaoChatCompletion = async (
     return {
       blueprint: normalizeLlmBlueprint(
         extractJsonObject(content),
-        sampleAnalysis,
+        sampleAnalyses,
         vertical,
         category
       )
@@ -797,23 +879,27 @@ const buildFallbackSlots = (
 
 export const extractStructureBlueprint = async ({
   sampleAnalysis,
+  sampleAnalyses,
   vertical = defaultVertical,
   category = defaultCategory,
   useMock = false
 }: StructureExtractionInput): Promise<StructureBlueprint> => {
-  if (!sampleAnalysis && !useMock) {
+  const analyses = normalizeSampleAnalyses(sampleAnalysis, sampleAnalyses);
+  const primarySampleAnalysis = getPrimarySampleAnalysis(sampleAnalysis, analyses);
+
+  if (analyses.length === 0 && !useMock) {
     throw new StructureExtractionInputError(
-      "Request body must include sample_analysis or set use_mock to true"
+      "Request body must include sample_analysis, sample_analyses, or set use_mock to true"
     );
   }
 
   const hasLlmKey = config.providers.hasLlmApiKey;
-  const sourceRef = getSourceRef(sampleAnalysis);
-  const durationSeconds = getDuration(sampleAnalysis);
+  const sourceRef = getSourceRefs(analyses);
+  const durationSeconds = getDuration(primarySampleAnalysis);
 
-  if (!useMock && sampleAnalysis && config.providers.llm.enabled) {
+  if (!useMock && analyses.length > 0 && config.providers.llm.enabled) {
     const llmBlueprint = await callDoubaoStructureExtraction(
-      sampleAnalysis,
+      analyses,
       vertical,
       category
     );
@@ -822,14 +908,20 @@ export const extractStructureBlueprint = async ({
     return llmBlueprint;
   }
 
-  const slots = buildFallbackSlots(durationSeconds, sampleAnalysis);
+  const slots = buildFallbackSlots(durationSeconds, primarySampleAnalysis).map(
+    (slot, index) => ({
+      ...slot,
+      source_evidence:
+        analyses.length > 1 ? getCombinedEvidence(analyses, index) : slot.source_evidence
+    })
+  );
 
   const blueprint: StructureBlueprint = {
     id: `structure_blueprint_${sourceRef}`,
     version: "0.1.0",
     created_at: new Date().toISOString(),
     source: {
-      type: useMock || !sampleAnalysis || !hasLlmKey ? "mock" : "sample_analysis",
+      type: useMock || analyses.length === 0 || !hasLlmKey ? "mock" : "sample_analysis",
       ref_id: sourceRef,
       model: hasLlmKey ? "fallback_rule_engine_missing_endpoint" : "fallback_rule_engine",
       prompt_version: promptVersion
