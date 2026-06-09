@@ -1332,6 +1332,18 @@ const buildV2CoverPlan = (
     ])
   ).slice(0, 4);
   const coverHeroSentence = heroDescription.replace(/[。.!！?？]+$/u, "");
+  const bgmPlan = {
+    prompt_ref: "final_bgm_prompt",
+    prompt_source: "deterministic_canvas_bgm_plan",
+    duration_seconds: session.target_duration_seconds,
+    prompt: [
+      `为一支 ${session.target_duration_seconds}s 左右的竖屏商业广告生成无版权感背景音乐，产品是${productName}。`,
+      "音乐方向：清爽夏日、年轻、有活力、明亮但不吵，适合冰饮广告。",
+      "节奏建议：中快板 105-120 BPM，前段快速吸引注意，中段保持轻快律动，结尾有干净上扬的收束，方便 CTA 出现。",
+      "编曲建议：轻快鼓组、清亮合成器、弹性贝斯、少量水滴/冰块感音色点缀。",
+      "不要人声主唱；不要生成可识别歌词；不要压过旁白和字幕节奏；整体适合短视频平台商业广告。"
+    ].join("\n")
+  };
 
   return {
     cover_title: coverTitle,
@@ -1339,6 +1351,7 @@ const buildV2CoverPlan = (
     cover_copy_options: Array.from(new Set(copyOptions)).slice(0, 4),
     video_title_recommendations: videoTitleRecommendations,
     video_description_recommendations: videoDescriptionRecommendations,
+    bgm_plan: bgmPlan,
     visual_direction: `${coverHeroSentence}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。`,
     recommended_source: coverSegment
       ? {

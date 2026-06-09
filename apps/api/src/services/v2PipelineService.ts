@@ -4062,6 +4062,11 @@ const getGeneratedVideoDurationSeconds = async (videoPath: string): Promise<numb
   return Number(duration.toFixed(3));
 };
 
+const hasAudioStream = async (mediaPath: string): Promise<boolean> => {
+  const probeResult = await runFFprobe(mediaPath);
+  return Boolean(probeResult.streams?.some((stream) => stream.codec_type === "audio"));
+};
+
 const materializeGeneratedVideo = async (videoUri: string): Promise<string> => {
   if (videoUri.startsWith("/") && fs.existsSync(videoUri)) {
     return videoUri;
@@ -4084,6 +4089,31 @@ const materializeGeneratedVideo = async (videoUri: string): Promise<string> => {
 
   fs.writeFileSync(videoPath, Buffer.from(await response.arrayBuffer()));
   return videoPath;
+};
+
+const materializeAssemblyAudio = async (
+  audioUri: string,
+  workDir: string
+): Promise<string> => {
+  if (audioUri.startsWith("/") && fs.existsSync(audioUri)) {
+    return audioUri;
+  }
+
+  if (!isHttpUrl(audioUri)) {
+    throw new V2PipelineInputError(
+      "bgm_audio_uri must be an existing local path or HTTP URL"
+    );
+  }
+
+  const audioPath = path.join(workDir, `bgm_source_${crypto.randomUUID()}.m4a`);
+  const response = await fetch(audioUri);
+
+  if (!response.ok) {
+    throw new V2PipelineInputError(`failed to download bgm audio: ${response.status}`);
+  }
+
+  fs.writeFileSync(audioPath, Buffer.from(await response.arrayBuffer()));
+  return audioPath;
 };
 
 const materializeAssemblyVideo = async (
@@ -4580,6 +4610,114 @@ const normalizeAssemblyBackgroundColor = (value: unknown): string => {
 const escapeConcatPath = (filePath: string): string =>
   filePath.replace(/'/gu, "'\\''");
 
+const normalizeBgmVolume = (value: unknown): number => {
+  const volume = Number(value ?? 0.18);
+  if (!Number.isFinite(volume) || volume < 0 || volume > 1) {
+    throw new V2PipelineInputError("bgm_volume must be between 0 and 1");
+  }
+
+  return Number(volume.toFixed(3));
+};
+
+const generateFallbackBgmAudio = async (
+  prompt: string,
+  durationSeconds: number,
+  workDir: string
+): Promise<JsonObject> => {
+  const bgmPath = path.join(workDir, `generated_bgm_${crypto.randomUUID()}.m4a`);
+  const duration = Math.max(1, Number(durationSeconds.toFixed(3)));
+  const fadeOutStart = Math.max(0, duration - 1);
+  const promptHash = [...prompt].reduce((total, char) => total + char.charCodeAt(0), 0);
+  const rootFrequency = 196 + (promptHash % 5) * 24;
+  const fifthFrequency = Number((rootFrequency * 1.5).toFixed(3));
+
+  await runFFmpeg(
+    [
+      "-y",
+      "-f",
+      "lavfi",
+      "-i",
+      `sine=frequency=${rootFrequency}:duration=${duration}:sample_rate=44100`,
+      "-f",
+      "lavfi",
+      "-i",
+      `sine=frequency=${fifthFrequency}:duration=${duration}:sample_rate=44100`,
+      "-filter_complex",
+      [
+        "[0:a]volume=0.05[a0]",
+        "[1:a]volume=0.025[a1]",
+        "[a0][a1]amix=inputs=2:duration=first[mix]",
+        `[mix]afade=t=in:st=0:d=0.35,afade=t=out:st=${fadeOutStart}:d=1[a]`
+      ].join(";"),
+      "-map",
+      "[a]",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      bgmPath
+    ],
+    [{ path: bgmPath, replacement: "[generated bgm]" }]
+  );
+
+  return {
+    status: "generated",
+    source: {
+      type: "local_fallback_synth",
+      reason:
+        "text2music provider is not configured; generated a deterministic local music bed for assembly testing"
+    },
+    prompt,
+    duration_seconds: duration,
+    audio_path: bgmPath
+  };
+};
+
+const mixBgmIntoFinalVideo = async (
+  finalVideoPath: string,
+  bgmAudioPath: string,
+  durationSeconds: number,
+  volume: number
+): Promise<string> => {
+  const outputPath = finalVideoPath.replace(/\.mp4$/u, "_with_bgm.mp4");
+  const fadeOutStart = Math.max(0, durationSeconds - 1);
+
+  await runFFmpeg(
+    [
+      "-y",
+      "-i",
+      finalVideoPath,
+      "-stream_loop",
+      "-1",
+      "-i",
+      bgmAudioPath,
+      "-t",
+      String(durationSeconds),
+      "-filter_complex",
+      `[1:a]volume=${volume},afade=t=out:st=${fadeOutStart}:d=1[a]`,
+      "-map",
+      "0:v:0",
+      "-map",
+      "[a]",
+      "-c:v",
+      "copy",
+      "-c:a",
+      "aac",
+      "-shortest",
+      "-movflags",
+      "+faststart",
+      outputPath
+    ],
+    [
+      { path: finalVideoPath, replacement: "[final video]" },
+      { path: bgmAudioPath, replacement: "[bgm audio]" },
+      { path: outputPath, replacement: "[final video with bgm]" }
+    ]
+  );
+
+  return outputPath;
+};
+
 export const assembleV2FinalVideo = async (
   payload: V2FinalAssemblyRequest
 ): Promise<JsonObject> => {
@@ -4591,6 +4729,11 @@ export const assembleV2FinalVideo = async (
   const fps = normalizeAssemblyFps(payload.fps);
   const backgroundColor = normalizeAssemblyBackgroundColor(payload.background_color);
   const allowLoopShortClips = payload.allow_loop_short_clips !== false;
+  const shouldGenerateBgm = payload.generate_bgm === true;
+  const bgmPrompt =
+    normalizeOptionalString(payload.bgm_prompt) ||
+    "清爽、轻快、有活力的短视频商业广告背景音乐，无人声主唱。";
+  const bgmVolume = normalizeBgmVolume(payload.bgm_volume);
   const normalizedSlots = payload.slots.map((slot, index) => {
     const videoUri = normalizeOptionalString(slot.video_uri);
     const durationSeconds = Number(slot.duration_seconds);
@@ -4724,23 +4867,58 @@ export const assembleV2FinalVideo = async (
   );
 
   const finalDurationSeconds = await getGeneratedVideoDurationSeconds(finalVideoPath);
+  let deliverableVideoPath = finalVideoPath;
+  let bgmResult: JsonObject = {
+    selection_mode: "ai_selected_at_final_assembly",
+    status: shouldGenerateBgm ? "pending" : "disabled"
+  };
+
+  if (shouldGenerateBgm) {
+    const bgmGenerationResult = payload.bgm_audio_uri
+      ? {
+          status: "provided",
+          source: { type: "provided_audio" },
+          prompt: bgmPrompt,
+          duration_seconds: finalDurationSeconds,
+          audio_path: await materializeAssemblyAudio(payload.bgm_audio_uri, workDir)
+        }
+      : await generateFallbackBgmAudio(bgmPrompt, finalDurationSeconds, workDir);
+    const bgmAudioPath = normalizeOptionalString(bgmGenerationResult.audio_path);
+    if (!bgmAudioPath) {
+      throw new V2PipelineInputError("bgm generation did not return an audio path");
+    }
+
+    deliverableVideoPath = await mixBgmIntoFinalVideo(
+      finalVideoPath,
+      bgmAudioPath,
+      finalDurationSeconds,
+      bgmVolume
+    );
+    bgmResult = {
+      selection_mode: "ai_selected_at_final_assembly",
+      status: "mixed",
+      prompt: bgmPrompt,
+      provider_result: bgmGenerationResult,
+      volume: bgmVolume,
+      audio_stream_present: await hasAudioStream(deliverableVideoPath),
+      video_without_bgm_path: finalVideoPath
+    };
+  }
+  const deliverableDurationSeconds = await getGeneratedVideoDurationSeconds(deliverableVideoPath);
 
   return {
     assembly_id: assemblyId,
-    final_video_url: getFinalAssemblyPublicUrl(finalVideoPath),
-    final_video_path: finalVideoPath,
+    final_video_url: getFinalAssemblyPublicUrl(deliverableVideoPath),
+    final_video_path: deliverableVideoPath,
     target_duration_seconds: targetDurationSeconds,
     planned_duration_seconds: totalDurationSeconds,
-    final_duration_seconds: finalDurationSeconds,
+    final_duration_seconds: deliverableDurationSeconds,
     resolution: resolution.label,
     fps,
     audio_policy: {
       source_clip_audio: "muted",
       per_clip_bgm: "disabled",
-      final_bgm: {
-        selection_mode: "ai_selected_at_final_assembly",
-        status: "pending_provider_integration"
-      }
+      final_bgm: bgmResult
     },
     slots: segmentResults
   };

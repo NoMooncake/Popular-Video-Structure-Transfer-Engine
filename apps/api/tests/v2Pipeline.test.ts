@@ -2158,6 +2158,11 @@ test(
       "这一支冰红茶短片，用冰感特写和畅饮瞬间记录夏天最想要的清爽。"
     ]);
     assert.match(
+      String(asRecord(shortRevalidate.cover_plan.bgm_plan).prompt),
+      /冰红茶/
+    );
+    assert.equal(asRecord(shortRevalidate.cover_plan.bgm_plan).duration_seconds, 0.5);
+    assert.match(
       String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
       /冰红茶/
     );
@@ -2733,6 +2738,8 @@ test(
       target_duration_seconds: 1,
       resolution: "360x640",
       fps: 24,
+      generate_bgm: true,
+      bgm_prompt: "清爽夏日冰红茶广告背景音乐，无人声主唱。",
       slots: [
         {
           slot_id: "slot_01",
@@ -2751,14 +2758,16 @@ test(
 
     assert.match(String(result.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
     assert.equal(result.planned_duration_seconds, 1);
-    assert.deepEqual(result.audio_policy, {
-      source_clip_audio: "muted",
-      per_clip_bgm: "disabled",
-      final_bgm: {
-        selection_mode: "ai_selected_at_final_assembly",
-        status: "pending_provider_integration"
-      }
-    });
+    assert.equal(asRecord(result.audio_policy).source_clip_audio, "muted");
+    assert.equal(asRecord(result.audio_policy).per_clip_bgm, "disabled");
+    const finalBgm = asRecord(asRecord(result.audio_policy).final_bgm);
+    const bgmProviderResult = asRecord(finalBgm.provider_result);
+    assert.equal(finalBgm.status, "mixed");
+    assert.equal(finalBgm.prompt, "清爽夏日冰红茶广告背景音乐，无人声主唱。");
+    assert.equal(finalBgm.audio_stream_present, true);
+    assert.equal(bgmProviderResult.status, "generated");
+    assert.equal(asRecord(bgmProviderResult.source).type, "local_fallback_synth");
+    assert.match(String(bgmProviderResult.audio_path), /generated_bgm_.*\.m4a$/u);
     assert.ok(
       Math.abs(Number(result.final_duration_seconds) - 1) < 0.15,
       `expected final duration close to 1s, got ${result.final_duration_seconds}`

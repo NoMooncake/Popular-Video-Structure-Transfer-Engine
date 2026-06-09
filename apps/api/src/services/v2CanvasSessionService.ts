@@ -841,7 +841,13 @@ export const assembleV2CanvasFinalVideo = async (
     resolution: normalizeOptionalString(payload.resolution),
     fps: payload.fps === undefined ? undefined : getNumber(payload.fps),
     background_color: normalizeOptionalString(payload.background_color),
-    allow_loop_short_clips: payload.allow_loop_short_clips !== false
+    allow_loop_short_clips: payload.allow_loop_short_clips !== false,
+    generate_bgm: payload.generate_bgm !== false,
+    bgm_prompt:
+      normalizeOptionalString(payload.bgm_prompt) ||
+      normalizeOptionalString(asJsonObject(asJsonObject(session.source.cover_plan).bgm_plan).prompt),
+    bgm_audio_uri: normalizeOptionalString(payload.bgm_audio_uri),
+    bgm_volume: payload.bgm_volume === undefined ? undefined : getNumber(payload.bgm_volume)
   });
 
   session.source = {

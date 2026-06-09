@@ -164,4 +164,8 @@ export type V2FinalAssemblyRequest = {
   fps?: number;
   background_color?: string;
   allow_loop_short_clips?: boolean;
+  generate_bgm?: boolean;
+  bgm_prompt?: string;
+  bgm_audio_uri?: string;
+  bgm_volume?: number;
 };
