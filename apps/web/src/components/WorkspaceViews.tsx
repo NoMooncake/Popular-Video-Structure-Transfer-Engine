@@ -1353,7 +1353,7 @@ const DemoView = ({
   return (
     <div className="page-shell demo-page">
       <CanvasTopBar
-        actionLabel="返回编辑"
+        actionLabel="返回画布"
         activeStep="demo"
         onNext={() => onStepChange("gap-fill")}
         onStepChange={onStepChange}

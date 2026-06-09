@@ -128,6 +128,7 @@ export const VideoBlockCanvas = ({
   const [candidateSeeds, setCandidateSeeds] = useState<Record<string, number>>({});
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const suppressNextPlayRef = useRef(false);
   const dragRef = useRef<{
     blockId: string;
     didMove: boolean;
@@ -267,6 +268,7 @@ export const VideoBlockCanvas = ({
       return;
     }
 
+    setActiveEditorBlockId(null);
     const container = scrollRef.current;
     if (!container) {
       return;
@@ -305,7 +307,7 @@ export const VideoBlockCanvas = ({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>, blockId: string) => {
     const target = event.target as HTMLElement;
-    if (target.closest("button, input, textarea")) {
+    if (target.closest("button:not(.figma-play-overlay), input, textarea")) {
       return;
     }
 
@@ -366,6 +368,10 @@ export const VideoBlockCanvas = ({
     setIsDragging(false);
 
     if (didMove) {
+      suppressNextPlayRef.current = true;
+      window.setTimeout(() => {
+        suppressNextPlayRef.current = false;
+      }, 0);
       return;
     }
 
@@ -376,7 +382,7 @@ export const VideoBlockCanvas = ({
     const canEdit =
       block &&
       status !== "generating" &&
-      (needsCompletion(block, blockIndex) || Boolean(generatedVideoThumbs[blockId]));
+      needsCompletion(block, blockIndex);
 
     setActiveEditorBlockId(canEdit ? blockId : null);
   };
@@ -477,7 +483,7 @@ export const VideoBlockCanvas = ({
     editorBlock &&
     editorStatus &&
     editorStatus !== "generating" &&
-    (editorStatus !== "matched" || Boolean(generatedVideoThumbs[editorBlock.id]));
+    editorStatus !== "matched";
   const editorPosition =
     editorCanOpen
       ? positions[editorBlock.id] ?? basePositions[editorBlock.id]
@@ -622,13 +628,16 @@ export const VideoBlockCanvas = ({
                       </div>
                     ) : (
                       <>
-                        <img alt={labelForBlock(block, index)} src={image} />
+                        <img alt={labelForBlock(block, index)} draggable={false} src={image} />
                         {playable ? (
                           <button
                             type="button"
                             className="figma-play-overlay"
                             onClick={(event) => {
                               event.stopPropagation();
+                              if (suppressNextPlayRef.current) {
+                                return;
+                              }
                               setPlaybackBlockId(block.id);
                             }}
                             title="播放视频"
@@ -637,25 +646,6 @@ export const VideoBlockCanvas = ({
                           </button>
                         ) : null}
                         {aiCompleted ? <em className="figma-ai-complete-tag">AI</em> : null}
-                        {aiCompleted ? (
-                          <button
-                            type="button"
-                            className="figma-ai-edit-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              onSelectBlock(block.id);
-                              setActiveEditorBlockId(block.id);
-                            }}
-                            onPointerDown={(event) => event.stopPropagation()}
-                            title="返回编辑"
-                          >
-                            <svg aria-hidden="true" viewBox="0 0 24 24">
-                              <path d="M12 20h9" />
-                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                            </svg>
-                            <span>返回编辑</span>
-                          </button>
-                        ) : null}
                       </>
                     )}
                   </div>
@@ -749,6 +739,7 @@ export const VideoBlockCanvas = ({
                   </section>
                 </div>
                 <div className="figma-gap-editor-footer">
+                  <p>可以在参考提示词的基础上做进一步修改哦~</p>
                   <button
                     type="button"
                     className="figma-generate-video-button"
