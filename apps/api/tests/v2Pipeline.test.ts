@@ -349,6 +349,89 @@ test(
 );
 
 test(
+  "v2 material coverage reads synthesized payload slot sequence",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(4);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          role: "user_material" as const,
+          label: "ice_tea_payload_clip.mp4"
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "生成冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 4,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        payload: {
+          synthesized_structure: {
+            slot_sequence: [
+              {
+                slot_index: 1,
+                slot_type: "strong_hook",
+                duration_seconds: 2,
+                source_reference_indices: [2],
+                description: "冰镇瓶身和水珠微距强开场",
+                visual_direction: "微距特写冰红茶瓶身，冰块飞溅，冷凝水珠清晰。",
+                copy_direction: "这一口，立刻降温。"
+              }
+            ]
+          }
+        }
+      },
+      {
+        material_analysis: {
+          material_segments: [
+            {
+              material_id: "user_material_01",
+              segment_id: "seg_hook",
+              start_time: 0,
+              end_time: 2,
+              duration_seconds: 2,
+              visual_description: "冰红茶瓶身、水珠和冰块特写",
+              candidate_slot_types: ["strong_hook"],
+              recommended_usage: "裁切 + 强化冰感"
+            }
+          ]
+        }
+      }
+    );
+
+    const firstSlot = asRecord(coverage.slot_coverage[0]);
+
+    assert.equal(coverage.slot_coverage.length, 1);
+    assert.equal(firstSlot.slot_id, "slot_01");
+    assert.equal(firstSlot.slot_type, "strong_hook");
+    assert.equal(firstSlot.coverage_status, "covered");
+    assert.equal(
+      asRecord(firstSlot.frontend_display).shot_description,
+      "微距特写冰红茶瓶身，冰块飞溅，冷凝水珠清晰。"
+    );
+    assert.equal(asRecord(firstSlot.frontend_display).copy, "这一口，立刻降温。");
+    assert.deepEqual(firstSlot.source_reference_indices, [2]);
+    assert.equal(asRecord(firstSlot.frontend_display).source_reference_superscript, "²");
+    assert.equal(asRecordArray(firstSlot.assigned_materials)[0]?.segment_id, "seg_hook");
+  }
+);
+
+test(
   "v2 material coverage converts nested model fit slots into table-ready assignments",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {

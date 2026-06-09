@@ -945,52 +945,45 @@ const getArchitectureSlots = (
   fillableArchitecture: JsonObject,
   targetDuration: number
 ): JsonObject[] => {
+  const payload = asJsonObject(fillableArchitecture.payload);
+  const payloadSynthesizedStructure = asJsonObject(payload.synthesized_structure);
+  const topLevelSynthesizedStructure = asJsonObject(
+    fillableArchitecture.synthesized_structure
+  );
   const nestedArchitecture = asJsonObject(fillableArchitecture.fillable_architecture);
+  const nestedSynthesizedStructure = asJsonObject(
+    nestedArchitecture.synthesized_structure
+  );
   const finalPlan = asJsonObject(fillableArchitecture.final_plan);
   const result = asJsonObject(fillableArchitecture.result);
   const resultAdStructure = asJsonObject(result.ad_structure);
   const resultArchitecture = asJsonObject(
     result.fillable_architecture
   );
+  const slotContainers = [
+    fillableArchitecture,
+    payload,
+    payloadSynthesizedStructure,
+    topLevelSynthesizedStructure,
+    nestedArchitecture,
+    nestedSynthesizedStructure,
+    finalPlan,
+    resultAdStructure,
+    resultArchitecture,
+    asJsonObject(resultArchitecture.synthesized_structure)
+  ];
   const rawSlots =
-    (Array.isArray(fillableArchitecture.slots) && fillableArchitecture.slots) ||
-    (Array.isArray(fillableArchitecture.structure_slots) &&
-      fillableArchitecture.structure_slots) ||
-    (Array.isArray(fillableArchitecture.editable_slots) &&
-      fillableArchitecture.editable_slots) ||
-    (Array.isArray(fillableArchitecture.slot_planning) &&
-      fillableArchitecture.slot_planning) ||
-    (Array.isArray(fillableArchitecture.planned_structure) &&
-      fillableArchitecture.planned_structure) ||
-    (Array.isArray(fillableArchitecture.proposed_slots) &&
-      fillableArchitecture.proposed_slots) ||
-    (Array.isArray(finalPlan.slot_planning) && finalPlan.slot_planning) ||
-    (Array.isArray(resultAdStructure.slots) && resultAdStructure.slots) ||
-    (Array.isArray(resultAdStructure.structure_slots) &&
-      resultAdStructure.structure_slots) ||
-    (Array.isArray(nestedArchitecture.slots) && nestedArchitecture.slots) ||
-    (Array.isArray(nestedArchitecture.structure_slots) &&
-      nestedArchitecture.structure_slots) ||
-    (Array.isArray(nestedArchitecture.editable_slots) &&
-      nestedArchitecture.editable_slots) ||
-    (Array.isArray(nestedArchitecture.slot_planning) &&
-      nestedArchitecture.slot_planning) ||
-    (Array.isArray(nestedArchitecture.planned_structure) &&
-      nestedArchitecture.planned_structure) ||
-    (Array.isArray(nestedArchitecture.proposed_slots) &&
-      nestedArchitecture.proposed_slots) ||
-    (Array.isArray(resultArchitecture.slots) && resultArchitecture.slots) ||
-    (Array.isArray(resultArchitecture.structure_slots) &&
-      resultArchitecture.structure_slots) ||
-    (Array.isArray(resultArchitecture.editable_slots) &&
-      resultArchitecture.editable_slots) ||
-    (Array.isArray(resultArchitecture.slot_planning) &&
-      resultArchitecture.slot_planning) ||
-    (Array.isArray(resultArchitecture.planned_structure) &&
-      resultArchitecture.planned_structure) ||
-    (Array.isArray(resultArchitecture.proposed_slots) &&
-      resultArchitecture.proposed_slots) ||
-    [];
+    slotContainers
+      .flatMap((container) => [
+        Array.isArray(container.slot_sequence) ? container.slot_sequence : [],
+        Array.isArray(container.slots) ? container.slots : [],
+        Array.isArray(container.structure_slots) ? container.structure_slots : [],
+        Array.isArray(container.editable_slots) ? container.editable_slots : [],
+        Array.isArray(container.slot_planning) ? container.slot_planning : [],
+        Array.isArray(container.planned_structure) ? container.planned_structure : [],
+        Array.isArray(container.proposed_slots) ? container.proposed_slots : []
+      ])
+      .find((candidateSlots) => candidateSlots.length > 0) || [];
 
   const slots = rawSlots.map((slot, index) => {
     const record = asJsonObject(slot);
@@ -998,6 +991,9 @@ const getArchitectureSlots = (
       ...record,
       slot_id:
         normalizeOptionalString(record.slot_id) ||
+        (typeof record.slot_index === "number"
+          ? `slot_${String(record.slot_index).padStart(2, "0")}`
+          : undefined) ||
         `slot_${String(index + 1).padStart(2, "0")}`,
       slot_type:
         record.slot_type ??
@@ -1647,13 +1643,25 @@ const collectCoverageHintsByMaterialRef = (
   }
 
   const architectureSlotContainers = analysisRoots.flatMap((root) => [
+    root,
+    asJsonObject(root.payload),
+    asJsonObject(asJsonObject(root.payload).synthesized_structure),
+    asJsonObject(root.synthesized_structure),
     asJsonObject(root.fillable_architecture),
+    asJsonObject(asJsonObject(root.fillable_architecture).synthesized_structure),
     asJsonObject(asJsonObject(root.result).fillable_architecture),
+    asJsonObject(
+      asJsonObject(asJsonObject(root.result).fillable_architecture)
+        .synthesized_structure
+    ),
     asJsonObject(root.final_plan)
   ]);
   const architectureSlots = architectureSlotContainers.flatMap((container) =>
     [
+      ...(Array.isArray(container.slot_sequence) ? container.slot_sequence : []),
       ...(Array.isArray(container.slots) ? container.slots : []),
+      ...(Array.isArray(container.structure_slots) ? container.structure_slots : []),
+      ...(Array.isArray(container.editable_slots) ? container.editable_slots : []),
       ...(Array.isArray(container.slot_planning) ? container.slot_planning : []),
       ...(Array.isArray(container.planned_structure) ? container.planned_structure : []),
       ...(Array.isArray(container.proposed_slots) ? container.proposed_slots : [])
