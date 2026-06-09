@@ -1,12 +1,21 @@
-import { useState, useRef } from "react";
-import type { ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 
 import type { WorkflowRunResult } from "../App";
 import {
-  analyzeSampleVideo,
-  extractStructureBlueprint,
+  assembleV2CanvasFinalVideo,
+  analyzeV2Pipeline,
+  assembleV2FinalVideo,
+  createV2ScriptSession,
+  revalidateV2Canvas,
+  reorderV2ScriptSlots,
+  updateV2ScriptSlot,
   uploadMaterialFiles,
   uploadSampleVideos
+} from "../api/client";
+import type {
+  V2CanvasSession,
+  V2ScriptSession
 } from "../api/client";
 import {
   canvasBlocks as fallbackCanvasBlocks,
@@ -21,7 +30,11 @@ import type {
   SampleShot,
   StepKey,
   StructureBlueprint,
-  UploadedVideoFile
+  V2CanvasFinalVideoResult,
+  V2FinalAssemblySlot,
+  UploadedVideoFile,
+  V2PipelineResult,
+  V2ReferenceAnalysisTable
 } from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { VideoBlockCanvas } from "./VideoBlockCanvas";
@@ -34,12 +47,18 @@ type WorkspaceViewsProps = {
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onReorderBlocks: (orderedIds: string[]) => void;
   onStepChange: (step: StepKey) => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   onWorkflowReady: (result: WorkflowRunResult) => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  sampleFiles?: UploadedVideoFile[];
+  canvasSession?: V2CanvasSession;
+  scriptSession?: V2ScriptSession;
   selectedBlock: CanvasBlock;
   selectedBlockId: string;
   structureBlueprint?: StructureBlueprint;
+  workflowResult: WorkflowRunResult | null;
+  v2PipelineResult?: V2PipelineResult;
   projectName: string;
   onProjectNameChange: (name: string) => void;
 };
@@ -68,11 +87,6 @@ const steps: Array<{
     key: "gap-fill",
     label: "缺口补全",
     description: "红黄绿匹配状态和补全策略"
-  },
-  {
-    key: "gap-detail",
-    label: "缺口详情",
-    description: "逐项解释缺什么、为什么缺、怎么补"
   },
   {
     key: "demo",
@@ -186,6 +200,54 @@ const toBackendCategory = (value: string) => {
   return value.trim() || "pet_food";
 };
 
+const getErrorMessage = (error: unknown) => {
+  return error instanceof Error ? error.message : "接口连接失败";
+};
+
+const getTargetDurationSeconds = (brief: string) => {
+  const match = brief.match(/(\d+(?:\.\d+)?)\s*(?:秒|s)/iu);
+  const duration = Number(match?.[1] ?? 20);
+
+  return Number.isFinite(duration) && duration > 0 ? duration : 20;
+};
+
+const readTextAssets = async (files: File[]) => {
+  const textFiles = files.filter(
+    (file) =>
+      file.type.startsWith("text/") ||
+      file.name.toLowerCase().endsWith(".txt") ||
+      file.name.toLowerCase().endsWith(".md")
+  );
+
+  return Promise.all(
+    textFiles.map(async (file, index) => ({
+      asset_id: `txt_${String(index + 1).padStart(2, "0")}`,
+      type: "note" as const,
+      content: await file.text()
+    }))
+  );
+};
+
+const parseDurationSeconds = (value: string): number | undefined => {
+  const rangeMatch = value.match(
+    /(\d+(?:\.\d+)?)\s*(?:-|~|–|—|到|至)\s*(\d+(?:\.\d+)?)/u
+  );
+  if (rangeMatch) {
+    const startSeconds = Number(rangeMatch[1]);
+    const endSeconds = Number(rangeMatch[2]);
+    const durationSeconds = endSeconds - startSeconds;
+
+    return durationSeconds > 0 ? Number(durationSeconds.toFixed(3)) : undefined;
+  }
+
+  const singleMatch = value.match(/(\d+(?:\.\d+)?)/u);
+  const durationSeconds = Number(singleMatch?.[1]);
+
+  return Number.isFinite(durationSeconds) && durationSeconds > 0
+    ? Number(durationSeconds.toFixed(3))
+    : undefined;
+};
+
 export const WorkspaceViews = ({
   activeStep,
   blocks,
@@ -194,12 +256,18 @@ export const WorkspaceViews = ({
   onUpdateBlock,
   onReorderBlocks,
   onStepChange,
+  onWorkflowPatch,
   onWorkflowReady,
   sampleAnalysis,
   sampleFile,
+  sampleFiles,
+  canvasSession,
+  scriptSession,
   selectedBlock,
   selectedBlockId,
   structureBlueprint,
+  workflowResult,
+  v2PipelineResult,
   projectName,
   onProjectNameChange
 }: WorkspaceViewsProps) => {
@@ -218,9 +286,13 @@ export const WorkspaceViews = ({
       <FigmaSampleAnalysisView
         onNext={() => onStepChange("migration")}
         onHome={() => onStepChange("input")}
+        onWorkflowPatch={onWorkflowPatch}
         sampleAnalysis={sampleAnalysis}
         sampleFile={sampleFile}
+        sampleFiles={sampleFiles}
+        workflowResult={workflowResult}
         structureBlueprint={structureBlueprint}
+        v2PipelineResult={v2PipelineResult}
         projectName={projectName}
         onProjectNameChange={onProjectNameChange}
       />
@@ -236,8 +308,10 @@ export const WorkspaceViews = ({
         onReorderBlocks={onReorderBlocks}
         onStepChange={onStepChange}
         onHome={() => onStepChange("input")}
+        onWorkflowPatch={onWorkflowPatch}
         projectName={projectName}
         onProjectNameChange={onProjectNameChange}
+        scriptSession={scriptSession}
       />
     );
   }
@@ -246,28 +320,28 @@ export const WorkspaceViews = ({
     return (
       <GapFillView
         blocks={blocks}
-        onNext={() => onStepChange("gap-detail")}
+        onNext={() => onStepChange("demo")}
         onSelectBlock={onSelectBlock}
         onUpdateBlock={onUpdateBlock}
         onStepChange={onStepChange}
+        onWorkflowPatch={onWorkflowPatch}
         selectedBlockId={selectedBlockId}
+        canvasSession={canvasSession}
+        scriptSession={scriptSession}
         projectName={projectName}
       />
     );
   }
 
-  if (activeStep === "gap-detail") {
-    return (
-      <GapDetailView
-        onNext={() => onStepChange("demo")}
-        onStepChange={onStepChange}
-        selectedBlock={selectedBlock}
-        projectName={projectName}
-      />
-    );
-  }
 
-  return <DemoView blocks={blocks} onStepChange={onStepChange} projectName={projectName} />;
+  return (
+    <DemoView
+      blocks={blocks}
+      onStepChange={onStepChange}
+      projectName={projectName}
+      workflowResult={workflowResult}
+    />
+  );
 };
 
 type HeaderProps = {
@@ -348,7 +422,6 @@ const InputView = ({
     "idle" | "uploading" | "analyzing" | "extracting" | "success" | "error"
   >("idle");
   const [sampleFiles, setSampleFiles] = useState<File[]>([]);
-  const [targetTopic] = useState("宠物用品 / 猫粮"); // Kept for backend call
   const [showModal, setShowModal] = useState(false);
 
   const isRunning = ["uploading", "analyzing", "extracting"].includes(pipelineStatus);
@@ -393,56 +466,57 @@ const InputView = ({
           ? await uploadMaterialFiles(videoMaterialFiles)
           : { files: [] };
 
-      setPipelineStatus("analyzing");
-      setPipelineNote("正在解析样例视频");
-      const analysis = await analyzeSampleVideo(uploadedSampleFile.file_id);
-
       setPipelineStatus("extracting");
       setPipelineNote("正在调用 Mimo 提取结构");
-      let usedStructureFallback = false;
-      let blueprint: StructureBlueprint;
-      try {
-        blueprint = await extractStructureBlueprint(analysis, {
-          category: toBackendCategory(targetTopic),
-          useMock: false,
-          vertical: "seeding_de_seeding"
-        });
-      } catch {
-        usedStructureFallback = true;
-        blueprint = await extractStructureBlueprint(analysis, {
-          category: toBackendCategory(targetTopic),
-          useMock: true,
-          vertical: "seeding_de_seeding"
-        });
-      }
+      const textAssets = await readTextAssets(materialFiles);
+      const pipelineResult = await analyzeV2Pipeline({
+        reference_file_ids: uploadedSample.files.map((file) => file.file_id),
+        user_material_file_ids: uploadedMaterials.files.map((file) => file.file_id),
+        text_assets: [
+          {
+            asset_id: "brief_01",
+            type: "brief",
+            content: brief
+          },
+          ...textAssets
+        ],
+        user_request: {
+          goal: brief
+        },
+        options: {
+          allow_fallback: true,
+          generate_image_candidates: false,
+          image_candidate_count: 4,
+          target_duration_seconds: getTargetDurationSeconds(brief)
+        }
+      });
+      const scriptSession = await createV2ScriptSession({
+        pipeline_result: pipelineResult,
+        user_request: {
+          goal: brief
+        },
+        target_duration_seconds: pipelineResult.summary.target_duration_seconds
+      });
 
       setPipelineStatus("success");
       setPipelineNote(
-        usedStructureFallback
-          ? "Mimo 返回结构未通过后端 schema 校验，已回退到规则结构。"
-          : skippedMaterialCount > 0
+        skippedMaterialCount > 0
           ? `已完成分析；${skippedMaterialCount} 个非视频素材暂未上传到当前后端。`
           : "已完成真实接口分析"
       );
       onWorkflowReady({
         materialFiles: uploadedMaterials.files,
-        sampleAnalysis: analysis,
         sampleFile: uploadedSampleFile,
-        structureBlueprint: blueprint
+        sampleFiles: uploadedSample.files,
+        scriptSession,
+        v2PipelineResult: pipelineResult
       });
       onNext();
     } catch (error) {
-      console.warn("Backend unavailable, falling back to UI preview mode.", error);
-      setPipelineStatus("success");
-      setPipelineNote("（纯UI预览模式）接口连接失败");
-      // Set to empty mock data so UI can still render
-      onWorkflowReady({
-        materialFiles: [],
-        sampleAnalysis: undefined,
-        sampleFile: undefined,
-        structureBlueprint: undefined
-      });
-      onNext();
+      console.warn("V2 pipeline failed.", error);
+      setPipelineStatus("error");
+      setPipelineNote("接口连接失败");
+      setPipelineError(getErrorMessage(error));
     }
   };
 
@@ -640,6 +714,16 @@ const buildBackendSampleRows = (
   });
 };
 
+const buildV2SampleRows = (table: V2ReferenceAnalysisTable): SampleAnalysisRow[] => {
+  return (table.rows ?? []).map((row, index) => ({
+      duration: row.duration ?? "",
+      image: row.sample_video?.media?.uri ?? "",
+      shotTitle: row.shot_description?.title ?? `分镜 ${index + 1}`,
+      shotDescription: row.shot_description?.description ?? "",
+      migrationPossibility: row.migration_possibility ?? ""
+    }));
+};
+
 const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
   1: [
     {
@@ -776,66 +860,171 @@ type ExtraSample = {
 const FigmaSampleAnalysisView = ({
   onNext,
   onHome,
+  onWorkflowPatch,
   sampleAnalysis,
   sampleFile,
+  sampleFiles,
+  workflowResult,
   structureBlueprint,
+  v2PipelineResult,
   projectName,
   onProjectNameChange
 }: {
   onNext: () => void;
   onHome: () => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  sampleFiles?: UploadedVideoFile[];
+  workflowResult: WorkflowRunResult | null;
   structureBlueprint?: StructureBlueprint;
+  v2PipelineResult?: V2PipelineResult;
   projectName: string;
   onProjectNameChange: (name: string) => void;
 }) => {
-  const [activeSample, setActiveSample] = useState(1);
+  const [activeSample, setActiveSample] = useState(v2PipelineResult || sampleAnalysis ? 0 : 2);
   const [extraSamples, setExtraSamples] = useState<ExtraSample[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [tempTitle, setTempTitle] = useState(projectName);
   const addSampleInputRef = useRef<HTMLInputElement>(null);
-  const backendRows = sampleAnalysis
-    ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
-    : null;
+  const v2Tables = v2PipelineResult?.stages.reference_analysis_tables ?? [];
+  const backendSamples = v2PipelineResult
+    ? Array.from({
+        length: Math.max(v2Tables.length, sampleFiles?.length ?? 0)
+      }, (_, index) => {
+        const table = v2Tables[index];
+        return {
+          label:
+            sampleFiles?.[index]?.original_filename ??
+            table?.source_label ??
+            `样例 ${index + 1}`,
+          rows: table ? buildV2SampleRows(table) : []
+        };
+      })
+    : sampleAnalysis
+      ? [
+          {
+            label: sampleFile?.original_filename ?? "口红广告",
+            rows: buildBackendSampleRows(sampleAnalysis, structureBlueprint)
+          }
+        ]
+      : [];
+  const hasBackendSamples = backendSamples.length > 0;
+  const sourceLabel = projectName;
 
-  const baseSampleCount = backendRows ? 1 : 3;
+  const baseSampleCount = hasBackendSamples ? backendSamples.length : 3;
 
-  const handleAddSample = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? []);
-    if (files.length === 0) return;
+  const getCurrentGoal = (): string => {
+    const scriptGoal = workflowResult?.scriptSession?.user_request.goal;
+    return typeof scriptGoal === "string" && scriptGoal.trim()
+      ? scriptGoal
+      : projectName;
+  };
 
-    const firstNewIndex = baseSampleCount + extraSamples.length + 1;
-    const placeholders = files.map((file) => ({
-        name: file.name,
-        status: "loading",
-        rows: []
-      } satisfies ExtraSample));
+  const handleAddSample = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    setExtraSamples((prev) => [...prev, ...placeholders]);
-    setActiveSample(firstNewIndex);
+    const selectedFiles = Array.from(files);
+    e.target.value = "";
 
-    files.forEach((file, fileIndex) => {
-      setTimeout(() => {
+    if (v2PipelineResult) {
+      const firstNewIndex = baseSampleCount + extraSamples.length;
+      setExtraSamples((prev) => [
+        ...prev,
+        ...selectedFiles.map((file) => ({
+          name: file.name,
+          status: "loading" as const,
+          rows: []
+        }))
+      ]);
+      setActiveSample(firstNewIndex);
+
+      try {
+        const uploadedSample = await uploadSampleVideos(selectedFiles);
+        const nextSampleFiles = [...(sampleFiles ?? []), ...uploadedSample.files];
+        const goal = getCurrentGoal();
+        const pipelineResult = await analyzeV2Pipeline({
+          reference_file_ids: nextSampleFiles.map((file) => file.file_id),
+          user_material_file_ids: workflowResult?.materialFiles.map((file) => file.file_id) ?? [],
+          text_assets: [
+            {
+              asset_id: "brief_01",
+              type: "brief",
+              content: goal
+            }
+          ],
+          user_request: {
+            goal
+          },
+          options: {
+            allow_fallback: true,
+            generate_image_candidates: false,
+            image_candidate_count: 4,
+            target_duration_seconds: v2PipelineResult.summary.target_duration_seconds
+          }
+        });
+        const scriptSession = await createV2ScriptSession({
+          pipeline_result: pipelineResult,
+          user_request: {
+            goal
+          },
+          target_duration_seconds: pipelineResult.summary.target_duration_seconds
+        });
+
+        onWorkflowPatch({
+          sampleFile: nextSampleFiles[0],
+          sampleFiles: nextSampleFiles,
+          scriptSession,
+          v2PipelineResult: pipelineResult,
+          canvasRevalidateResult: undefined,
+          canvasSession: undefined,
+          finalAssembly: undefined,
+          finalVideo: undefined
+        });
+        setExtraSamples([]);
+        setActiveSample(Math.max(0, nextSampleFiles.length - 1));
+      } catch (error) {
+        console.warn("Failed to add v2 sample video.", error);
         setExtraSamples((prev) =>
-          prev.map((sample, sampleIndex) =>
-            sampleIndex === extraSamples.length + fileIndex
-              ? { ...sample, status: "done", rows: generateMockAnalysis(file.name) }
+          prev.map((sample, index) =>
+            index >= prev.length - selectedFiles.length
+              ? { ...sample, status: "done" as const, rows: [] }
               : sample
           )
         );
-      }, 900 + fileIndex * 250);
-    });
+      }
 
-    event.target.value = "";
+      return;
+    }
+
+    selectedFiles.forEach((file, fileIdx) => {
+      const newIndex = baseSampleCount + extraSamples.length + fileIdx;
+      const placeholder: ExtraSample = {
+        name: file.name,
+        status: "loading",
+        rows: []
+      };
+
+      setExtraSamples((prev) => [...prev, placeholder]);
+      setActiveSample(newIndex);
+
+      // Simulate AI analysis with 1.5s delay
+      setTimeout(() => {
+        setExtraSamples((prev) =>
+          prev.map((s, i) =>
+            i === prev.length - 1 - (files.length - 1 - fileIdx)
+              ? { ...s, status: "done" as const, rows: generateMockAnalysis(file.name) }
+              : s
+          )
+        );
+      }, 1500);
+    });
   };
 
   // Determine which rows to show
   const getActiveRows = (): { rows: SampleAnalysisRow[] | null; loading: boolean; label: string } => {
-    if (backendRows && activeSample === 1) {
-      return { rows: backendRows, loading: false, label: sampleFile?.original_filename ?? "口红广告" };
-    }
-    const extraIdx = activeSample - baseSampleCount - 1;
+    const extraIdx = activeSample - baseSampleCount;
     if (extraIdx >= 0 && extraIdx < extraSamples.length) {
       const extra = extraSamples[extraIdx];
       return {
@@ -844,6 +1033,16 @@ const FigmaSampleAnalysisView = ({
         label: extra.name
       };
     }
+
+    if (hasBackendSamples) {
+      const sample = backendSamples[activeSample] ?? backendSamples[0];
+      return {
+        rows: sample.rows,
+        loading: false,
+        label: sample.label
+      };
+    }
+
     return {
       rows: sampleAnalysisTables[activeSample] ?? sampleAnalysisTables[1],
       loading: false,
@@ -912,21 +1111,21 @@ const FigmaSampleAnalysisView = ({
 
       <div className="figma-analysis-content">
         <nav className="figma-sample-nav" aria-label="样例视频">
-          {(backendRows ? [1] : [1, 2, 3]).map((sampleNumber) => (
+          {(hasBackendSamples ? backendSamples.map((_, index) => index) : [1, 2, 3]).map((sampleNumber) => (
             <button
               className={sampleNumber === activeSample ? "active" : ""}
               key={sampleNumber}
               onClick={() => setActiveSample(sampleNumber)}
               type="button"
             >
-              {sampleNumber}
+              {hasBackendSamples ? sampleNumber + 1 : sampleNumber}
             </button>
           ))}
           {extraSamples.map((_, i) => (
             <button
-              className={activeSample === baseSampleCount + i + 1 ? "active" : ""}
+              className={activeSample === baseSampleCount + i ? "active" : ""}
               key={`extra-${i}`}
-              onClick={() => setActiveSample(baseSampleCount + i + 1)}
+              onClick={() => setActiveSample(baseSampleCount + i)}
               type="button"
             >
               {baseSampleCount + i + 1}
@@ -963,7 +1162,7 @@ const FigmaSampleAnalysisView = ({
                     {row.duration}
                   </div>
                   <div className="sample-media-cell" role="cell">
-                    <img alt="" src={row.image} />
+                    {row.image ? <img alt="" src={row.image} /> : <PlaceholderBlock label={active.label} />}
                   </div>
                   <div className="shot-desc-cell" role="cell">
                     <strong>{row.shotTitle}</strong>
@@ -989,8 +1188,10 @@ const StructureMigrationView = ({
   onReorderBlocks,
   onStepChange,
   onHome,
+  onWorkflowPatch,
   projectName,
-  onProjectNameChange
+  onProjectNameChange,
+  scriptSession
 }: {
   blocks: CanvasBlock[];
   materialFiles: UploadedVideoFile[];
@@ -998,8 +1199,10 @@ const StructureMigrationView = ({
   onReorderBlocks: (orderedIds: string[]) => void;
   onStepChange: (step: StepKey) => void;
   onHome: () => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   projectName?: string;
   onProjectNameChange?: (name: string) => void;
+  scriptSession?: V2ScriptSession;
 }) => {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -1042,7 +1245,31 @@ const StructureMigrationView = ({
     event.target.value = "";
   };
 
-  const handleDrop = (targetId: string) => {
+  const syncScriptSlot = async (
+    block: CanvasBlock,
+    payload: {
+      required_duration?: number;
+      voiceover_text?: string;
+      copy?: string;
+    }
+  ) => {
+    if (!scriptSession) {
+      return;
+    }
+
+    try {
+      const nextSession = await updateV2ScriptSlot(
+        scriptSession.session_id,
+        block.id,
+        payload
+      );
+      onWorkflowPatch({ scriptSession: nextSession });
+    } catch (error) {
+      console.warn("V2 script slot sync failed.", error);
+    }
+  };
+
+  const handleDrop = async (targetId: string) => {
     if (!dragId || dragId === targetId) {
       setDragId(null);
       setDropTargetId(null);
@@ -1058,8 +1285,37 @@ const StructureMigrationView = ({
     }
     ids.splice(to, 0, ids.splice(from, 1)[0]);
     onReorderBlocks(ids);
+    if (scriptSession) {
+      try {
+        const nextSession = await reorderV2ScriptSlots(scriptSession.session_id, ids);
+        onWorkflowPatch({ scriptSession: nextSession });
+      } catch (error) {
+        console.warn("V2 script slot reorder failed.", error);
+      }
+    }
     setDragId(null);
     setDropTargetId(null);
+  };
+
+  const enterCanvas = async () => {
+    if (!scriptSession) {
+      onStepChange("gap-fill");
+      return;
+    }
+
+    try {
+      const revalidateResult = await revalidateV2Canvas({
+        session_id: scriptSession.session_id,
+        persist_canvas_session: true
+      });
+      onWorkflowPatch({
+        canvasRevalidateResult: revalidateResult,
+        canvasSession: revalidateResult.canvas_session
+      });
+    } catch (error) {
+      console.warn("V2 canvas revalidate failed.", error);
+    }
+    onStepChange("gap-fill");
   };
 
   const stopDrag = (event: { stopPropagation: () => void }) => event.stopPropagation();
@@ -1129,7 +1385,7 @@ const StructureMigrationView = ({
           <button
             type="button"
             className="migration-nav-button migration-nav-forward"
-            onClick={() => onStepChange("gap-fill")}
+            onClick={enterCanvas}
           >
             <span>进入画布</span>
             <span aria-hidden="true">›</span>
@@ -1203,6 +1459,12 @@ const StructureMigrationView = ({
                         onChange={(event) =>
                           onUpdateBlock({ ...block, timeRange: event.target.value })
                         }
+                        onBlur={(event) => {
+                          const requiredDuration = parseDurationSeconds(event.target.value);
+                          if (requiredDuration) {
+                            syncScriptSlot(block, { required_duration: requiredDuration });
+                          }
+                        }}
                         placeholder="3s"
                       />
                     </div>
@@ -1230,6 +1492,12 @@ const StructureMigrationView = ({
                                 transition: "none"
                               };
                           onUpdateBlock({ ...block, timeline: updatedTimeline });
+                        }}
+                        onBlur={(event) => {
+                          syncScriptSlot(block, {
+                            copy: event.target.value,
+                            voiceover_text: event.target.value
+                          });
                         }}
                         placeholder="输入旁白文本..."
                         rows={2}
@@ -1275,27 +1543,62 @@ const StructureMigrationView = ({
 };
 
 const GapFillView = ({
+  canvasSession,
   blocks,
   onSelectBlock,
   onUpdateBlock,
   onStepChange,
+  onWorkflowPatch,
   selectedBlockId,
+  scriptSession,
   projectName
 }: {
+  canvasSession?: V2CanvasSession;
   blocks: CanvasBlock[];
   onNext: () => void;
   onSelectBlock: (blockId: string) => void;
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onStepChange: (step: StepKey) => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   selectedBlockId: string;
+  scriptSession?: V2ScriptSession;
   projectName?: string;
 }) => {
+  const exportFinalVideo = async () => {
+    if (!canvasSession) {
+      onStepChange("demo");
+      return;
+    }
+
+    try {
+      const finalVideo = await assembleV2CanvasFinalVideo(
+        canvasSession.canvas_session_id,
+        {
+          generate_bgm: true
+        }
+      );
+      onWorkflowPatch({
+        canvasSession: finalVideo.canvas_session,
+        canvasSessionId: finalVideo.canvas_session?.canvas_session_id,
+        finalAssembly: finalVideo.final_assembly,
+        finalVideo
+      });
+    } catch (error) {
+      console.warn("V2 final assembly failed.", error);
+    }
+    onStepChange("demo");
+  };
+
   return (
     <div className="gap-fill-page">
       <VideoBlockCanvas
         blocks={blocks}
+        canvasSessionId={canvasSession?.canvas_session_id}
         onBack={() => onStepChange("migration")}
-        onExport={() => onStepChange("demo")}
+        onCanvasSessionChange={(nextCanvasSession) =>
+          onWorkflowPatch({ canvasSession: nextCanvasSession })
+        }
+        onExport={exportFinalVideo}
         onSelectBlock={onSelectBlock}
         onUpdateBlock={onUpdateBlock}
         projectName={projectName}
@@ -1305,88 +1608,489 @@ const GapFillView = ({
   );
 };
 
-const GapDetailView = ({
-  onNext,
-  onStepChange,
-  selectedBlock
-}: {
-  onNext: () => void;
-  onStepChange: (step: StepKey) => void;
-  selectedBlock: CanvasBlock;
-  projectName?: string;
-}) => {
-  const gaps = selectedBlock.gap ? [selectedBlock.gap] : gapReport.gaps;
+type PreviewSegment = {
+  id: string;
+  label: string;
+  thumbnail: string;
+  videoUrl?: string;
+  start: number;
+  duration: number;
+  end: number;
+  aiGenerated: boolean;
+};
 
+const previewImages = [
+  "https://www.figma.com/api/mcp/asset/7a9bb822-f69c-4344-9da9-27ec440b9d2e",
+  "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1400&q=85",
+  "https://www.figma.com/api/mcp/asset/45d15bc2-c541-433f-9c4c-2a1db76e627d",
+  "https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=1400&q=85",
+  "https://www.figma.com/api/mcp/asset/27f882c5-4b54-4e3e-b9b7-811c7dfe6429"
+];
+
+const coverImageAsset = "/cover-coffee.png";
+
+const parseRangeDuration = (value: string) => {
+  const matches = value.match(/(\d+(?:\.\d+)?)/g)?.map(Number) ?? [];
+  if (matches.length >= 2 && matches[1] > matches[0]) {
+    return Number((matches[1] - matches[0]).toFixed(2));
+  }
+  return 4;
+};
+
+const getRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+const getString = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+const getCanvasSessionId = (result?: WorkflowRunResult | null) => {
+  if (!result) {
+    return undefined;
+  }
+  const sessionId = result.canvasSessionId || getString(getRecord(result.canvasSession).canvas_session_id);
+  return sessionId || getString(getRecord(result.canvasSession).id);
+};
+
+const getFinalVideoUrl = (result?: WorkflowRunResult | null) => {
   return (
-    <div className="page-shell gap-detail-page">
-      <CanvasTopBar
-        actionLabel="进入演示"
-        activeStep="gap-detail"
-        onNext={onNext}
-        onStepChange={onStepChange}
-        subtitle="解释缺什么、为什么缺，以及可以通过 AI 生成、包装剪辑或素材复用如何补全。"
-        title="缺口详情"
-      />
-
-      <section className="gap-detail-layout">
-        <aside className="content-card selected-block-card">
-          <div className="section-heading compact">
-            <div>
-              <span className="eyebrow">Selected</span>
-              <h2>当前视频块</h2>
-            </div>
-          </div>
-          <strong>{readableSlot(selectedBlock)}</strong>
-          <p>{readableGoal(selectedBlock)}</p>
-          <div className="detail-grid">
-            <div>
-              <span>时长</span>
-              <strong>{selectedBlock.timeRange}</strong>
-            </div>
-            <div>
-              <span>节奏</span>
-              <strong>{selectedBlock.slot.rhythm}</strong>
-            </div>
-            <div>
-              <span>状态</span>
-              <StatusBadge status={selectedBlock.status} />
-            </div>
-          </div>
-        </aside>
-
-        <div className="gap-card-list">
-          {gaps.map((gap) => (
-            <section className="content-card gap-detail-card" key={gap.gap_id}>
-              <div className="panel-heading">
-                <span>{slotLabelByType[gap.slot_type] ?? gap.slot_type}</span>
-                <strong>{gap.severity}</strong>
-              </div>
-              <h2>{readableGapMissing(gap.gap_id, gap.missing)}</h2>
-              <p>{readableGapImpact(gap.gap_id, gap.impact)}</p>
-              <div className="fill-options">
-                {gap.fill_options.map((option) => (
-                  <article className="fill-option" key={`${gap.gap_id}-${option.type}`}>
-                    <strong>{option.type}</strong>
-                    <span>{readableFillOption(option.type, option.description)}</span>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      </section>
-    </div>
+    result?.finalAssembly?.final_video_url ||
+    result?.finalVideo?.final_assembly?.final_video_url ||
+    getString(getRecord(result?.finalVideo).final_video_url)
   );
 };
 
+const downloadUrl = (url: string, filename: string) => {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+};
+
+const buildPreviewSegments = (blocks: CanvasBlock[], workflowResult?: WorkflowRunResult | null) => {
+  const finalAssembly = workflowResult?.finalAssembly ?? workflowResult?.finalVideo?.final_assembly;
+  const assemblySlots = Array.isArray(finalAssembly?.slots) ? finalAssembly.slots : [];
+  let cursor = 0;
+
+  return blocks.map((block, index): PreviewSegment => {
+    const slotRecord = getRecord(assemblySlots[index]);
+    const duration =
+      Number(slotRecord.duration_seconds) ||
+      Number((block.slot as unknown as Record<string, unknown>).required_duration) ||
+      parseRangeDuration(block.timeRange);
+    const videoUrl = getString(slotRecord.video_uri) || getString(slotRecord.final_video_url);
+    const start = cursor;
+    const aiGenerated =
+      block.timeline?.visual_source?.toLowerCase().includes("ai") ||
+      block.materialSummary.toLowerCase().includes("ai");
+
+    cursor += duration;
+
+    return {
+      id: block.id,
+      label: readableSlot(block),
+      thumbnail: getString(slotRecord.thumbnail_url) || previewImages[index % previewImages.length],
+      videoUrl,
+      start,
+      duration,
+      end: cursor,
+      aiGenerated
+    };
+  });
+};
+
+const PlayIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+
+const PauseIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M8 5v14" />
+    <path d="M16 5v14" />
+  </svg>
+);
+
+const ShareIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M12 4v10" />
+    <path d="m8 8 4-4 4 4" />
+    <path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+  </svg>
+);
+
+const ChevronLeftIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="m15 18-6-6 6-6" />
+  </svg>
+);
+
+const ChevronRightIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="m9 18 6-6-6-6" />
+  </svg>
+);
+
 const DemoView = ({
   blocks,
-  onStepChange
+  onStepChange,
+  projectName,
+  workflowResult
 }: {
   blocks: CanvasBlock[];
   onStepChange: (step: StepKey) => void;
   projectName?: string;
+  workflowResult?: WorkflowRunResult | null;
 }) => {
+  const segments = useMemo(
+    () => buildPreviewSegments(blocks, workflowResult),
+    [blocks, workflowResult]
+  );
+  const totalDuration = segments.at(-1)?.end ?? 0;
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [coverModalOpen, setCoverModalOpen] = useState(false);
+  const [exportMessage, setExportMessage] = useState("");
+  const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "success" | "error">("idle");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(true);
+  const [playhead, setPlayhead] = useState(0);
+  const [previewHovered, setPreviewHovered] = useState(false);
+  const [coverTitle, setCoverTitle] = useState(projectName || "一杯好咖啡 开启美好一天");
+  const [coverIntro, setCoverIntro] = useState("精选咖啡豆，匠心烘焙，香醇顺滑，回味悠长。");
+  const currentSegment = segments[activeIndex] ?? segments[0];
+  const finalVideoUrl = getFinalVideoUrl(workflowResult);
+  const finalVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsPreparing(false), 760);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (finalVideoUrl || !isPlaying || totalDuration <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setPlayhead((current) => {
+        const next = Math.min(totalDuration, Number((current + 0.1).toFixed(2)));
+        const nextIndex = segments.findIndex((segment) => next >= segment.start && next < segment.end);
+        if (nextIndex >= 0 && nextIndex !== activeIndex) {
+          setActiveIndex(nextIndex);
+        }
+        if (next >= totalDuration) {
+          setIsPlaying(false);
+        }
+        return next;
+      });
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [activeIndex, finalVideoUrl, isPlaying, segments, totalDuration]);
+
+  useEffect(() => {
+    const video = finalVideoRef.current;
+    if (!video) {
+      return;
+    }
+
+    if (isPlaying) {
+      void video.play().catch(() => setIsPlaying(false));
+    } else {
+      video.pause();
+    }
+  }, [isPlaying]);
+
+  const startFrom = (index: number) => {
+    const segment = segments[index];
+    if (!segment) {
+      return;
+    }
+    setActiveIndex(index);
+    setPlayhead(segment.start);
+    if (finalVideoRef.current) {
+      finalVideoRef.current.currentTime = segment.start;
+    }
+    setIsPlaying(true);
+  };
+
+  const togglePlayback = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      return;
+    }
+    if (playhead >= totalDuration) {
+      setPlayhead(currentSegment?.start ?? 0);
+      if (finalVideoRef.current) {
+        finalVideoRef.current.currentTime = currentSegment?.start ?? 0;
+      }
+    }
+    setIsPlaying(true);
+  };
+
+  const handleVideoTimeUpdate = () => {
+    const video = finalVideoRef.current;
+    if (!video) {
+      return;
+    }
+
+    const current = video.currentTime;
+    setPlayhead(current);
+    const nextIndex = segments.findIndex((segment) => current >= segment.start && current < segment.end);
+    if (nextIndex >= 0) {
+      setActiveIndex(nextIndex);
+    }
+  };
+
+  const handlePreviewKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== " " || !previewHovered) {
+      return;
+    }
+    event.preventDefault();
+    togglePlayback();
+  };
+
+  const handleGenerateCoverCopy = () => {
+    setCoverTitle(projectName ? `${projectName}，一眼心动` : "一杯好咖啡 开启美好一天");
+    setCoverIntro("用高光画面抓住第一眼，把产品卖点压缩成一句能传播的标题。");
+  };
+
+  const handleExport = async () => {
+    if (exportStatus === "exporting") {
+      return;
+    }
+
+    setExportStatus("exporting");
+    setExportMessage("");
+
+    try {
+      const canvasSessionId = getCanvasSessionId(workflowResult);
+      let exportedUrl = finalVideoUrl;
+
+      if (canvasSessionId) {
+        const result = await assembleV2CanvasFinalVideo(canvasSessionId, {
+          resolution: "1280x720",
+          fps: 24,
+          background_color: "black",
+          allow_loop_short_clips: true,
+          generate_bgm: true
+        });
+        exportedUrl = result.final_assembly?.final_video_url;
+      } else {
+        const slots: V2FinalAssemblySlot[] = segments
+          .filter((segment) => segment.videoUrl)
+          .map((segment) => ({
+            slot_id: segment.id,
+            slot_type: segment.label,
+            video_uri: segment.videoUrl ?? "",
+            duration_seconds: segment.duration,
+            start_seconds: 0
+          }));
+
+        if (slots.length === segments.length && slots.length > 0) {
+          const result = await assembleV2FinalVideo({
+            slots,
+            resolution: "1280x720",
+            fps: 24,
+            background_color: "black",
+            allow_loop_short_clips: true,
+            generate_bgm: true
+          });
+          exportedUrl = result.final_video_url;
+        } else {
+          await new Promise((resolve) => window.setTimeout(resolve, 1100));
+        }
+      }
+
+      if (exportedUrl) {
+        downloadUrl(exportedUrl, `${projectName || "shotswift"}-final.mp4`);
+      }
+
+      setExportStatus("success");
+      setExportMessage("导出成功！快去分享你的作品吧~");
+    } catch (error) {
+      setExportStatus("error");
+      setExportMessage(error instanceof Error ? error.message : "导出失败，请稍后再试。");
+    }
+  };
+
+  const progress = totalDuration > 0 ? Math.min(100, (playhead / totalDuration) * 100) : 0;
+
+  return (
+    <div className="preview-page">
+      <header className="preview-topbar">
+        <div className="preview-brand">
+          <span>迁镜</span>
+          <strong>{projectName || "口红广告"}</strong>
+          <i aria-hidden="true">✎</i>
+        </div>
+        <div className="figma-analysis-avatar" aria-label="用户头像" />
+      </header>
+
+      <div className="preview-action-row">
+        <button className="preview-back-button" type="button" onClick={() => onStepChange("gap-fill")}>
+          <ChevronLeftIcon />
+          返回画布
+        </button>
+        <button className="preview-cover-button" type="button" onClick={() => setCoverModalOpen(true)}>
+          制作封面
+          <ChevronRightIcon />
+        </button>
+      </div>
+
+      <main className="preview-stage" aria-busy={isPreparing}>
+        <aside className="preview-strip" aria-label="视频片段列表">
+          {segments.map((segment, index) => (
+            <button
+              className={`preview-thumb ${index === activeIndex ? "active" : ""}`}
+              key={segment.id}
+              onClick={() => startFrom(index)}
+              type="button"
+            >
+              <img alt={segment.label} src={segment.thumbnail} />
+              {index !== activeIndex ? <span className="preview-thumb-dim" /> : null}
+              {segment.aiGenerated ? <em>AI</em> : null}
+            </button>
+          ))}
+        </aside>
+
+        <section className="preview-main">
+          <div
+            className="preview-screen"
+            onClick={togglePlayback}
+            onKeyDown={handlePreviewKeyDown}
+            onMouseEnter={() => setPreviewHovered(true)}
+            onMouseLeave={() => setPreviewHovered(false)}
+            role="button"
+            tabIndex={0}
+          >
+            {finalVideoUrl ? (
+              <video
+                muted
+                onEnded={() => setIsPlaying(false)}
+                onTimeUpdate={handleVideoTimeUpdate}
+                ref={finalVideoRef}
+                src={finalVideoUrl}
+              />
+            ) : (
+              <img alt={currentSegment?.label ?? "视频预览"} src={currentSegment?.thumbnail ?? previewImages[0]} />
+            )}
+            {isPreparing ? (
+              <div className="preview-loading">
+                <span />
+                <strong>正在准备预览串播...</strong>
+              </div>
+            ) : (
+              <div className="preview-play-mask">
+                {isPlaying ? <PauseIcon /> : <PlayIcon />}
+              </div>
+            )}
+          </div>
+
+          <div className="preview-progress" aria-label="播放进度">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+
+          <div className="preview-controls" aria-label="播放控制">
+            <button
+              aria-pressed={isPlaying}
+              className={isPlaying ? "active" : ""}
+              type="button"
+              title="播放"
+              onClick={() => setIsPlaying(true)}
+            >
+              <PlayIcon />
+            </button>
+            <button
+              aria-pressed={!isPlaying}
+              className={!isPlaying ? "active" : ""}
+              type="button"
+              title="暂停"
+              onClick={() => setIsPlaying(false)}
+            >
+              <PauseIcon />
+            </button>
+          </div>
+
+          <p className="preview-status">
+            {finalVideoUrl
+              ? "已连接最终视频结果。"
+              : "当前使用 mock 串播预览；后端返回最终视频后会自动切换为真实视频导出。"}
+          </p>
+        </section>
+      </main>
+
+      {coverModalOpen ? (
+        <div className="cover-modal" role="dialog" aria-modal="true" aria-label="封面与标题生成">
+          <div className="cover-modal-shell">
+            <button
+              aria-label="关闭封面制作"
+              className="cover-modal-close"
+              type="button"
+              onClick={() => setCoverModalOpen(false)}
+            >
+              ×
+            </button>
+            <main className="cover-modal-body">
+              <aside className="cover-prompts" aria-label="封面提示词">
+                <section className="cover-prompt-card">
+                  <p>
+                    请你扮演一位专业广告文案策划，为一款咖啡产品生成广告标题和简介。产品信息如下：
+                    品牌名：晨野咖啡。咖啡类型：低糖冷萃咖啡。目标人群：上班族、学生。
+                  </p>
+                  <button type="button" onClick={handleGenerateCoverCopy}>生成标题简介</button>
+                </section>
+                <section className="cover-prompt-card cover-prompt-card-tall">
+                  <p>
+                    请生成一张高质感咖啡广告封面图。画面主体是一杯“晨野咖啡”低糖冷萃咖啡，放置在干净的办公桌或木质桌面上，旁边有笔记本电脑、书本、阳光洒落的窗边场景，营造清晨灵感和工作效率均衡的氛围。画面风格：高级感、清爽、自然、治愈。色调：浅棕色、奶油白、暖阳金。少量深咖色。
+                  </p>
+                  <button type="button">生成封面</button>
+                </section>
+              </aside>
+
+              <section className="cover-preview-card">
+                <div className="cover-copy">
+                  <h2>{coverTitle}</h2>
+                  <p>{coverIntro}</p>
+                </div>
+                <div className="cover-art">
+                  <img alt="封面预览" src={coverImageAsset} />
+                </div>
+              </section>
+            </main>
+
+            <button
+              className={`cover-export-button ${exportStatus === "exporting" ? "loading" : ""}`}
+              type="button"
+              title="导出成品"
+              onClick={handleExport}
+            >
+              {exportStatus === "exporting" ? <span /> : <ShareIcon />}
+              导出成品
+            </button>
+            {exportMessage ? (
+              <p className={`cover-export-message ${exportStatus}`}>{exportMessage}</p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const LegacyDemoView = ({
+  blocks,
+  finalVideoResult,
+  onStepChange
+}: {
+  blocks: CanvasBlock[];
+  finalVideoResult?: V2CanvasFinalVideoResult;
+  onStepChange: (step: StepKey) => void;
+  projectName?: string;
+}) => {
+  const finalVideoUrl = finalVideoResult?.final_assembly?.final_video_url;
+
   return (
     <div className="page-shell demo-page">
       <CanvasTopBar
@@ -1400,11 +2104,15 @@ const DemoView = ({
 
       <section className="demo-layout">
         <div className="video-preview">
-          <div className="preview-canvas">
-            <span>新手养猫怎么选猫粮</span>
-            <strong>别盲买猫粮</strong>
-            <p>结构迁移预览</p>
-          </div>
+          {finalVideoUrl ? (
+            <video className="preview-canvas" controls src={finalVideoUrl} />
+          ) : (
+            <div className="preview-canvas">
+              <span>新手养猫怎么选猫粮</span>
+              <strong>别盲买猫粮</strong>
+              <p>结构迁移预览</p>
+            </div>
+          )}
           <div className="scrubber">
             <span />
           </div>
@@ -1425,7 +2133,15 @@ const DemoView = ({
             <span>标题包装</span>
             <strong>红色警示</strong>
           </div>
-          <button className="primary-action full" type="button">
+          <button
+            className="primary-action full"
+            onClick={() => {
+              if (finalVideoUrl) {
+                window.open(finalVideoUrl, "_blank", "noopener,noreferrer");
+              }
+            }}
+            type="button"
+          >
             导出结果
           </button>
         </aside>

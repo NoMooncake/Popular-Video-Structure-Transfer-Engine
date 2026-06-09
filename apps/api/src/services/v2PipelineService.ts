@@ -466,6 +466,24 @@ const findNearestReferenceFrame = (
     )[0];
 };
 
+const findReferencedReferenceFrame = (
+  frames: V2ReferenceFrame[],
+  record: JsonObject
+): V2ReferenceFrame | undefined => {
+  const frameRefs = normalizeStringArray(record.frame_refs);
+  const frameRef =
+    frameRefs[0] ||
+    normalizeOptionalString(record.frame_ref) ||
+    normalizeOptionalString(record.frame_id) ||
+    normalizeOptionalString(record.reference_frame_id);
+
+  if (!frameRef) {
+    return undefined;
+  }
+
+  return frames.find((frame) => frame.frame_id === frameRef);
+};
+
 const getReferenceAnalysisRoot = (analysis: JsonObject): JsonObject => {
   const payload = asJsonObject(analysis.payload);
 
@@ -614,7 +632,9 @@ const buildReferenceTableRow = (
     total,
     targetDuration
   );
-  const nearestFrame = findNearestReferenceFrame(frames, (startSeconds + endSeconds) / 2);
+  const nearestFrame =
+    findReferencedReferenceFrame(frames, record) ||
+    findNearestReferenceFrame(frames, (startSeconds + endSeconds) / 2);
   const rawTitle =
     normalizeOptionalString(record.title) ||
     normalizeOptionalString(record.shot_title) ||
@@ -3453,6 +3473,16 @@ const callReferenceAnalysisWithFrameRetry = async (
 
     return output;
   };
+
+  if (frames.length > 0) {
+    try {
+      return { output: await callFramesOnly("reference frames available") };
+    } catch (error) {
+      if (!allowFallback) {
+        throw error;
+      }
+    }
+  }
 
   try {
     const output = await requestMultimodalJson(
