@@ -1,577 +1,910 @@
-import { useState, useRef, useEffect } from "react";
-import type { CanvasBlock, MatchStatus } from "../types";
-import { StatusBadge } from "./StatusBadge";
+import { useMemo, useRef, useState } from "react";
+import type { CanvasBlock } from "../types";
 
 type VideoBlockCanvasProps = {
   blocks: CanvasBlock[];
   selectedBlockId: string;
   onSelectBlock: (blockId: string) => void;
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
+  onBack?: () => void;
+  onExport?: () => void;
+  projectName?: string;
 };
 
-// Initial coordinates for structure cards
-const initialPositions: Record<string, { x: number; y: number }> = {
-  slot_01: { x: 50, y: 150 },
-  slot_02: { x: 340, y: 150 },
-  slot_03: { x: 630, y: 40 },
-  slot_04: { x: 630, y: 260 },
-  slot_05: { x: 920, y: 150 },
-  slot_06: { x: 1210, y: 150 },
-
-  // Supplement card offsets (will spawn dynamically near structure slots)
-  supp_slot_01: { x: 50, y: 360 },
-  supp_slot_04: { x: 630, y: 470 },
-  supp_slot_06: { x: 1210, y: 360 }
+type CanvasPosition = {
+  x: number;
+  y: number;
 };
 
-// Mock generated image variants (2x2 grid)
-const mockAiImages = [
-  "https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=400&q=80",
-  "https://images.unsplash.com/photo-1533738363-b7f9aef128ce?auto=format&fit=crop&w=400&q=80",
-  "https://images.unsplash.com/photo-1573865526739-10659fec78a5?auto=format&fit=crop&w=400&q=80",
-  "https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&w=400&q=80"
+type CanvasStatus = "matched" | "missing" | "partial" | "generating";
+
+type VideoGenerationPayload = {
+  keyframe_image?: string;
+  video_prompt: string;
+};
+
+const BASE_CANVAS_WIDTH = 2360;
+const BASE_CANVAS_HEIGHT = 980;
+const MIN_ZOOM = 25;
+const MAX_ZOOM = 200;
+const ZOOM_STEP = 10;
+const DRAG_THRESHOLD = 4;
+
+const cardImages = [
+  "https://www.figma.com/api/mcp/asset/7a9bb822-f69c-4344-9da9-27ec440b9d2e",
+  "https://www.figma.com/api/mcp/asset/45d15bc2-c541-433f-9c4c-2a1db76e627d",
+  "https://www.figma.com/api/mcp/asset/27f882c5-4b54-4e3e-b9b7-811c7dfe6429"
 ];
 
-const slotLabelByType: Record<string, string> = {
-  risk_or_pain_hook: "风险 Hook",
-  pain_desire: "需求拆解",
-  product_reveal: "产品露出",
-  proof_comparison: "对比证明",
-  decision_warning: "避坑提醒",
-  cta: "行动引导"
+const aiCandidateImages = [
+  "https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=1000&q=80",
+  "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1000&q=80",
+  "https://images.unsplash.com/photo-1512496015851-a90fb38ba796?auto=format&fit=crop&w=1000&q=80",
+  "https://images.unsplash.com/photo-1512207128881-1baee87126fb?auto=format&fit=crop&w=1000&q=80",
+  "https://images.unsplash.com/photo-1541643600914-78b084683601?auto=format&fit=crop&w=1000&q=80",
+  "https://images.unsplash.com/photo-1505577058444-a3dab90d4253?auto=format&fit=crop&w=1000&q=80",
+  "https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&w=1000&q=80",
+  "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1000&q=80"
+];
+
+const figmaLabels = ["Hook", "产品介入", "感官特写", "使用动作", "使用动作", "行动引导"];
+
+const initialPositions: Record<string, CanvasPosition> = {
+  slot_01: { x: 204, y: 263 },
+  slot_02: { x: 566, y: 263 },
+  slot_03: { x: 928, y: 263 },
+  slot_04: { x: 1290, y: 263 },
+  slot_05: { x: 1652, y: 263 },
+  slot_06: { x: 2014, y: 263 }
 };
 
-const slotGoalByType: Record<string, string> = {
-  risk_or_pain_hook: "用风险标题抓住新手养猫用户",
-  pain_desire: "说明不同猫咪需求不能跟风选择",
-  product_reveal: "按需求展示猫粮选择方向",
-  proof_comparison: "用对比卡片解释推荐理由",
-  decision_warning: "加入避坑提醒降低盲买风险",
-  cta: "引导评论区补充自家猫咪情况"
+const fallbackPositions = (blocks: CanvasBlock[]) =>
+  blocks.reduce<Record<string, CanvasPosition>>((positions, block, index) => {
+    positions[block.id] = initialPositions[block.id] ?? {
+      x: 204 + index * 362,
+      y: 263
+    };
+    return positions;
+  }, {});
+
+const labelForBlock = (block: CanvasBlock, index: number) =>
+  figmaLabels[index] ?? block.slot.slot_type ?? block.label;
+
+const imageForBlock = (index: number) => cardImages[index % cardImages.length];
+
+const portColorByStatus: Record<CanvasStatus, "matched" | "missing" | "partial"> = {
+  matched: "matched",
+  partial: "partial",
+  missing: "missing",
+  generating: "partial"
 };
 
-const readableSlot = (block: CanvasBlock) => {
-  return slotLabelByType[block.slot.slot_type] ?? block.label;
-};
+const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
 
-const readableGoal = (block: CanvasBlock) => {
-  return slotGoalByType[block.slot.slot_type] ?? block.slot.content_goal;
-};
+const defaultKeyframePromptFor = (block: CanvasBlock, index: number) =>
+  `请生成一幅画面，展示${labelForBlock(
+    block,
+    index
+  )}的场景，突出产品如何改变环境或提升用户体验。画面应充满活力，能够吸引观众的注意力。`;
+
+const defaultVideoPromptFor = (block: CanvasBlock, index: number) =>
+  block.timeline?.visual_description
+    ? `在这个视频中，我们将围绕“${labelForBlock(block, index)}”补充一段画面。${block.timeline.visual_description} 请保持与前后镜头一致的光线、节奏和产品呈现方式。`
+    : `在这个视频中，我们将深入探讨“${labelForBlock(
+        block,
+        index
+      )}”的重要性。我们的产品具有清晰的卖点和自然的使用场景，画面需要承接前后镜头，突出产品如何提升用户体验，并保持广告整体节奏连贯。`;
+
+const rotateCandidates = (seed: number) =>
+  Array.from({ length: 4 }, (_, index) => aiCandidateImages[(seed + index) % aiCandidateImages.length]);
 
 export const VideoBlockCanvas = ({
   blocks,
   selectedBlockId,
   onSelectBlock,
-  onUpdateBlock
+  onUpdateBlock,
+  onBack,
+  onExport,
+  projectName = "口红广告"
 }: VideoBlockCanvasProps) => {
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(initialPositions);
+  const basePositions = useMemo(() => fallbackPositions(blocks), [blocks]);
+  const [positions, setPositions] = useState<Record<string, CanvasPosition>>(basePositions);
   const [isDragging, setIsDragging] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const [zoom, setZoom] = useState(100);
+  const [zoomDraft, setZoomDraft] = useState("100");
   const [showHelp, setShowHelp] = useState(false);
+  const [activeEditorBlockId, setActiveEditorBlockId] = useState<string | null>(null);
+  const [keyframeLoadingBlockId, setKeyframeLoadingBlockId] = useState<string | null>(null);
+  const [generatingVideoBlockId, setGeneratingVideoBlockId] = useState<string | null>(null);
+  const [selectorBlockId, setSelectorBlockId] = useState<string | null>(null);
+  const [selectedCandidateUrl, setSelectedCandidateUrl] = useState<string | null>(null);
+  const [playbackBlockId, setPlaybackBlockId] = useState<string | null>(null);
+  const [keyframePrompts, setKeyframePrompts] = useState<Record<string, string>>({});
+  const [videoPrompts, setVideoPrompts] = useState<Record<string, string>>({});
+  const [keyframeCandidates, setKeyframeCandidates] = useState<Record<string, string[]>>({});
+  const [selectedKeyframes, setSelectedKeyframes] = useState<Record<string, string>>({});
+  const [generatedVideoThumbs, setGeneratedVideoThumbs] = useState<Record<string, string>>({});
+  const [candidateSeeds, setCandidateSeeds] = useState<Record<string, number>>({});
 
-  // Spawning / Connection state for supplement cards
-  const [connectedSupplements, setConnectedSupplements] = useState<Record<string, boolean>>({
-    slot_01: false,
-    slot_04: false,
-    slot_06: false
-  });
-
-  // AI image selected for each slot
-  const [aiImages, setAiImages] = useState<Record<string, string | null>>({
-    slot_01: null,
-    slot_04: null,
-    slot_06: null
-  });
-
-  // AI Generation Loading State
-  const [generatingSlotId, setGeneratingSlotId] = useState<string | null>(null);
-  const [showAiSelector, setShowAiSelector] = useState(false);
-
-  // Dragging state references
+  const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
-    draggedId: string;
+    blockId: string;
+    didMove: boolean;
     startX: number;
     startY: number;
     startLeft: number;
     startTop: number;
   } | null>(null);
+  const panRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
 
-  const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? blocks[0];
+  const selectedBlock = blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
 
-  const handlePointerDown = (e: React.PointerEvent, id: string) => {
-    e.stopPropagation();
-    onSelectBlock(id.replace("supp_", "")); // select the base block
-    const pos = positions[id] || { x: 0, y: 0 };
-    dragRef.current = {
-      draggedId: id,
-      startX: e.clientX,
-      startY: e.clientY,
-      startLeft: pos.x,
-      startTop: pos.y
-    };
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  const getCanvasStatus = (block: CanvasBlock, index: number): CanvasStatus => {
+    if (generatingVideoBlockId === block.id) {
+      return "generating";
+    }
+
+    if (generatedVideoThumbs[block.id]) {
+      return "matched";
+    }
+
+    if (index === 1 || block.status === "missing") {
+      return "missing";
+    }
+
+    if (block.status === "partial") {
+      return "partial";
+    }
+
+    return "matched";
   };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!dragRef.current) return;
-    const { draggedId, startX, startY, startLeft, startTop } = dragRef.current;
-    
-    // Set dragging state to hide SVG paths for performance
+  const needsCompletion = (block: CanvasBlock, index: number) =>
+    getCanvasStatus(block, index) !== "matched";
+
+  const statusTextFor = (status: CanvasStatus, aiCompleted: boolean) => {
+    if (status === "generating") {
+      return "生成中";
+    }
+
+    if (aiCompleted) {
+      return "AI已生成";
+    }
+
+    if (status === "matched") {
+      return "已完成";
+    }
+
+    if (status === "missing") {
+      return "缺必要输入";
+    }
+
+    return "时长不足";
+  };
+
+  const getKeyframePrompt = (block: CanvasBlock, index: number) =>
+    keyframePrompts[block.id] ?? defaultKeyframePromptFor(block, index);
+
+  const getVideoPrompt = (block: CanvasBlock, index: number) =>
+    videoPrompts[block.id] ?? defaultVideoPromptFor(block, index);
+
+  const applyZoom = (
+    nextZoom: number,
+    anchor?: {
+      clientX: number;
+      clientY: number;
+    }
+  ) => {
+    const container = scrollRef.current;
+    const next = clampZoom(Math.round(nextZoom));
+    const previousScale = zoom / 100;
+    const nextScale = next / 100;
+
+    let anchorCanvasX: number | null = null;
+    let anchorCanvasY: number | null = null;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (container && anchor) {
+      const rect = container.getBoundingClientRect();
+      offsetX = anchor.clientX - rect.left;
+      offsetY = anchor.clientY - rect.top;
+      anchorCanvasX = (container.scrollLeft + offsetX) / previousScale;
+      anchorCanvasY = (container.scrollTop + offsetY) / previousScale;
+    }
+
+    setZoom(next);
+    setZoomDraft(String(next));
+
+    if (container && anchorCanvasX !== null && anchorCanvasY !== null) {
+      window.requestAnimationFrame(() => {
+        container.scrollLeft = anchorCanvasX * nextScale - offsetX;
+        container.scrollTop = anchorCanvasY * nextScale - offsetY;
+      });
+    }
+  };
+
+  const commitZoomDraft = () => {
+    const next = Number.parseInt(zoomDraft, 10);
+    if (Number.isFinite(next)) {
+      applyZoom(next);
+      return;
+    }
+    setZoomDraft(String(zoom));
+  };
+
+  const resetViewport = () => {
+    setPositions(basePositions);
+    applyZoom(100);
+  };
+
+  const handleWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest(".figma-zoom-control")) {
+      return;
+    }
+
+    event.preventDefault();
+    const direction = event.deltaY > 0 ? -1 : 1;
+    applyZoom(zoom + direction * ZOOM_STEP, {
+      clientX: event.clientX,
+      clientY: event.clientY
+    });
+  };
+
+  const handleCanvasPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (
+      target.closest(
+        ".figma-structure-card, .figma-gap-editor, .figma-canvas-tools, .figma-help-popover, .figma-ai-modal, .figma-zoom-control, button, input, textarea"
+      )
+    ) {
+      return;
+    }
+
+    const container = scrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    panRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop
+    };
+    setIsPanning(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleCanvasPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!panRef.current || !scrollRef.current) {
+      return;
+    }
+
+    scrollRef.current.scrollLeft =
+      panRef.current.scrollLeft - (event.clientX - panRef.current.startX);
+    scrollRef.current.scrollTop =
+      panRef.current.scrollTop - (event.clientY - panRef.current.startY);
+  };
+
+  const handleCanvasPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!panRef.current) {
+      return;
+    }
+
+    panRef.current = null;
+    setIsPanning(false);
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLElement>, blockId: string) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, textarea")) {
+      return;
+    }
+
+    event.stopPropagation();
+    onSelectBlock(blockId);
+
+    const current = positions[blockId] ?? basePositions[blockId] ?? { x: 0, y: 0 };
+    dragRef.current = {
+      blockId,
+      didMove: false,
+      startX: event.clientX,
+      startY: event.clientY,
+      startLeft: current.x,
+      startTop: current.y
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLElement>) => {
+    if (!dragRef.current) {
+      return;
+    }
+
+    const { blockId, startX, startY, startLeft, startTop } = dragRef.current;
+    const scale = zoom / 100;
+    const deltaX = event.clientX - startX;
+    const deltaY = event.clientY - startY;
+
+    if (!dragRef.current.didMove && Math.hypot(deltaX, deltaY) < DRAG_THRESHOLD) {
+      return;
+    }
+
+    dragRef.current.didMove = true;
     if (!isDragging) {
       setIsDragging(true);
     }
 
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    const nextX = Math.max(24, startLeft + deltaX / scale);
+    const nextY = Math.max(130, startTop + deltaY / scale);
 
-    setPositions((prev) => ({
-      ...prev,
-      [draggedId]: {
-        x: Math.max(0, startLeft + dx),
-        y: Math.max(0, startTop + dy)
+    setPositions((current) => ({
+      ...current,
+      [blockId]: {
+        x: nextX,
+        y: nextY
       }
     }));
   };
 
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (!dragRef.current) return;
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+  const handlePointerUp = (event: React.PointerEvent<HTMLElement>) => {
+    if (!dragRef.current) {
+      return;
+    }
+
+    const { blockId, didMove } = dragRef.current;
+    event.currentTarget.releasePointerCapture(event.pointerId);
     dragRef.current = null;
     setIsDragging(false);
+
+    if (didMove) {
+      return;
+    }
+
+    onSelectBlock(blockId);
+    const blockIndex = blocks.findIndex((block) => block.id === blockId);
+    const block = blocks[blockIndex];
+    const status = block ? getCanvasStatus(block, blockIndex) : null;
+    const canEdit =
+      block &&
+      status !== "generating" &&
+      (needsCompletion(block, blockIndex) || Boolean(generatedVideoThumbs[blockId]));
+
+    setActiveEditorBlockId(canEdit ? blockId : null);
   };
 
-  // Helper to compute SVG connection lines
-  const getTimelinePath = (fromId: string, toId: string) => {
-    const fromPos = positions[fromId];
-    const toPos = positions[toId];
-    if (!fromPos || !toPos) return "";
-    const x1 = fromPos.x + 240;
-    const y1 = fromPos.y + 80;
-    const x2 = toPos.x;
-    const y2 = toPos.y + 80;
-    const dx = x2 - x1;
-    return `M ${x1} ${y1} C ${x1 + dx / 2} ${y1}, ${x2 - dx / 2} ${y2}, ${x2} ${y2}`;
+  const generateKeyframeCandidates = (blockId: string) => {
+    setActiveEditorBlockId(blockId);
+    setKeyframeLoadingBlockId(blockId);
+    setSelectedCandidateUrl(null);
+
+    window.setTimeout(() => {
+      setCandidateSeeds((current) => {
+        const nextSeed = (current[blockId] ?? 0) + 1;
+        setKeyframeCandidates((candidateMap) => ({
+          ...candidateMap,
+          [blockId]: rotateCandidates(nextSeed)
+        }));
+        return {
+          ...current,
+          [blockId]: nextSeed
+        };
+      });
+      setSelectedKeyframes((current) => {
+        const next = { ...current };
+        delete next[blockId];
+        return next;
+      });
+      setKeyframeLoadingBlockId(null);
+    }, 500);
   };
 
-  const getMaterialPath = (suppId: string, structId: string) => {
-    const suppPos = positions[suppId];
-    const structPos = positions[structId];
-    if (!suppPos || !structPos) return "";
-    const x1 = suppPos.x + 120;
-    const y1 = suppPos.y;
-    const x2 = structPos.x + 120;
-    const y2 = structPos.y + 160;
-    const dy = y1 - y2;
-    return `M ${x1} ${y1} C ${x1} ${y1 - dy / 2}, ${x2} ${y2 + dy / 2}, ${x2} ${y2}`;
+  const openCandidateSelector = (blockId: string) => {
+    if (!keyframeCandidates[blockId]?.length) {
+      generateKeyframeCandidates(blockId);
+    }
+    setSelectedCandidateUrl(selectedKeyframes[blockId] ?? null);
+    setSelectorBlockId(blockId);
   };
 
-  // Check if timeline connections should be solid
-  const isSolidTimeline = (fromId: string, toId: string) => {
-    const fromBlock = blocks.find((b) => b.id === fromId);
-    const toBlock = blocks.find((b) => b.id === toId);
-    return fromBlock?.status === "matched" && toBlock?.status === "matched";
-  };
+  const confirmCandidate = () => {
+    if (!selectorBlockId || !selectedCandidateUrl) {
+      return;
+    }
 
-  // Trigger simulated AI generation
-  const handleTriggerAiGeneration = (slotId: string) => {
-    setGeneratingSlotId(slotId);
-    setTimeout(() => {
-      setGeneratingSlotId(null);
-      setShowAiSelector(true);
-    }, 1200);
-  };
-
-  const handleSelectAiImage = (imageUrl: string) => {
-    if (!selectedBlock) return;
-    const blockId = selectedBlock.id;
-    setAiImages((prev) => ({ ...prev, [blockId]: imageUrl }));
-    setShowAiSelector(false);
-
-    // Update block state to matched
-    onUpdateBlock({
-      ...selectedBlock,
-      status: "matched",
-      timeline: selectedBlock.timeline
-        ? {
-            ...selectedBlock.timeline,
-            visual_source: "generated_graphic",
-            visual_description: `AI生成的图片: ${selectedBlock.gap?.missing || "补全素材"}`
-          }
-        : undefined
-    });
-  };
-
-  const toggleConnectSupplement = (slotId: string) => {
-    setConnectedSupplements((prev) => ({
-      ...prev,
-      [slotId]: !prev[slotId]
+    setSelectedKeyframes((current) => ({
+      ...current,
+      [selectorBlockId]: selectedCandidateUrl
     }));
+    setSelectorBlockId(null);
+    setSelectedCandidateUrl(null);
   };
+
+  const generateVideo = (block: CanvasBlock, index: number) => {
+    const videoPrompt = getVideoPrompt(block, index).trim();
+    if (!videoPrompt || generatingVideoBlockId) {
+      return;
+    }
+
+    const payload: VideoGenerationPayload = {
+      keyframe_image: selectedKeyframes[block.id],
+      video_prompt: videoPrompt
+    };
+
+    setGeneratingVideoBlockId(block.id);
+    setActiveEditorBlockId(null);
+
+    window.setTimeout(() => {
+      const generatedThumbnail =
+        payload.keyframe_image ?? keyframeCandidates[block.id]?.[0] ?? imageForBlock(index);
+
+      setGeneratedVideoThumbs((current) => ({
+        ...current,
+        [block.id]: generatedThumbnail
+      }));
+
+      onUpdateBlock({
+        ...block,
+        status: "matched",
+        materialSummary: "AI 生成视频已完成",
+        timeline: block.timeline
+          ? {
+              ...block.timeline,
+              visual_source: "ai_generated_video",
+              visual_description: payload.video_prompt
+            }
+          : block.timeline
+      });
+
+      setGeneratingVideoBlockId(null);
+    }, 900);
+  };
+
+  const editorBlock = activeEditorBlockId
+    ? blocks.find((block) => block.id === activeEditorBlockId)
+    : null;
+  const editorIndex = editorBlock ? blocks.findIndex((block) => block.id === editorBlock.id) : -1;
+  const editorStatus = editorBlock ? getCanvasStatus(editorBlock, editorIndex) : null;
+  const editorCanOpen =
+    editorBlock &&
+    editorStatus &&
+    editorStatus !== "generating" &&
+    (editorStatus !== "matched" || Boolean(generatedVideoThumbs[editorBlock.id]));
+  const editorPosition =
+    editorCanOpen
+      ? positions[editorBlock.id] ?? basePositions[editorBlock.id]
+      : null;
+
+  const selectorBlock = selectorBlockId
+    ? blocks.find((block) => block.id === selectorBlockId)
+    : null;
+  const selectorIndex = selectorBlock
+    ? blocks.findIndex((block) => block.id === selectorBlock.id)
+    : -1;
+  const selectorCandidates = selectorBlockId
+    ? keyframeCandidates[selectorBlockId] ?? rotateCandidates(candidateSeeds[selectorBlockId] ?? 0)
+    : [];
 
   return (
-    <section className="canvas-panel" aria-label="视频块白板">
-      <div className="canvas-toolbar">
-        <div>
-          <h2>ShotSwift 白板画布</h2>
-          <p>拖拽视频块调整布局。选择缺失或部分匹配的卡片进行素材补全与 AI 生成。</p>
-        </div>
-        <div className="floating-tools" aria-label="画布工具">
-          <button type="button" onClick={() => setPositions(initialPositions)} title="重置布局">↺ 重置</button>
-          <button type="button" onClick={() => setShowHelp(true)}>帮助 ?</button>
-        </div>
-      </div>
+    <section className="figma-canvas-page" aria-label="生成视频">
+      <header className="figma-canvas-topbar">
+        <button className="figma-canvas-brand" type="button" onClick={onBack}>
+          <span>迁镜</span>
+          <strong>{projectName}</strong>
+          <i aria-hidden="true">✎</i>
+        </button>
+        <div className="figma-analysis-avatar" aria-label="用户头像" />
+      </header>
 
-      <div className="whiteboard-wrapper" style={{ position: "relative" }}>
-        <div className="whiteboard graph-board" style={{ height: "640px", overflow: "auto" }}>
-          {/* SVG Connector Lines */}
-          {!isDragging && (
-            <svg className="graph-connectors" style={{ width: "1600px", height: "600px", position: "absolute", pointerEvents: "none" }} aria-hidden="true">
-              {/* Timeline Sequence Connections */}
-              <path
-                className={isSolidTimeline("slot_01", "slot_02") ? "graph-line solid" : "graph-line dashed"}
-                d={getTimelinePath("slot_01", "slot_02")}
-              />
-              <path
-                className={isSolidTimeline("slot_02", "slot_03") ? "graph-line solid" : "graph-line dashed"}
-                d={getTimelinePath("slot_02", "slot_03")}
-              />
-              <path
-                className={isSolidTimeline("slot_02", "slot_04") ? "graph-line solid" : "graph-line dashed"}
-                d={getTimelinePath("slot_02", "slot_04")}
-              />
-              <path
-                className={isSolidTimeline("slot_03", "slot_05") ? "graph-line solid" : "graph-line dashed"}
-                d={getTimelinePath("slot_03", "slot_05")}
-              />
-              <path
-                className={isSolidTimeline("slot_04", "slot_05") ? "graph-line solid" : "graph-line dashed"}
-                d={getTimelinePath("slot_04", "slot_05")}
-              />
-              <path
-                className={isSolidTimeline("slot_05", "slot_06") ? "graph-line solid" : "graph-line dashed"}
-                d={getTimelinePath("slot_05", "slot_06")}
-              />
+      <nav className="figma-canvas-tools" aria-label="画布工具">
+        <button type="button" title="导出" onClick={onExport}>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M12 4v11" />
+            <path d="m7 9 5-5 5 5" />
+            <path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" />
+          </svg>
+        </button>
+        <button type="button" title="帮助" onClick={() => setShowHelp((value) => !value)}>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.7 9a2.4 2.4 0 0 1 4.55 1.05c0 1.55-1.1 2.06-1.9 2.64-.58.42-.83.82-.83 1.56" />
+            <path d="M12 17.4h.01" />
+          </svg>
+        </button>
+        <button type="button" title="返回" onClick={onBack}>
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+      </nav>
 
-              {/* Material Supplement Connections */}
-              {connectedSupplements.slot_01 && (
-                <path
-                  className={selectedBlock.status === "matched" ? "graph-line solid" : "graph-line dashed"}
-                  d={getMaterialPath("supp_slot_01", "slot_01")}
-                />
-              )}
-              {connectedSupplements.slot_04 && (
-                <path
-                  className={selectedBlock.status === "matched" ? "graph-line solid" : "graph-line dashed"}
-                  d={getMaterialPath("supp_slot_04", "slot_04")}
-                />
-              )}
-              {connectedSupplements.slot_06 && (
-                <path
-                  className={selectedBlock.status === "matched" ? "graph-line solid" : "graph-line dashed"}
-                  d={getMaterialPath("supp_slot_06", "slot_06")}
-                />
-              )}
-            </svg>
-          )}
-
-          {/* Render Structure Slot Cards */}
-          {blocks.map((block) => {
-            const pos = positions[block.id] || { x: 0, y: 0 };
-            const isSelected = selectedBlockId === block.id;
-
-            return (
-              <div
-                key={block.id}
-                className="graph-node"
-                style={{
-                  transform: `translate(${pos.x}px, ${pos.y}px)`,
-                  position: "absolute",
-                  transition: isDragging ? "none" : "transform 0.1s ease"
-                }}
-              >
-                <div
-                  className={`video-block ${block.status} ${isSelected ? "selected" : ""}`}
-                  onPointerDown={(e) => handlePointerDown(e, block.id)}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  style={{ touchAction: "none" }}
-                >
-                  <span className={`match-strip ${block.status}`} />
-                  <span className="block-meta">
-                    <span className="block-time">{block.timeRange}</span>
-                    <StatusBadge status={block.status} />
-                  </span>
-                  <strong>{readableSlot(block)}</strong>
-                  <small>{readableGoal(block)}</small>
-
-                  {/* Left Timeline Port */}
-                  <span className="node-port left-port" />
-                  
-                  {/* Right Timeline Port */}
-                  <span className="node-port right-port" />
-
-                  {/* Bottom Input Port - visible when selected */}
-                  {isSelected && <span className="node-port bottom-port" />}
-                </div>
-              </div>
-            );
-          })}
-
-          {/* Render Spawning Supplement Cards */}
-          {blocks.map((block) => {
-            if (!connectedSupplements[block.id]) return null;
-            const suppId = `supp_${block.id}`;
-            const pos = positions[suppId] || { x: 0, y: 0 };
-            const isSelected = selectedBlockId === block.id;
-            const customImage = aiImages[block.id];
-
-            return (
-              <div
-                key={suppId}
-                className="graph-node supplement-node"
-                style={{
-                  transform: `translate(${pos.x}px, ${pos.y}px)`,
-                  position: "absolute",
-                  transition: isDragging ? "none" : "transform 0.1s ease"
-                }}
-              >
-                <div
-                  className={`video-block supplement-card ${isSelected ? "selected" : ""}`}
-                  onPointerDown={(e) => handlePointerDown(e, suppId)}
-                  onPointerMove={handlePointerMove}
-                  onPointerUp={handlePointerUp}
-                  style={{
-                    touchAction: "none",
-                    background: "#222222",
-                    border: "1px dashed var(--text-muted)",
-                    color: "var(--text)"
-                  }}
-                >
-                  <span className="match-strip partial" style={{ background: "var(--theme)" }} />
-                  <span className="block-meta">
-                    <span className="block-time">素材补全</span>
-                    <span className="supplement-tag">补充卡片</span>
-                  </span>
-                  
-                  <div className="supplement-body" style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
-                    {customImage ? (
-                      <img src={customImage} alt="AI Generated" style={{ width: "64px", height: "64px", borderRadius: "4px", objectFit: "cover" }} />
-                    ) : (
-                      <div className="media-placeholder" style={{ width: "64px", height: "64px", minWidth: "64px", minHeight: "64px", fontSize: "10px" }}>待生成</div>
-                    )}
-                    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center" }}>
-                      <strong style={{ fontSize: "12px", color: "var(--text-strong)" }}>{block.gap?.missing || "图片素材"}</strong>
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{block.gap?.strategy || "使用AI包装生成"}</span>
-                    </div>
-                  </div>
-
-                  {/* Top Output Port */}
-                  <span className="node-port top-port" />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Floating Question Legend Overlay */}
-        {showHelp && (
-          <div className="legend-overlay" style={{
-            position: "absolute",
-            bottom: "20px",
-            left: "20px",
-            background: "var(--panel)",
-            border: "1px solid var(--line)",
-            borderRadius: "var(--radius)",
-            padding: "16px",
-            zIndex: 10,
-            maxWidth: "320px",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.5)"
-          }}>
-            <h3 style={{ margin: "0 0 10px", color: "var(--text-strong)" }}>画布图例说明</h3>
-            <div className="legend-list" style={{ gap: "8px", fontSize: "13px" }}>
-              <span><i className="legend-dot matched" /> 已匹配 (Matched) - 状态完备，不可编辑</span>
-              <span><i className="legend-dot partial" /> 部分匹配 (Partial) - 建议包装补全</span>
-              <span><i className="legend-dot missing" /> 未匹配 (Missing) - 完全缺失，建议AI生成</span>
-              <hr style={{ border: "0", borderTop: "1px solid var(--line)", margin: "8px 0" }} />
-              <span>─── 实线: 绿-绿连接 (时间线顺畅)</span>
-              <span>- - - 虚线: 缺口连接 (包含缺失/部分匹配块)</span>
-            </div>
-            <button
-              type="button"
-              className="primary-action"
-              style={{ minHeight: "30px", marginTop: "12px", width: "100%" }}
-              onClick={() => setShowHelp(false)}
-            >
-              关闭
-            </button>
-          </div>
-        )}
-
-        {/* Floating Question mark trigger button on bottom-left */}
-        {!showHelp && (
-          <button
-            type="button"
-            className="help-trigger-btn"
-            onClick={() => setShowHelp(true)}
+      <div
+        className={`figma-canvas-scroll ${isPanning ? "is-panning" : ""}`}
+        onPointerDown={handleCanvasPointerDown}
+        onPointerMove={handleCanvasPointerMove}
+        onPointerCancel={handleCanvasPointerUp}
+        onPointerUp={handleCanvasPointerUp}
+        onWheel={handleWheel}
+        ref={scrollRef}
+      >
+        <div
+          className="figma-canvas-scale-shell"
+          style={{
+            height: BASE_CANVAS_HEIGHT * (zoom / 100),
+            width: BASE_CANVAS_WIDTH * (zoom / 100)
+          }}
+        >
+          <div
+            className="figma-canvas-stage"
             style={{
-              position: "absolute",
-              bottom: "20px",
-              left: "20px",
-              width: "36px",
-              height: "36px",
-              borderRadius: "999px",
-              background: "var(--panel-soft)",
-              border: "1px solid var(--line)",
-              color: "var(--text)",
-              fontWeight: "bold",
-              fontSize: "18px",
-              cursor: "pointer",
-              zIndex: 9
+              height: BASE_CANVAS_HEIGHT,
+              transform: `scale(${zoom / 100})`,
+              width: BASE_CANVAS_WIDTH
             }}
           >
-            ?
-          </button>
-        )}
+            {!isDragging ? (
+              <svg className="figma-canvas-lines" aria-hidden="true">
+                {blocks.slice(0, -1).map((block, index) => {
+                  const nextBlock = blocks[index + 1];
+                  const from = positions[block.id] ?? basePositions[block.id];
+                  const to = positions[nextBlock.id] ?? basePositions[nextBlock.id];
+                  const solid =
+                    getCanvasStatus(block, index) === "matched" &&
+                    getCanvasStatus(nextBlock, index + 1) === "matched";
+
+                  if (!from || !to) {
+                    return null;
+                  }
+
+                  return (
+                    <line
+                      className={solid ? "solid" : "dashed"}
+                      key={`${block.id}-${nextBlock.id}`}
+                      x1={from.x + 286}
+                      x2={to.x + 4}
+                      y1={from.y + 131}
+                      y2={to.y + 131}
+                    />
+                  );
+                })}
+              </svg>
+            ) : null}
+
+            {blocks.map((block, index) => {
+              const pos = positions[block.id] ?? basePositions[block.id] ?? { x: 0, y: 0 };
+              const selected = selectedBlockId === block.id;
+              const image = generatedVideoThumbs[block.id] ?? imageForBlock(index);
+              const canvasStatus = getCanvasStatus(block, index);
+              const gap = needsCompletion(block, index);
+              const portTone = portColorByStatus[canvasStatus];
+              const aiCompleted = Boolean(generatedVideoThumbs[block.id]);
+              const playable = canvasStatus === "matched";
+              const isGeneratingVideo = canvasStatus === "generating";
+
+              return (
+                <article
+                  className={`figma-structure-card status-${canvasStatus} ${selected ? "selected" : ""} ${gap ? "gap" : ""} ${aiCompleted ? "ai-completed" : ""}`}
+                  key={block.id}
+                  onPointerDown={(event) => handlePointerDown(event, block.id)}
+                  onPointerMove={handlePointerMove}
+                  onPointerCancel={handlePointerUp}
+                  onPointerUp={handlePointerUp}
+                  style={{ transform: `translate(${pos.x}px, ${pos.y}px)` }}
+                >
+                  <div className="figma-card-label">
+                    <span aria-hidden="true" />
+                    <strong>{labelForBlock(block, index)}</strong>
+                  </div>
+                  <div className="figma-card-frame">
+                    <i className={`figma-port top ${portTone}`} aria-hidden="true" />
+                    <i className={`figma-port left ${portTone}`} aria-hidden="true" />
+                    <i className={`figma-port right ${portTone}`} aria-hidden="true" />
+                    {isGeneratingVideo ? (
+                      <div className="figma-generating-state">
+                        <span aria-hidden="true" />
+                        <strong>Generating</strong>
+                      </div>
+                    ) : gap ? (
+                      <div className="figma-gap-card">
+                        <p>
+                          缺少必要素材，
+                          <br />
+                          试试AI补齐吧！
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <img alt={labelForBlock(block, index)} src={image} />
+                        {playable ? (
+                          <button
+                            type="button"
+                            className="figma-play-overlay"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setPlaybackBlockId(block.id);
+                            }}
+                            title="播放视频"
+                          >
+                            <span aria-hidden="true" />
+                          </button>
+                        ) : null}
+                        {aiCompleted ? <em className="figma-ai-complete-tag">AI</em> : null}
+                        {aiCompleted ? (
+                          <button
+                            type="button"
+                            className="figma-ai-edit-button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              onSelectBlock(block.id);
+                              setActiveEditorBlockId(block.id);
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            title="返回编辑"
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 24 24">
+                              <path d="M12 20h9" />
+                              <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+                            </svg>
+                            <span>返回编辑</span>
+                          </button>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+
+            {editorBlock && editorPosition && editorStatus ? (
+              <aside
+                className="figma-gap-editor"
+                style={{
+                  transform: `translate(${Math.max(24, editorPosition.x - 225)}px, ${
+                    editorPosition.y + 261
+                  }px)`
+                }}
+              >
+                <div className="figma-gap-editor-body">
+                  <section className="figma-editor-column keyframe">
+                    <p className="figma-editor-label">生成满意的关键帧</p>
+                    <div className="figma-prompt-frame">
+                      {selectedKeyframes[editorBlock.id] ? (
+                        <div className="figma-selected-keyframe">
+                          <img alt="已选择关键帧" src={selectedKeyframes[editorBlock.id]} />
+                          <div className="figma-selected-keyframe-actions">
+                            <span>已选择</span>
+                            <button type="button" onClick={() => openCandidateSelector(editorBlock.id)}>
+                              重新选择
+                            </button>
+                          </div>
+                        </div>
+                      ) : keyframeCandidates[editorBlock.id]?.length ? (
+                        <div className="figma-keyframe-result">
+                          <button
+                            type="button"
+                            className="figma-keyframe-thumbs"
+                            onClick={() => openCandidateSelector(editorBlock.id)}
+                            title="查看候选关键帧"
+                          >
+                            {keyframeCandidates[editorBlock.id].map((imageUrl, imageIndex) => (
+                              <img alt={`关键帧缩略图 ${imageIndex + 1}`} key={imageUrl} src={imageUrl} />
+                            ))}
+                          </button>
+                          <button
+                            type="button"
+                            className="figma-prompt-action compact"
+                            disabled={keyframeLoadingBlockId === editorBlock.id}
+                            onClick={() => generateKeyframeCandidates(editorBlock.id)}
+                          >
+                            {keyframeLoadingBlockId === editorBlock.id ? "生成中" : "重新生成"}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="figma-keyframe-empty">
+                          <textarea
+                            className="figma-prompt-textarea"
+                            onChange={(event) =>
+                              setKeyframePrompts((current) => ({
+                                ...current,
+                                [editorBlock.id]: event.target.value
+                              }))
+                            }
+                            value={getKeyframePrompt(editorBlock, editorIndex)}
+                          />
+                          <button
+                            type="button"
+                            className="figma-prompt-action"
+                            disabled={keyframeLoadingBlockId === editorBlock.id}
+                            onClick={() => generateKeyframeCandidates(editorBlock.id)}
+                          >
+                            {keyframeLoadingBlockId === editorBlock.id ? "生成中" : "生成图片"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="figma-editor-column video">
+                    <p className="figma-editor-label">视频生成prompt</p>
+                    <div className="figma-prompt-frame video">
+                      <textarea
+                        className="figma-prompt-textarea"
+                        onChange={(event) =>
+                          setVideoPrompts((current) => ({
+                            ...current,
+                            [editorBlock.id]: event.target.value
+                          }))
+                        }
+                        value={getVideoPrompt(editorBlock, editorIndex)}
+                      />
+                    </div>
+                  </section>
+                </div>
+                <div className="figma-gap-editor-footer">
+                  <button
+                    type="button"
+                    className="figma-generate-video-button"
+                    disabled={!getVideoPrompt(editorBlock, editorIndex).trim() || generatingVideoBlockId !== null}
+                    onClick={() => generateVideo(editorBlock, editorIndex)}
+                  >
+                    <span aria-hidden="true">✦</span>
+                    AI生成
+                  </button>
+                </div>
+              </aside>
+            ) : null}
+          </div>
+        </div>
       </div>
 
-      {/* Dynamic Editing Panel below or beside */}
-      {selectedBlock && (
-        <div className="content-card editing-detail-panel" style={{ marginTop: "18px" }}>
-          <div className="section-heading" style={{ marginBottom: "12px" }}>
-            <div>
-              <span className="eyebrow">{readableSlot(selectedBlock)}</span>
-              <h2>{selectedBlock.status === "matched" ? "🔒 结构块已锁定" : "🛠️ 补全详情编辑"}</h2>
-            </div>
-            <StatusBadge status={selectedBlock.status} />
-          </div>
+      <div className="figma-zoom-control" aria-label="缩放比例">
+        <button type="button" onClick={resetViewport} title="重置画布">
+          复位
+        </button>
+        <input
+          aria-label="缩放百分比"
+          inputMode="numeric"
+          onBlur={commitZoomDraft}
+          onChange={(event) => setZoomDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+          value={zoomDraft}
+        />
+        <span>%</span>
+      </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1.5fr", gap: "20px" }}>
-            <div>
-              <p style={{ color: "var(--text-muted)", fontSize: "13px", marginBottom: "8px" }}>
-                <strong>目标: </strong>{readableGoal(selectedBlock)}
-              </p>
-              {selectedBlock.gap ? (
-                <div style={{ background: "rgba(0,0,0,0.15)", padding: "10px", borderRadius: "var(--radius)" }}>
-                  <h4 style={{ color: "var(--theme)", margin: "0 0 4px", fontSize: "13px" }}>⚠️ 素材缺口: {selectedBlock.gap.missing}</h4>
-                  <p style={{ margin: "0", fontSize: "12px", color: "var(--text-muted)" }}>{selectedBlock.gap.impact}</p>
+      {showHelp ? (
+        <aside className="figma-help-popover">
+          <strong>画布状态</strong>
+          <span>
+            绿色表示已完成，红色表示缺必要输入，黄色表示时长不足。缺失块可单击打开补齐面板。
+          </span>
+          <span>需要补齐的块与前后结构连接为虚线；空白处可拖动画布，滚轮可缩放。</span>
+          <button type="button" onClick={() => setShowHelp(false)}>
+            关闭
+          </button>
+        </aside>
+      ) : null}
+
+      {selectorBlock && selectorBlockId ? (
+        <div className="figma-ai-modal" role="dialog" aria-modal="true" aria-label="选择关键帧图片">
+          <div className="figma-keyframe-modal-panel">
+            <aside className="figma-keyframe-modal-sidebar">
+              <div className="figma-ai-modal-head">
+                <div>
+                  <span>关键帧 Prompt</span>
+                  <h2>{labelForBlock(selectorBlock, selectorIndex)}</h2>
                 </div>
-              ) : (
-                <div style={{ background: "rgba(52, 183, 122, 0.1)", padding: "10px", borderRadius: "var(--radius)", color: "var(--matched)", fontSize: "13px" }}>
-                  ✓ 状态完备。已成功对接对应素材，锁定编辑。
-                </div>
-              )}
-            </div>
-
-            {selectedBlock.gap && (
-              <div style={{ borderLeft: "1px solid var(--line)", paddingLeft: "20px" }}>
-                <div style={{ display: "flex", gap: "10px", marginBottom: "12px" }}>
-                  <button
-                    type="button"
-                    className={`primary-action ${connectedSupplements[selectedBlock.id] ? "active-toggle" : ""}`}
-                    onClick={() => toggleConnectSupplement(selectedBlock.id)}
-                    style={{
-                      background: connectedSupplements[selectedBlock.id] ? "var(--matched)" : "var(--panel-soft)",
-                      border: "1px solid var(--line)",
-                      color: "#ffffff"
-                    }}
-                  >
-                    {connectedSupplements[selectedBlock.id] ? "已连接补充卡片" : "连接补充卡片"}
-                  </button>
-
-                  <button
-                    type="button"
-                    className="primary-action"
-                    disabled={generatingSlotId !== null || !connectedSupplements[selectedBlock.id] || selectedBlock.status === "matched"}
-                    onClick={() => handleTriggerAiGeneration(selectedBlock.id)}
-                  >
-                    {generatingSlotId === selectedBlock.id ? "AIGC 生成中..." : "AI 生成素材"}
-                  </button>
-                </div>
-
-                {connectedSupplements[selectedBlock.id] && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <label style={{ fontSize: "12px", color: "var(--text-muted)" }}>修改AI提示词 (Prompt):</label>
-                    <input
-                      type="text"
-                      className="migration-input"
-                      style={{ textAlign: "left", fontSize: "13px" }}
-                      defaultValue={
-                        selectedBlock.id === "slot_01"
-                          ? "新手买猫粮警示画面，大字警告，3D质感"
-                          : selectedBlock.id === "slot_04"
-                          ? "成分对比卡片，横向网格，扁平化现代UI"
-                          : "结尾猫咪吃粮引导关注，暖色调，评论条"
-                      }
-                    />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* AI Image Grid Selector Modal */}
-      {showAiSelector && (
-        <div className="ai-selector-modal" style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.85)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 100
-        }}>
-          <div style={{
-            background: "var(--panel)",
-            border: "1px solid var(--line)",
-            borderRadius: "var(--radius)",
-            padding: "24px",
-            maxWidth: "520px",
-            width: "90%",
-            boxShadow: "0 20px 50px rgba(0,0,0,0.6)"
-          }}>
-            <h3 style={{ margin: "0 0 8px", color: "var(--text-strong)" }}>AIGC 4选1 智能物料生成</h3>
-            <p style={{ color: "var(--text-muted)", fontSize: "13px", margin: "0 0 16px" }}>AI 一次性为您生成了4张拼贴与包装卡片方案。请点击选择其中一张作为新素材的主图：</p>
-            
-            <div className="ai-image-grid" style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: "12px",
-              marginBottom: "20px"
-            }}>
-              {mockAiImages.map((url, i) => (
                 <button
-                  key={url}
                   type="button"
-                  onClick={() => handleSelectAiImage(url)}
-                  style={{
-                    background: "none",
-                    border: "2px solid transparent",
-                    borderRadius: "6px",
-                    padding: "0",
-                    overflow: "hidden",
-                    cursor: "pointer",
-                    transition: "border-color 0.2s"
+                  onClick={() => {
+                    setSelectorBlockId(null);
+                    setSelectedCandidateUrl(null);
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--theme)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = "transparent")}
+                  aria-label="关闭"
                 >
-                  <img src={url} alt={`Option ${i + 1}`} style={{ width: "100%", height: "140px", objectFit: "cover", display: "block" }} />
+                  ×
                 </button>
-              ))}
+              </div>
+              <textarea
+                className="figma-keyframe-modal-prompt"
+                onChange={(event) =>
+                  setKeyframePrompts((current) => ({
+                    ...current,
+                    [selectorBlockId]: event.target.value
+                  }))
+                }
+                value={getKeyframePrompt(selectorBlock, selectorIndex)}
+              />
+              <button
+                type="button"
+                className="figma-prompt-action modal"
+                disabled={keyframeLoadingBlockId === selectorBlockId}
+                onClick={() => generateKeyframeCandidates(selectorBlockId)}
+              >
+                {keyframeLoadingBlockId === selectorBlockId ? "生成中" : "重新生成"}
+              </button>
+            </aside>
+            <div className="figma-keyframe-modal-grid">
+              {selectorCandidates.map((imageUrl, index) => {
+                const selected = selectedCandidateUrl === imageUrl;
+                return (
+                  <div className="figma-keyframe-choice" key={`${imageUrl}-${index}`}>
+                    <button
+                      type="button"
+                      className={`figma-keyframe-choice-button ${selected ? "is-selected" : ""}`}
+                      onClick={() => setSelectedCandidateUrl(imageUrl)}
+                    >
+                      <img alt={`候选关键帧 ${index + 1}`} src={imageUrl} />
+                      {selected ? <span className="figma-candidate-check">✓</span> : null}
+                    </button>
+                    {selected ? (
+                      <div className="figma-candidate-confirm">
+                        <p>确认选择该图片作为关键帧吗？</p>
+                        <button type="button" onClick={confirmCandidate}>
+                          确认
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
-
-            <button
-              type="button"
-              className="primary-action"
-              style={{ width: "100%" }}
-              onClick={() => setShowAiSelector(false)}
-            >
-              取消
-            </button>
           </div>
         </div>
-      )}
+      ) : null}
+
+      {playbackBlockId ? (
+        <div className="figma-playback-modal" role="dialog" aria-modal="true" aria-label="视频播放预览">
+          <div className="figma-playback-panel">
+            <div className="figma-ai-modal-head">
+              <div>
+                <span>视频预览</span>
+                <h2>
+                  {labelForBlock(
+                    blocks.find((block) => block.id === playbackBlockId) ?? blocks[0],
+                    blocks.findIndex((block) => block.id === playbackBlockId)
+                  )}
+                </h2>
+              </div>
+              <button type="button" onClick={() => setPlaybackBlockId(null)} aria-label="关闭">
+                ×
+              </button>
+            </div>
+            <div className="figma-video-placeholder">
+              <span aria-hidden="true" />
+              <strong>播放接口待接入</strong>
+              <p>这里预留后端视频 URL 接入点；拿到生成结果后可替换为真实 video 播放。</p>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedBlock ? (
+        <div className="figma-canvas-status" aria-live="polite">
+          {(() => {
+            const index = blocks.findIndex((block) => block.id === selectedBlock.id);
+            const status = getCanvasStatus(selectedBlock, index);
+            return (
+              <>
+                <span>{labelForBlock(selectedBlock, index)}</span>
+                <strong>{statusTextFor(status, Boolean(generatedVideoThumbs[selectedBlock.id]))}</strong>
+              </>
+            );
+          })()}
+        </div>
+      ) : null}
     </section>
   );
 };

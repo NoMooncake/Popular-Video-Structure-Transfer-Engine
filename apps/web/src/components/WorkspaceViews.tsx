@@ -1239,11 +1239,11 @@ const StructureMigrationView = ({
 
 const GapFillView = ({
   blocks,
-  onNext,
   onSelectBlock,
   onUpdateBlock,
   onStepChange,
-  selectedBlockId
+  selectedBlockId,
+  projectName
 }: {
   blocks: CanvasBlock[];
   onNext: () => void;
@@ -1254,43 +1254,16 @@ const GapFillView = ({
   projectName?: string;
 }) => {
   return (
-    <div className="page-shell gap-fill-page">
-      <CanvasTopBar
-        actionLabel="查看缺口"
-        activeStep="gap-fill"
-        onNext={onNext}
-        onStepChange={onStepChange}
-        subtitle="每个结构槽位变成一个视频块，红/黄/绿表示匹配状态；只有绿色到绿色的连接为实线。"
-        title="缺口补全"
+    <div className="gap-fill-page">
+      <VideoBlockCanvas
+        blocks={blocks}
+        onBack={() => onStepChange("migration")}
+        onExport={() => onStepChange("demo")}
+        onSelectBlock={onSelectBlock}
+        onUpdateBlock={onUpdateBlock}
+        projectName={projectName}
+        selectedBlockId={selectedBlockId}
       />
-      <section className="gap-fill-layout">
-        <VideoBlockCanvas
-          blocks={blocks}
-          onSelectBlock={onSelectBlock}
-          onUpdateBlock={onUpdateBlock}
-          selectedBlockId={selectedBlockId}
-        />
-        <aside className="content-card legend-card">
-          <div className="section-heading compact">
-            <div>
-              <span className="eyebrow">Legend</span>
-              <h2>匹配状态</h2>
-            </div>
-          </div>
-          <div className="legend-list">
-            <span>
-              <i className="legend-dot missing" /> 未成功匹配
-            </span>
-            <span>
-              <i className="legend-dot partial" /> 部分匹配
-            </span>
-            <span>
-              <i className="legend-dot matched" /> 已匹配
-            </span>
-          </div>
-          <p>点击视频块查看对应关系和可编辑的补全方式，复杂画布在小屏下会局部横向滚动。</p>
-        </aside>
-      </section>
     </div>
   );
 };
