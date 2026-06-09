@@ -1069,9 +1069,11 @@ const buildSegmentAwareMaterialCoverage = (
     const baseVideoPrompt = asJsonObject(base.recommended_video_prompt);
     const baseImagePrompt = asJsonObject(base.recommended_aigc_prompt);
     const recommendedVideoPrompt =
-      normalizeOptionalString(baseVideoPrompt.prompt)
-        ? baseVideoPrompt
-        : getCanvasFallbackVideoPrompt(session, slot, missingDuration || rawMissingDuration);
+      frontendCoverageStatus !== "fully_matched"
+        ? getCanvasFallbackVideoPrompt(session, slot, missingDuration || rawMissingDuration)
+        : normalizeOptionalString(baseVideoPrompt.prompt)
+          ? baseVideoPrompt
+          : getCanvasFallbackVideoPrompt(session, slot, missingDuration || rawMissingDuration);
     const recommendedAigcPrompt =
       normalizeOptionalString(baseImagePrompt.prompt)
         ? baseImagePrompt

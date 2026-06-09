@@ -2284,6 +2284,10 @@ test(
       /冰红茶/
     );
     assert.match(
+      String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_video_prompt).prompt),
+      /目标补全时长约 1s/
+    );
+    assert.match(
       String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_aigc_prompt).prompt),
       /冰红茶/
     );
