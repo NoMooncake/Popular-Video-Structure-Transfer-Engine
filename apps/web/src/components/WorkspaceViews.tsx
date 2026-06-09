@@ -3,12 +3,19 @@ import type { ChangeEvent, KeyboardEvent } from "react";
 
 import type { WorkflowRunResult } from "../App";
 import {
-  analyzeV2Pipeline,
   assembleV2CanvasFinalVideo,
+  analyzeV2Pipeline,
   assembleV2FinalVideo,
   createV2ScriptSession,
+  revalidateV2Canvas,
+  reorderV2ScriptSlots,
+  updateV2ScriptSlot,
   uploadMaterialFiles,
   uploadSampleVideos
+} from "../api/client";
+import type {
+  V2CanvasSession,
+  V2ScriptSession
 } from "../api/client";
 import {
   canvasBlocks as fallbackCanvasBlocks,
@@ -23,6 +30,7 @@ import type {
   SampleShot,
   StepKey,
   StructureBlueprint,
+  V2CanvasFinalVideoResult,
   V2FinalAssemblySlot,
   UploadedVideoFile,
   V2PipelineResult,
@@ -39,9 +47,12 @@ type WorkspaceViewsProps = {
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onReorderBlocks: (orderedIds: string[]) => void;
   onStepChange: (step: StepKey) => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   onWorkflowReady: (result: WorkflowRunResult) => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  canvasSession?: V2CanvasSession;
+  scriptSession?: V2ScriptSession;
   selectedBlock: CanvasBlock;
   selectedBlockId: string;
   structureBlueprint?: StructureBlueprint;
@@ -203,6 +214,26 @@ const readTextAssets = async (files: File[]) => {
   );
 };
 
+const parseDurationSeconds = (value: string): number | undefined => {
+  const rangeMatch = value.match(
+    /(\d+(?:\.\d+)?)\s*(?:-|~|–|—|到|至)\s*(\d+(?:\.\d+)?)/u
+  );
+  if (rangeMatch) {
+    const startSeconds = Number(rangeMatch[1]);
+    const endSeconds = Number(rangeMatch[2]);
+    const durationSeconds = endSeconds - startSeconds;
+
+    return durationSeconds > 0 ? Number(durationSeconds.toFixed(3)) : undefined;
+  }
+
+  const singleMatch = value.match(/(\d+(?:\.\d+)?)/u);
+  const durationSeconds = Number(singleMatch?.[1]);
+
+  return Number.isFinite(durationSeconds) && durationSeconds > 0
+    ? Number(durationSeconds.toFixed(3))
+    : undefined;
+};
+
 export const WorkspaceViews = ({
   activeStep,
   blocks,
@@ -211,9 +242,12 @@ export const WorkspaceViews = ({
   onUpdateBlock,
   onReorderBlocks,
   onStepChange,
+  onWorkflowPatch,
   onWorkflowReady,
   sampleAnalysis,
   sampleFile,
+  canvasSession,
+  scriptSession,
   selectedBlock,
   selectedBlockId,
   structureBlueprint,
@@ -254,8 +288,10 @@ export const WorkspaceViews = ({
         onUpdateBlock={onUpdateBlock}
         onReorderBlocks={onReorderBlocks}
         onStepChange={onStepChange}
+        onWorkflowPatch={onWorkflowPatch}
         projectName={projectName}
         onProjectNameChange={onProjectNameChange}
+        scriptSession={scriptSession}
       />
     );
   }
@@ -268,7 +304,10 @@ export const WorkspaceViews = ({
         onSelectBlock={onSelectBlock}
         onUpdateBlock={onUpdateBlock}
         onStepChange={onStepChange}
+        onWorkflowPatch={onWorkflowPatch}
         selectedBlockId={selectedBlockId}
+        canvasSession={canvasSession}
+        scriptSession={scriptSession}
         projectName={projectName}
       />
     );
@@ -1023,16 +1062,20 @@ const StructureMigrationView = ({
   onUpdateBlock,
   onReorderBlocks,
   onStepChange,
+  onWorkflowPatch,
   projectName,
-  onProjectNameChange
+  onProjectNameChange,
+  scriptSession
 }: {
   blocks: CanvasBlock[];
   materialFiles: UploadedVideoFile[];
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onReorderBlocks: (orderedIds: string[]) => void;
   onStepChange: (step: StepKey) => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   projectName?: string;
   onProjectNameChange?: (name: string) => void;
+  scriptSession?: V2ScriptSession;
 }) => {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [ttsStatus, setTtsStatus] = useState<Record<string, "idle" | "loading" | "success">>({});
@@ -1063,7 +1106,31 @@ const StructureMigrationView = ({
     }, 1500);
   };
 
-  const handleDrop = (targetId: string) => {
+  const syncScriptSlot = async (
+    block: CanvasBlock,
+    payload: {
+      required_duration?: number;
+      voiceover_text?: string;
+      copy?: string;
+    }
+  ) => {
+    if (!scriptSession) {
+      return;
+    }
+
+    try {
+      const nextSession = await updateV2ScriptSlot(
+        scriptSession.session_id,
+        block.id,
+        payload
+      );
+      onWorkflowPatch({ scriptSession: nextSession });
+    } catch (error) {
+      console.warn("V2 script slot sync failed.", error);
+    }
+  };
+
+  const handleDrop = async (targetId: string) => {
     if (!dragId || dragId === targetId) {
       setDragId(null);
       setDropTargetId(null);
@@ -1079,8 +1146,37 @@ const StructureMigrationView = ({
     }
     ids.splice(to, 0, ids.splice(from, 1)[0]);
     onReorderBlocks(ids);
+    if (scriptSession) {
+      try {
+        const nextSession = await reorderV2ScriptSlots(scriptSession.session_id, ids);
+        onWorkflowPatch({ scriptSession: nextSession });
+      } catch (error) {
+        console.warn("V2 script slot reorder failed.", error);
+      }
+    }
     setDragId(null);
     setDropTargetId(null);
+  };
+
+  const enterCanvas = async () => {
+    if (!scriptSession) {
+      onStepChange("gap-fill");
+      return;
+    }
+
+    try {
+      const revalidateResult = await revalidateV2Canvas({
+        session_id: scriptSession.session_id,
+        persist_canvas_session: true
+      });
+      onWorkflowPatch({
+        canvasRevalidateResult: revalidateResult,
+        canvasSession: revalidateResult.canvas_session
+      });
+    } catch (error) {
+      console.warn("V2 canvas revalidate failed.", error);
+    }
+    onStepChange("gap-fill");
   };
 
   const stopDrag = (event: { stopPropagation: () => void }) => event.stopPropagation();
@@ -1139,7 +1235,7 @@ const StructureMigrationView = ({
           <button
             type="button"
             className="migration-nav-button migration-nav-forward"
-            onClick={() => onStepChange("gap-fill")}
+            onClick={enterCanvas}
           >
             <span>进入画布</span>
             <span aria-hidden="true">›</span>
@@ -1208,6 +1304,12 @@ const StructureMigrationView = ({
                         onChange={(event) =>
                           onUpdateBlock({ ...block, timeRange: event.target.value })
                         }
+                        onBlur={(event) => {
+                          const requiredDuration = parseDurationSeconds(event.target.value);
+                          if (requiredDuration) {
+                            syncScriptSlot(block, { required_duration: requiredDuration });
+                          }
+                        }}
                         placeholder="3s"
                       />
                     </div>
@@ -1253,6 +1355,12 @@ const StructureMigrationView = ({
                               };
                           onUpdateBlock({ ...block, timeline: updatedTimeline });
                         }}
+                        onBlur={(event) => {
+                          syncScriptSlot(block, {
+                            copy: event.target.value,
+                            voiceover_text: event.target.value
+                          });
+                        }}
                         placeholder="输入旁白文本..."
                         rows={2}
                       />
@@ -1290,27 +1398,62 @@ const StructureMigrationView = ({
 };
 
 const GapFillView = ({
+  canvasSession,
   blocks,
   onSelectBlock,
   onUpdateBlock,
   onStepChange,
+  onWorkflowPatch,
   selectedBlockId,
+  scriptSession,
   projectName
 }: {
+  canvasSession?: V2CanvasSession;
   blocks: CanvasBlock[];
   onNext: () => void;
   onSelectBlock: (blockId: string) => void;
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onStepChange: (step: StepKey) => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   selectedBlockId: string;
+  scriptSession?: V2ScriptSession;
   projectName?: string;
 }) => {
+  const exportFinalVideo = async () => {
+    if (!canvasSession) {
+      onStepChange("demo");
+      return;
+    }
+
+    try {
+      const finalVideo = await assembleV2CanvasFinalVideo(
+        canvasSession.canvas_session_id,
+        {
+          generate_bgm: true
+        }
+      );
+      onWorkflowPatch({
+        canvasSession: finalVideo.canvas_session,
+        canvasSessionId: finalVideo.canvas_session?.canvas_session_id,
+        finalAssembly: finalVideo.final_assembly,
+        finalVideo
+      });
+    } catch (error) {
+      console.warn("V2 final assembly failed.", error);
+    }
+    onStepChange("demo");
+  };
+
   return (
     <div className="gap-fill-page">
       <VideoBlockCanvas
         blocks={blocks}
+        canvasSessionId={canvasSession?.canvas_session_id}
         onBack={() => onStepChange("migration")}
-        onExport={() => onStepChange("demo")}
+        onCanvasSessionChange={(nextCanvasSession) =>
+          onWorkflowPatch({ canvasSession: nextCanvasSession })
+        }
+        onExport={exportFinalVideo}
         onSelectBlock={onSelectBlock}
         onUpdateBlock={onUpdateBlock}
         projectName={projectName}
@@ -1793,12 +1936,16 @@ const DemoView = ({
 
 const LegacyDemoView = ({
   blocks,
+  finalVideoResult,
   onStepChange
 }: {
   blocks: CanvasBlock[];
+  finalVideoResult?: V2CanvasFinalVideoResult;
   onStepChange: (step: StepKey) => void;
   projectName?: string;
 }) => {
+  const finalVideoUrl = finalVideoResult?.final_assembly?.final_video_url;
+
   return (
     <div className="page-shell demo-page">
       <CanvasTopBar
@@ -1812,11 +1959,15 @@ const LegacyDemoView = ({
 
       <section className="demo-layout">
         <div className="video-preview">
-          <div className="preview-canvas">
-            <span>新手养猫怎么选猫粮</span>
-            <strong>别盲买猫粮</strong>
-            <p>结构迁移预览</p>
-          </div>
+          {finalVideoUrl ? (
+            <video className="preview-canvas" controls src={finalVideoUrl} />
+          ) : (
+            <div className="preview-canvas">
+              <span>新手养猫怎么选猫粮</span>
+              <strong>别盲买猫粮</strong>
+              <p>结构迁移预览</p>
+            </div>
+          )}
           <div className="scrubber">
             <span />
           </div>
@@ -1837,7 +1988,15 @@ const LegacyDemoView = ({
             <span>标题包装</span>
             <strong>红色警示</strong>
           </div>
-          <button className="primary-action full" type="button">
+          <button
+            className="primary-action full"
+            onClick={() => {
+              if (finalVideoUrl) {
+                window.open(finalVideoUrl, "_blank", "noopener,noreferrer");
+              }
+            }}
+            type="button"
+          >
             导出结果
           </button>
         </aside>

@@ -2,9 +2,9 @@ import type {
   SampleAnalysis,
   StructureBlueprint,
   UploadResponse,
-  V2CanvasFinalVideoResult,
   V2FinalAssemblyRequest,
   V2FinalAssemblyResult,
+  V2MaterialCoverageSlot,
   V2PipelineResult
 } from "../types";
 
@@ -260,6 +260,88 @@ export type V2ScriptSession = {
   }>;
 };
 
+export type V2CanvasNode = {
+  node_id: string;
+  node_type:
+    | "script_slot"
+    | "material_segment"
+    | "missing_material"
+    | "video_prompt"
+    | "image_prompt"
+    | "image_candidate"
+    | "generated_video";
+  slot_id?: string;
+  segment_id?: string;
+  display_order?: number;
+  position?: Record<string, unknown>;
+  data: Record<string, unknown>;
+};
+
+export type V2CanvasEdge = {
+  edge_id: string;
+  source_node_id: string;
+  target_node_id: string;
+  edge_type:
+    | "sequence"
+    | "fills_slot"
+    | "has_gap"
+    | "prompt_to_gap"
+    | "image_to_gap"
+    | "generated_video_to_gap";
+  data?: Record<string, unknown>;
+};
+
+export type V2CanvasSession = {
+  canvas_session_id: string;
+  script_session_id: string;
+  created_at: string;
+  updated_at: string;
+  target_duration_seconds: number;
+  nodes: V2CanvasNode[];
+  edges: V2CanvasEdge[];
+  source: Record<string, unknown>;
+};
+
+export type V2CanvasRevalidateResult = {
+  session_id: string;
+  target_duration_seconds: number;
+  script_slots: V2ScriptSession["slots"];
+  material_coverage: {
+    slot_coverage: V2MaterialCoverageSlot[];
+    [key: string]: unknown;
+  };
+  canvas_session?: V2CanvasSession;
+  canvas_session_id?: string;
+  cover_plan?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type V2CanvasImageCandidateResponse = {
+  canvas_session: V2CanvasSession;
+  image_generation_result: Record<string, unknown>;
+  image_candidate_nodes: V2CanvasNode[];
+};
+
+export type V2CanvasGapVideoResponse = {
+  canvas_session: V2CanvasSession;
+  generated_video_node: V2CanvasNode;
+  edge: V2CanvasEdge;
+  generation_result: Record<string, unknown>;
+};
+
+export type V2CanvasFinalVideoResponse = {
+  canvas_session: V2CanvasSession;
+  assembly_slots: Record<string, unknown>[];
+  cover_plan: Record<string, unknown>;
+  final_assembly: {
+    assembly_id: string;
+    final_video_url?: string;
+    final_video_path?: string;
+    final_duration_seconds?: number;
+    [key: string]: unknown;
+  };
+};
+
 export const getV2Status = async <T = unknown>(): Promise<T> => {
   return toJson<T>(await fetch("/api/v2/status"));
 };
@@ -285,6 +367,122 @@ export const createV2ScriptSession = async (payload: {
 }): Promise<V2ScriptSession> => {
   return toJson<V2ScriptSession>(
     await fetch("/api/v2/script-sessions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const updateV2ScriptSlot = async (
+  sessionId: string,
+  slotId: string,
+  payload: {
+    required_duration?: number;
+    duration_seconds?: number;
+    duration?: number;
+    voiceover_text?: string;
+    copy?: string;
+  }
+): Promise<V2ScriptSession> => {
+  return toJson<V2ScriptSession>(
+    await fetch(`/api/v2/script-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const reorderV2ScriptSlots = async (
+  sessionId: string,
+  slotIds: string[]
+): Promise<V2ScriptSession> => {
+  return toJson<V2ScriptSession>(
+    await fetch(`/api/v2/script-sessions/${encodeURIComponent(sessionId)}/slot-order`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        slot_ids: slotIds
+      })
+    })
+  );
+};
+
+export const revalidateV2Canvas = async (payload: {
+  session_id: string;
+  accepted_duration_short_slots?: string[];
+  persist_canvas_session?: boolean;
+  extract_frames?: boolean;
+  refine_segments?: boolean;
+  use_multimodal_provider?: boolean;
+}): Promise<V2CanvasRevalidateResult> => {
+  return toJson<V2CanvasRevalidateResult>(
+    await fetch("/api/v2/canvas/revalidate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const generateV2CanvasImageCandidates = async (
+  canvasSessionId: string,
+  payload: {
+    slot_id: string;
+    prompt?: string;
+    count?: number;
+    allow_fallback?: boolean;
+    use_image_provider?: boolean;
+  }
+): Promise<V2CanvasImageCandidateResponse> => {
+  return toJson<V2CanvasImageCandidateResponse>(
+    await fetch(`/api/v2/canvas-sessions/${encodeURIComponent(canvasSessionId)}/image-candidates`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const generateV2CanvasGapVideo = async (
+  canvasSessionId: string,
+  payload: {
+    slot_id: string;
+    approved_image_uri?: string;
+    video_prompt?: string;
+    duration_seconds?: number;
+    allow_fallback?: boolean;
+    use_video_provider?: boolean;
+  }
+): Promise<V2CanvasGapVideoResponse> => {
+  return toJson<V2CanvasGapVideoResponse>(
+    await fetch(`/api/v2/canvas-sessions/${encodeURIComponent(canvasSessionId)}/gap-video`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const assembleV2CanvasFinalVideo = async (
+  canvasSessionId: string,
+  payload: Omit<V2FinalAssemblyRequest, "slots"> = {}
+): Promise<V2CanvasFinalVideoResponse> => {
+  return toJson<V2CanvasFinalVideoResponse>(
+    await fetch(`/api/v2/canvas-sessions/${encodeURIComponent(canvasSessionId)}/final-video`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -327,21 +525,6 @@ export const assembleV2FinalVideo = async (
 ): Promise<V2FinalAssemblyResult> => {
   return toJson<V2FinalAssemblyResult>(
     await fetch("/api/v2/assembly/final-video", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(payload)
-    })
-  );
-};
-
-export const assembleV2CanvasFinalVideo = async (
-  canvasSessionId: string,
-  payload: Omit<V2FinalAssemblyRequest, "slots">
-): Promise<V2CanvasFinalVideoResult> => {
-  return toJson<V2CanvasFinalVideoResult>(
-    await fetch(`/api/v2/canvas-sessions/${encodeURIComponent(canvasSessionId)}/final-video`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

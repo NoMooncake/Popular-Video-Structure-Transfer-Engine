@@ -174,11 +174,10 @@ const toV2TimelineItem = (
   transition: "none"
 });
 
-export const createCanvasBlocksFromV2Pipeline = (
-  pipelineResult: V2PipelineResult
+export const createCanvasBlocksFromV2Coverage = (
+  slots: V2MaterialCoverageSlot[],
+  sourceId?: string
 ): CanvasBlock[] => {
-  const slots = pipelineResult.stages.material_coverage.slot_coverage;
-
   return slots.map((slot) => {
     const timeRange = formatV2Duration(slot);
     const gap = toV2Gap(slot);
@@ -201,11 +200,18 @@ export const createCanvasBlocksFromV2Pipeline = (
       timeline,
       v2: {
         coverageSlot: slot,
-        sourcePipelineId: pipelineResult.id
+        sourcePipelineId: sourceId
       }
     };
   });
 };
+
+export const createCanvasBlocksFromV2Pipeline = (
+  pipelineResult: V2PipelineResult
+): CanvasBlock[] => createCanvasBlocksFromV2Coverage(
+  pipelineResult.stages.material_coverage.slot_coverage,
+  pipelineResult.id
+);
 
 export const canvasBlocks: CanvasBlock[] = createCanvasBlocks(structureBlueprint);
 

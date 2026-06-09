@@ -5,6 +5,7 @@ import { WorkspaceViews } from "./components/WorkspaceViews";
 import {
   canvasBlocks as fallbackCanvasBlocks,
   createCanvasBlocks,
+  createCanvasBlocksFromV2Coverage,
   createCanvasBlocksFromV2Pipeline
 } from "./data/workflow";
 import type {
@@ -17,16 +18,21 @@ import type {
   UploadedVideoFile,
   V2PipelineResult
 } from "./types";
-import type { V2ScriptSession } from "./api/client";
+import type {
+  V2CanvasRevalidateResult,
+  V2CanvasSession,
+  V2ScriptSession
+} from "./api/client";
 
 export type WorkflowRunResult = {
-  canvasSession?: Record<string, unknown>;
   canvasSessionId?: string;
   finalAssembly?: V2FinalAssemblyResult;
   finalVideo?: V2CanvasFinalVideoResult;
   materialFiles: UploadedVideoFile[];
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  canvasRevalidateResult?: V2CanvasRevalidateResult;
+  canvasSession?: V2CanvasSession;
   scriptSession?: V2ScriptSession;
   structureBlueprint?: StructureBlueprint;
   v2PipelineResult?: V2PipelineResult;
@@ -40,6 +46,16 @@ export const App = () => {
   const [projectName, setProjectName] = useState("未命名项目 01");
 
   useEffect(() => {
+    if (workflowResult?.canvasRevalidateResult) {
+      setBlocks(
+        createCanvasBlocksFromV2Coverage(
+          workflowResult.canvasRevalidateResult.material_coverage.slot_coverage,
+          workflowResult.canvasRevalidateResult.canvas_session_id
+        )
+      );
+      return;
+    }
+
     if (workflowResult?.v2PipelineResult) {
       setBlocks(createCanvasBlocksFromV2Pipeline(workflowResult.v2PipelineResult));
       return;
@@ -48,7 +64,11 @@ export const App = () => {
     if (workflowResult?.structureBlueprint) {
       setBlocks(createCanvasBlocks(workflowResult.structureBlueprint));
     }
-  }, [workflowResult]);
+  }, [
+    workflowResult?.canvasRevalidateResult,
+    workflowResult?.structureBlueprint,
+    workflowResult?.v2PipelineResult
+  ]);
 
   useEffect(() => {
     if (!blocks.some((block) => block.id === selectedBlockId)) {
@@ -79,6 +99,10 @@ export const App = () => {
     });
   };
 
+  const handleWorkflowPatch = (patch: Partial<WorkflowRunResult>) => {
+    setWorkflowResult((current) => (current ? { ...current, ...patch } : current));
+  };
+
   return (
     <AppShell>
       <main className={`workspace page-${activeStep}`}>
@@ -90,9 +114,12 @@ export const App = () => {
           onUpdateBlock={handleUpdateBlock}
           onReorderBlocks={handleReorderBlocks}
           onStepChange={setActiveStep}
+          onWorkflowPatch={handleWorkflowPatch}
           onWorkflowReady={setWorkflowResult}
           sampleAnalysis={workflowResult?.sampleAnalysis}
           sampleFile={workflowResult?.sampleFile}
+          canvasSession={workflowResult?.canvasSession}
+          scriptSession={workflowResult?.scriptSession}
           selectedBlock={selectedBlock}
           selectedBlockId={selectedBlockId}
           structureBlueprint={workflowResult?.structureBlueprint}

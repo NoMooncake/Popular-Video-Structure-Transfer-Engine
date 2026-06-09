@@ -1,10 +1,18 @@
 import { useMemo, useRef, useState } from "react";
-import { generateV2ImageCandidates, generateV2ImageToVideo } from "../api/client";
+import {
+  generateV2CanvasGapVideo,
+  generateV2CanvasImageCandidates,
+  generateV2ImageCandidates,
+  generateV2ImageToVideo
+} from "../api/client";
+import type { V2CanvasSession } from "../api/client";
 import type { CanvasBlock } from "../types";
 
 type VideoBlockCanvasProps = {
   blocks: CanvasBlock[];
+  canvasSessionId?: string;
   selectedBlockId: string;
+  onCanvasSessionChange?: (canvasSession: V2CanvasSession) => void;
   onSelectBlock: (blockId: string) => void;
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onBack?: () => void;
@@ -141,9 +149,24 @@ const extractGeneratedVideoUri = (response: unknown): string | undefined => {
   );
 };
 
+const hasCanvasSession = (response: unknown): response is { canvas_session: V2CanvasSession } =>
+  Boolean(asRecord(response).canvas_session);
+
+const getImageGenerationPayload = (response: unknown): unknown => {
+  const record = asRecord(response);
+  return record.image_generation_result ?? response;
+};
+
+const getVideoGenerationPayload = (response: unknown): unknown => {
+  const record = asRecord(response);
+  return record.generation_result ?? response;
+};
+
 export const VideoBlockCanvas = ({
   blocks,
+  canvasSessionId,
   selectedBlockId,
+  onCanvasSessionChange,
   onSelectBlock,
   onUpdateBlock,
   onBack,
@@ -454,16 +477,26 @@ export const VideoBlockCanvas = ({
       const prompt =
         block.v2?.coverageSlot?.recommended_aigc_prompt?.prompt ??
         getKeyframePrompt(block, blockIndex);
-      const response = await generateV2ImageCandidates({
-        prompt,
-        count: 4,
-        allow_fallback: true,
-        reference_video_uris:
-          block.v2?.coverageSlot?.direct_video_reference_materials
-            ?.map((material) => material.uri)
-            .filter((uri): uri is string => Boolean(uri)) ?? []
-      });
-      const generatedUris = extractImageCandidateUris(response);
+      const response: unknown = canvasSessionId
+        ? await generateV2CanvasImageCandidates(canvasSessionId, {
+            slot_id: block.id,
+            prompt,
+            count: 4,
+            allow_fallback: true
+          })
+        : await generateV2ImageCandidates({
+            prompt,
+            count: 4,
+            allow_fallback: true,
+            reference_video_uris:
+              block.v2?.coverageSlot?.direct_video_reference_materials
+                ?.map((material) => material.uri)
+                .filter((uri): uri is string => Boolean(uri)) ?? []
+          });
+      if (hasCanvasSession(response)) {
+        onCanvasSessionChange?.(response.canvas_session);
+      }
+      const generatedUris = extractImageCandidateUris(getImageGenerationPayload(response));
       setCandidateSeeds((current) => {
         const nextSeed = (current[blockId] ?? 0) + 1;
         setKeyframeCandidates((candidateMap) => ({
@@ -526,22 +559,34 @@ export const VideoBlockCanvas = ({
     setActiveEditorBlockId(null);
 
     try {
-      const response = await generateV2ImageToVideo({
-        approved_image_uri: payload.keyframe_image,
-        source_video_uri: payload.source_video_uri,
-        video_prompt: payload.video_prompt,
-        generation_mode: payload.keyframe_image ? "generated_image" : "direct_from_material_frame",
-        duration_seconds:
-          block.v2?.coverageSlot?.ai_completion_required_duration ??
-          block.v2?.coverageSlot?.required_duration ??
-          5,
-        slot_id: block.id,
-        slot_type: block.slot.slot_type,
-        slot_description: block.migrationResult,
-        allow_fallback: true
-      });
+      const durationSeconds =
+        block.v2?.coverageSlot?.ai_completion_required_duration ??
+        block.v2?.coverageSlot?.required_duration ??
+        5;
+      const response: unknown = canvasSessionId
+        ? await generateV2CanvasGapVideo(canvasSessionId, {
+            approved_image_uri: payload.keyframe_image,
+            duration_seconds: durationSeconds,
+            slot_id: block.id,
+            video_prompt: payload.video_prompt,
+            allow_fallback: true
+          })
+        : await generateV2ImageToVideo({
+            approved_image_uri: payload.keyframe_image,
+            source_video_uri: payload.source_video_uri,
+            video_prompt: payload.video_prompt,
+            generation_mode: payload.keyframe_image ? "generated_image" : "direct_from_material_frame",
+            duration_seconds: durationSeconds,
+            slot_id: block.id,
+            slot_type: block.slot.slot_type,
+            slot_description: block.migrationResult,
+            allow_fallback: true
+          });
+      if (hasCanvasSession(response)) {
+        onCanvasSessionChange?.(response.canvas_session);
+      }
       const generatedThumbnail =
-        extractGeneratedVideoUri(response) ??
+        extractGeneratedVideoUri(getVideoGenerationPayload(response)) ??
         payload.keyframe_image ??
         keyframeCandidates[block.id]?.[0] ??
         imageForBlock(index);
