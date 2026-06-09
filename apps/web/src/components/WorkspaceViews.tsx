@@ -780,13 +780,37 @@ const buildBackendSampleRows = (
 };
 
 const buildV2SampleRows = (table: V2ReferenceAnalysisTable): SampleAnalysisRow[] => {
-  return (table.rows ?? []).map((row, index) => ({
+  const rows = (table.rows ?? []).map((row, index) => ({
       duration: row.duration ?? "",
       image: row.sample_video?.media?.uri ?? "",
       shotTitle: row.shot_description?.title ?? `分镜 ${index + 1}`,
       shotDescription: row.shot_description?.description ?? "",
       migrationPossibility: row.migration_possibility ?? ""
     }));
+
+  if (rows.length > 0) {
+    return rows;
+  }
+
+  return (table.frames ?? []).map((frame, index, frames) => {
+    const nextFrame = frames[index + 1];
+    const startSeconds =
+      typeof frame.time_seconds === "number" && Number.isFinite(frame.time_seconds)
+        ? frame.time_seconds
+        : index;
+    const endSeconds =
+      typeof nextFrame?.time_seconds === "number" && nextFrame.time_seconds > startSeconds
+        ? nextFrame.time_seconds
+        : startSeconds + 1;
+
+    return {
+      duration: `${Number(startSeconds.toFixed(3))} - ${Number(endSeconds.toFixed(3))}s`,
+      image: frame.uri ?? "",
+      shotTitle: `分镜 ${index + 1}`,
+      shotDescription: "根据样例关键帧提取可迁移的画面节奏、构图和产品展示方式。",
+      migrationPossibility: "可迁移为新视频中相同结构位置的画面、节奏和商业说服表达。"
+    };
+  });
 };
 
 const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {

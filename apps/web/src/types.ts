@@ -205,6 +205,12 @@ export type V2ReferenceAnalysisTable = {
   sample_index?: number;
   file_id?: string;
   source_label?: string;
+  frames?: Array<{
+    frame_id?: string;
+    time_seconds?: number;
+    uri?: string;
+    source_label?: string;
+  }>;
   rows?: V2ReferenceAnalysisTableRow[];
 };
 

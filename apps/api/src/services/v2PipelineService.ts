@@ -694,6 +694,36 @@ const buildSummaryReferenceRows = (
   }));
 };
 
+const buildFrameFallbackReferenceRows = (
+  frames: V2ReferenceFrame[],
+  targetDuration: number
+): JsonObject[] => {
+  return frames.map((frame, index) => {
+    const frameCount = Math.max(1, frames.length);
+    const fallbackStart = (index / frameCount) * targetDuration;
+    const fallbackEnd = ((index + 1) / frameCount) * targetDuration;
+    const nextFrame = frames[index + 1];
+    const startSeconds =
+      Number.isFinite(frame.time_seconds) && frame.time_seconds >= 0
+        ? frame.time_seconds
+        : fallbackStart;
+    const endSeconds =
+      nextFrame && nextFrame.time_seconds > startSeconds
+        ? nextFrame.time_seconds
+        : Math.max(startSeconds + 0.8, fallbackEnd);
+
+    return {
+      row_id: `reference_frame_row_${String(index + 1).padStart(2, "0")}`,
+      start_seconds: Number(startSeconds.toFixed(3)),
+      end_seconds: Number(endSeconds.toFixed(3)),
+      title: `分镜 ${index + 1}`,
+      visual_description: "根据样例关键帧提取可迁移的画面节奏、构图和产品展示方式。",
+      migration_possibility: "可迁移为新视频中相同结构位置的画面、节奏和商业说服表达。",
+      frame_refs: [frame.frame_id]
+    };
+  });
+};
+
 export const buildV2ReferenceAnalysisTables = (
   analyses: JsonObject[],
   videoRefs: V2VideoRef[],
@@ -708,6 +738,8 @@ export const buildV2ReferenceAnalysisTables = (
       timelineRecords.length > 0
         ? timelineRecords
         : buildSummaryReferenceRows(analysis, targetDuration);
+    const effectiveRecords =
+      records.length > 0 ? records : buildFrameFallbackReferenceRows(frames, targetDuration);
 
     return {
       sample_index: index + 1,
@@ -721,13 +753,13 @@ export const buildV2ReferenceAnalysisTables = (
         uri: frame.public_uri,
         source_label: frame.source_label
       })),
-      rows: records.map((record, rowIndex) =>
+      rows: effectiveRecords.map((record, rowIndex) =>
         buildReferenceTableRow(
           analysis,
           record,
           frames,
           rowIndex,
-          records.length,
+          effectiveRecords.length,
           targetDuration
         )
       )
@@ -3571,9 +3603,9 @@ const callReferenceAnalysisWithFrameRetry = async (
     );
     const retryError = getV2ProviderErrorMessage(output);
 
-    if (isErroredV2ReferenceAnalysisOutput(output)) {
+    if (!hasV2ReferenceAnalysisContent(output)) {
       throw new V2ProviderExecutionError(
-        `reference video analysis failed after frames-only retry: ${retryError || reason}`
+        `reference video analysis returned no timeline after frames-only retry: ${retryError || reason}`
       );
     }
 
@@ -3605,11 +3637,11 @@ const callReferenceAnalysisWithFrameRetry = async (
       )
     );
 
-    if (!isErroredV2ReferenceAnalysisOutput(output)) {
+    if (hasV2ReferenceAnalysisContent(output) && !isErroredV2ReferenceAnalysisOutput(output)) {
       return { output };
     }
 
-    const reason = getV2ProviderErrorMessage(output) || "provider returned error output";
+    const reason = getV2ProviderErrorMessage(output) || "provider returned no reference timeline";
     return { output: await callFramesOnly(reason) };
   } catch (error) {
     const originalReason = sanitizeFallbackReason(error);
