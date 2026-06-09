@@ -1837,6 +1837,76 @@ const formatMaterialSegmentTimeRange = (segment: JsonObject): string | undefined
   return undefined;
 };
 
+type UsedV2MaterialRange = {
+  start_seconds: number;
+  end_seconds: number;
+  slot_id: string;
+  segment_id?: string;
+};
+
+const getMaterialSegmentRange = (
+  segment: JsonObject
+): { start_seconds: number; end_seconds: number } | undefined => {
+  const startSeconds = Number(segment.start_seconds);
+  const endSeconds = Number(segment.end_seconds);
+
+  if (Number.isFinite(startSeconds) && Number.isFinite(endSeconds) && endSeconds > startSeconds) {
+    return {
+      start_seconds: Number(startSeconds.toFixed(3)),
+      end_seconds: Number(endSeconds.toFixed(3))
+    };
+  }
+
+  return undefined;
+};
+
+const materialSegmentRangesOverlap = (
+  left: { start_seconds: number; end_seconds: number },
+  right: { start_seconds: number; end_seconds: number }
+): boolean => {
+  const overlapSeconds =
+    Math.min(left.end_seconds, right.end_seconds) -
+    Math.max(left.start_seconds, right.start_seconds);
+
+  return overlapSeconds > 0.05;
+};
+
+const isMaterialSegmentRangeAvailable = (
+  materialId: string,
+  segment: JsonObject,
+  usedRangesByMaterialId: Map<string, UsedV2MaterialRange[]>
+): boolean => {
+  const segmentRange = getMaterialSegmentRange(segment);
+  if (!segmentRange) {
+    return true;
+  }
+
+  const usedRanges = usedRangesByMaterialId.get(materialId) || [];
+  return !usedRanges.some((usedRange) =>
+    materialSegmentRangesOverlap(segmentRange, usedRange)
+  );
+};
+
+const markMaterialSegmentRangeUsed = (
+  materialId: string,
+  slotId: string,
+  segment: JsonObject,
+  usedRangesByMaterialId: Map<string, UsedV2MaterialRange[]>
+): void => {
+  const segmentRange = getMaterialSegmentRange(segment);
+  if (!segmentRange) {
+    return;
+  }
+
+  const usedRanges = usedRangesByMaterialId.get(materialId) || [];
+  usedRanges.push({
+    ...segmentRange,
+    slot_id: slotId,
+    segment_id: normalizeOptionalString(segment.segment_id)
+  });
+  usedRangesByMaterialId.set(materialId, usedRanges);
+};
+
 const normalizeSourceReferenceIndices = (value: unknown): number[] => {
   const rawValues = Array.isArray(value) ? value : value === undefined ? [] : [value];
   return Array.from(
@@ -2573,6 +2643,7 @@ export const buildV2DeterministicMaterialCoverage = async (
     ])
   );
   const remainingSegmentDurations = new Map<string, number>();
+  const usedSegmentRangesByMaterialId = new Map<string, UsedV2MaterialRange[]>();
   for (const asset of materialAssets) {
     const materialId = String(asset.material_id);
     for (const segment of asJsonObjectArray(asset.material_segments)) {
@@ -2686,6 +2757,10 @@ export const buildV2DeterministicMaterialCoverage = async (
             continue;
           }
 
+          if (!isMaterialSegmentRangeAvailable(materialId, segment, usedSegmentRangesByMaterialId)) {
+            continue;
+          }
+
           if (requiredRemaining <= 0) {
             continue;
           }
@@ -2693,9 +2768,12 @@ export const buildV2DeterministicMaterialCoverage = async (
           const allocatedDuration = Number(
             Math.min(requiredRemaining, remainingSegmentDuration).toFixed(3)
           );
-          remainingSegmentDurations.set(
-            segmentKey,
-            Number((remainingSegmentDuration - allocatedDuration).toFixed(3))
+          remainingSegmentDurations.set(segmentKey, 0);
+          markMaterialSegmentRangeUsed(
+            materialId,
+            slotId,
+            segment,
+            usedSegmentRangesByMaterialId
           );
           requiredRemaining = Number((requiredRemaining - allocatedDuration).toFixed(3));
           matches.push({
