@@ -28,6 +28,7 @@ export const config = {
         apiPath: env.v2MultimodalApiPath,
         model: env.v2MultimodalModel,
         apiKey: env.v2MultimodalApiKey,
+        timeoutMs: env.v2ProviderTimeoutMs,
         enabled: Boolean(
           env.v2MultimodalApiBaseUrl &&
             env.v2MultimodalModel &&
@@ -40,6 +41,7 @@ export const config = {
         apiPath: env.v2ImageApiPath,
         model: env.v2ImageModel,
         apiKey: env.v2ImageApiKey,
+        timeoutMs: env.v2ProviderTimeoutMs,
         enabled: Boolean(
           env.v2ImageApiBaseUrl && env.v2ImageModel && env.v2ImageApiKey
         )
@@ -50,6 +52,7 @@ export const config = {
         apiPath: env.v2VideoApiPath,
         model: env.v2VideoModel,
         apiKey: env.v2VideoApiKey,
+        timeoutMs: env.v2ProviderTimeoutMs,
         enabled: Boolean(
           env.v2VideoApiBaseUrl && env.v2VideoModel && env.v2VideoApiKey
         )

@@ -52,6 +52,7 @@ export const env = {
   v2MultimodalApiPath: readString("V2_MULTIMODAL_API_PATH", "/chat/completions"),
   v2MultimodalModel: readOptionalString("V2_MULTIMODAL_MODEL"),
   v2MultimodalApiKey: readOptionalString("V2_MULTIMODAL_API_KEY"),
+  v2ProviderTimeoutMs: readNumber("V2_PROVIDER_TIMEOUT_MS", 300000),
   v2ImageProvider: readString("V2_IMAGE_PROVIDER", "seedance"),
   v2ImageApiBaseUrl: readOptionalString("V2_IMAGE_API_BASE_URL"),
   v2ImageApiPath: readString("V2_IMAGE_API_PATH", "/images/generations"),

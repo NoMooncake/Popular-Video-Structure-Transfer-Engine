@@ -116,6 +116,15 @@ test(
       };
       shot_count: number;
       keyframes: unknown[];
+      analysis_table: {
+        columns: string[];
+        rows: Array<{
+          duration: string;
+          sample_video: { media: { uri: string } };
+          shot_description: { title: string; description: string };
+          migration_possibility: string;
+        }>;
+      };
       transcript: { status: string; summary: string };
     };
 
@@ -124,6 +133,21 @@ test(
     assert.ok(body.video.cover_frame.uri.startsWith(`/api/frames/${fileId}/`));
     assert.ok(body.keyframes.length >= 3);
     assert.equal(body.shot_count, body.keyframes.length);
+    assert.deepEqual(body.analysis_table.columns, [
+      "时长",
+      "样例视频",
+      "分镜描述",
+      "迁移可能性"
+    ]);
+    assert.equal(body.analysis_table.rows.length, body.shot_count);
+    assert.ok(body.analysis_table.rows[0]?.duration.endsWith("s"));
+    assert.ok(
+      body.analysis_table.rows[0]?.sample_video.media.uri.startsWith(
+        `/api/frames/${fileId}/`
+      )
+    );
+    assert.ok(body.analysis_table.rows[0]?.shot_description.title.length > 0);
+    assert.ok(body.analysis_table.rows[0]?.migration_possibility.length > 0);
     assert.equal(body.transcript.status, "not_started");
     assert.ok(body.transcript.summary.length > 0);
 
@@ -143,6 +167,85 @@ test(
     assert.match(coverResponse.headers.get("content-type") || "", /image\/jpeg/u);
   }
 );
+
+test(
+  "POST /api/sample/analyze accepts multiple file_ids and returns per-video tables",
+  { skip: hasFFmpeg() ? false : "ffmpeg is required to generate test videos" },
+  async () => {
+    const firstFileId = createUploadedTestVideo();
+    const secondFileId = createUploadedTestVideo();
+    const response = await fetch(`${baseUrl}/api/sample/analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ file_ids: [firstFileId, secondFileId] })
+    });
+    const body = (await response.json()) as {
+      sample_count: number;
+      samples: Array<{
+        sample_index: number;
+        file_id: string;
+        analysis_table: {
+          columns: string[];
+          rows: Array<{ sample_video: { media: { uri: string } } }>;
+        };
+        analysis: { id: string; analysis_table: { rows: unknown[] } };
+      }>;
+      structure_migration_input: {
+        reference_file_ids: string[];
+        sample_analysis_ids: string[];
+        sample_analyses: unknown[];
+      };
+    };
+
+    assert.equal(response.status, 200);
+    assert.equal(body.sample_count, 2);
+    assert.deepEqual(body.structure_migration_input.reference_file_ids, [
+      firstFileId,
+      secondFileId
+    ]);
+    assert.equal(body.structure_migration_input.sample_analyses.length, 2);
+    assert.equal(body.samples[0]?.sample_index, 1);
+    assert.equal(body.samples[1]?.sample_index, 2);
+    assert.equal(body.samples[0]?.file_id, firstFileId);
+    assert.equal(body.samples[1]?.file_id, secondFileId);
+    assert.deepEqual(body.samples[0]?.analysis_table.columns, [
+      "时长",
+      "样例视频",
+      "分镜描述",
+      "迁移可能性"
+    ]);
+    assert.ok(
+      body.samples[0]?.analysis_table.rows[0]?.sample_video.media.uri.startsWith(
+        `/api/frames/${firstFileId}/`
+      )
+    );
+    assert.ok(
+      body.samples[1]?.analysis_table.rows[0]?.sample_video.media.uri.startsWith(
+        `/api/frames/${secondFileId}/`
+      )
+    );
+    assert.equal(
+      body.samples[0]?.analysis_table.rows.length,
+      body.samples[0]?.analysis.analysis_table.rows.length
+    );
+  }
+);
+
+test("POST /api/sample/analyze/batch rejects missing file_ids", async () => {
+  const response = await fetch(`${baseUrl}/api/sample/analyze/batch`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ file_ids: [] })
+  });
+  const body = (await response.json()) as { error: { code: string } };
+
+  assert.equal(response.status, 400);
+  assert.equal(body.error.code, "missing_file_ids");
+});
 
 test("POST /api/sample/analyze rejects unknown file_id", async () => {
   const response = await fetch(`${baseUrl}/api/sample/analyze`, {

@@ -1,4 +1,4 @@
-import type { SampleAnalysis, StructureBlueprint, UploadResponse } from "../types";
+import type { SampleAnalysis, StructureBlueprint, UploadResponse, V2PipelineResult } from "../types";
 
 type ApiErrorBody = {
   error?: {
@@ -152,6 +152,118 @@ export const extractStructureBlueprint = async (
         category: options.category ?? "pet_food",
         use_mock: options.useMock ?? false
       })
+    })
+  );
+};
+
+export type V2PipelineAnalyzeRequest = {
+  reference_file_ids?: string[];
+  user_material_file_ids?: string[];
+  reference_videos?: Array<{
+    file_id?: string;
+    uri?: string;
+    role: "reference_sample" | "user_material";
+    label?: string;
+  }>;
+  user_materials?: Array<{
+    file_id?: string;
+    uri?: string;
+    role: "reference_sample" | "user_material";
+    label?: string;
+  }>;
+  text_assets?: Array<{
+    asset_id?: string;
+    type: "brief" | "copy" | "note" | "requirement" | "other";
+    content: string;
+  }>;
+  user_request: {
+    goal: string;
+    target_audience?: string;
+    product_name?: string;
+    style_preferences?: string[];
+    must_include?: string[];
+    avoid?: string[];
+  };
+  options?: {
+    image_candidate_count?: number;
+    generate_image_candidates?: boolean;
+    target_duration_seconds?: number;
+    allow_fallback?: boolean;
+    accepted_duration_short_slots?: string[];
+  };
+};
+
+export type V2ImageCandidateRequest = {
+  prompt?: string;
+  image_prompt?: string;
+  prompt_package?: Record<string, unknown>;
+  count?: number;
+  allow_fallback?: boolean;
+  reference_images?: string[];
+  reference_video_uris?: string[];
+};
+
+export type V2ImageToVideoRequest = {
+  approved_image_uri?: string;
+  source_image_uri?: string;
+  image_uri?: string;
+  source_video_uri?: string;
+  video_prompt: string;
+  generation_mode?: "direct_from_material_frame" | "uploaded_image" | "generated_image";
+  duration_seconds?: number;
+  target_duration_seconds?: number;
+  aspect_ratio?: string;
+  slot_id?: string;
+  slot_type?: string;
+  slot_description?: string;
+  auto_trim_review?: boolean;
+  camera_fixed?: boolean;
+  watermark?: boolean;
+  allow_fallback?: boolean;
+};
+
+export const getV2Status = async <T = unknown>(): Promise<T> => {
+  return toJson<T>(await fetch("/api/v2/status"));
+};
+
+export const analyzeV2Pipeline = async (
+  payload: V2PipelineAnalyzeRequest
+): Promise<V2PipelineResult> => {
+  return toJson<V2PipelineResult>(
+    await fetch("/api/v2/pipeline/analyze", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const generateV2ImageCandidates = async <T = unknown>(
+  payload: V2ImageCandidateRequest
+): Promise<T> => {
+  return toJson<T>(
+    await fetch("/api/v2/generation/image-candidates", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const generateV2ImageToVideo = async <T = unknown>(
+  payload: V2ImageToVideoRequest
+): Promise<T> => {
+  return toJson<T>(
+    await fetch("/api/v2/generation/image-to-video", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
     })
   );
 };

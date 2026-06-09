@@ -1,5 +1,10 @@
 export type MatchStatus = "missing" | "partial" | "matched";
 
+export type V2FrontendCoverageStatus =
+  | "material_insufficient"
+  | "structure_complete_duration_short"
+  | "fully_matched";
+
 export type StepKey =
   | "input"
   | "analysis"
@@ -167,7 +172,115 @@ export type CanvasBlock = {
   label: string;
   timeRange: string;
   status: MatchStatus;
+  migrationResult: string;
+  materialSummary: string;
+  copy: string;
   slot: StructureSlot;
   gap?: GapItem;
   timeline?: TimelineItem;
+};
+
+export type V2MaterialCoverageSlot = {
+  slot_id: string;
+  slot_type: string;
+  slot_name?: string;
+  visual_goal?: string;
+  copy_direction?: string;
+  required_duration: number;
+  matched_material_duration: number;
+  missing_duration: number;
+  coverage_status: "covered" | "partial" | "duration_unknown" | "missing" | string;
+  frontend_coverage_status: V2FrontendCoverageStatus;
+  frontend_coverage_label: string;
+  frontend_display?: {
+    migration_result_title?: string;
+    migration_result_description?: string;
+    duration_text?: string;
+    shot_description?: string;
+    material_summary?: string;
+    copy?: string;
+    material_status?: string;
+  };
+  user_duration_short_decision?: "pending" | "accepted_as_sufficient" | "not_applicable";
+  ai_completion_required_duration?: number;
+  needs_ai_completion?: boolean;
+  gap_reason?: string;
+  available_user_actions?: string[];
+  available_generation_paths?: string[];
+  assigned_materials?: Array<{
+    material_id: string;
+    label?: string;
+    matched_material_duration?: number;
+  }>;
+  candidate_materials?: Array<{
+    material_id: string;
+    label?: string;
+    duration_seconds?: number;
+    fit_reason?: string;
+  }>;
+  direct_video_reference_materials?: Array<{
+    material_id: string;
+    label?: string;
+    uri?: string;
+    duration_seconds?: number;
+    frame_sample_timestamps_seconds?: number[];
+  }>;
+  recommended_aigc_prompt?: {
+    prompt_ref: string;
+    prompt_source: string;
+    prompt_description?: string;
+    prompt: string;
+  };
+  recommended_video_prompt?: {
+    prompt_ref: string;
+    prompt_source: string;
+    prompt_description?: string;
+    prompt: string;
+  };
+};
+
+export type V2PipelineResult = {
+  id: string;
+  version: "2.0.0";
+  created_at: string;
+  source: {
+    type: "api_first_v2";
+    multimodal_provider: string;
+    image_provider?: string;
+    video_provider?: string;
+    fallback_used?: boolean;
+    fallback_reason?: string;
+  };
+  input: {
+    reference_video_count: number;
+    user_material_count: number;
+    text_asset_count: number;
+  };
+  stages: {
+    reference_video_analyses: unknown[];
+    user_material_analysis: Record<string, unknown>;
+    fillable_architecture: Record<string, unknown>;
+    material_coverage: {
+      materials_sufficient: boolean;
+      requires_ai_completion: boolean;
+      target_duration_seconds: number;
+      total_known_material_duration_seconds: number;
+      material_assets: Record<string, unknown>[];
+      slot_coverage: V2MaterialCoverageSlot[];
+    };
+    production_plan: Record<string, unknown>;
+    image_candidates?: Array<{
+      candidate_id: string;
+      prompt_ref: string;
+      uri?: string;
+      provider_response: Record<string, unknown>;
+    }>;
+  };
+  summary: {
+    status: "completed";
+    needs_user_image_approval: boolean;
+    can_generate_video_directly: boolean;
+    target_duration_seconds: number;
+    notes: string;
+  };
 };

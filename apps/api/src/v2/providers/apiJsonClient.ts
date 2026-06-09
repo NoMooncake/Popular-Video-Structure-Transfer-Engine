@@ -10,6 +10,7 @@ type ApiProviderConfig = {
   apiPath: string;
   model?: string;
   apiKey?: string;
+  timeoutMs?: number;
   enabled: boolean;
 };
 
@@ -30,6 +31,12 @@ type ChatContentPart =
       };
       fps: number;
       media_resolution: "default" | "max";
+    }
+  | {
+      type: "image_url";
+      image_url: {
+        url: string;
+      };
     };
 
 type ChatCompletionResponse = {
@@ -327,6 +334,10 @@ const isVideoReference = (value: string): boolean => {
   return /\.(mp4|mov|avi|wmv)(?:[?#].*)?$/iu.test(value);
 };
 
+const isImageReference = (value: string): boolean => {
+  return /\.(jpe?g|png|webp)(?:[?#].*)?$/iu.test(value);
+};
+
 const getMimeType = (value: string): string => {
   const lowerValue = value.toLowerCase();
 
@@ -343,6 +354,20 @@ const getMimeType = (value: string): string => {
   }
 
   return "video/mp4";
+};
+
+const getImageMimeType = (value: string): string => {
+  const lowerValue = value.toLowerCase();
+
+  if (lowerValue.endsWith(".png")) {
+    return "image/png";
+  }
+
+  if (lowerValue.endsWith(".webp")) {
+    return "image/webp";
+  }
+
+  return "image/jpeg";
 };
 
 const toVideoUrl = (value: string): string | undefined => {
@@ -369,7 +394,31 @@ const toVideoUrl = (value: string): string | undefined => {
   return `data:${getMimeType(value)};base64,${encodedVideo}`;
 };
 
-const collectVideoContentParts = (value: unknown): ChatContentPart[] => {
+const toImageUrl = (value: string): string | undefined => {
+  if (value.startsWith("data:image/")) {
+    return value;
+  }
+
+  if (/^https?:\/\//iu.test(value) && isImageReference(value)) {
+    return value;
+  }
+
+  if (!value.startsWith("/") || !isImageReference(value) || !fs.existsSync(value)) {
+    return undefined;
+  }
+
+  const maxRawBytesForBase64Limit = 8 * 1024 * 1024;
+  const stats = fs.statSync(value);
+
+  if (!stats.isFile() || stats.size > maxRawBytesForBase64Limit) {
+    return undefined;
+  }
+
+  const encodedImage = fs.readFileSync(value).toString("base64");
+  return `data:${getImageMimeType(value)};base64,${encodedImage}`;
+};
+
+const collectMediaContentParts = (value: unknown): ChatContentPart[] => {
   const parts: ChatContentPart[] = [];
   const visit = (currentValue: unknown): void => {
     if (Array.isArray(currentValue)) {
@@ -386,7 +435,21 @@ const collectVideoContentParts = (value: unknown): ChatContentPart[] => {
     const record = currentValue as Record<string, unknown>;
     const uri = typeof record.uri === "string" ? record.uri : undefined;
     const url = typeof record.url === "string" ? record.url : undefined;
+    const imageUri =
+      typeof record.image_uri === "string" ? record.image_uri : undefined;
+    const imageUrl =
+      typeof record.image_url === "string" ? record.image_url : undefined;
     const videoUrl = uri ? toVideoUrl(uri) : url ? toVideoUrl(url) : undefined;
+    const resolvedImageUrl =
+      imageUri
+        ? toImageUrl(imageUri)
+        : imageUrl
+          ? toImageUrl(imageUrl)
+          : uri
+            ? toImageUrl(uri)
+            : url
+              ? toImageUrl(url)
+              : undefined;
 
     if (videoUrl) {
       parts.push({
@@ -396,6 +459,15 @@ const collectVideoContentParts = (value: unknown): ChatContentPart[] => {
         },
         fps: 2,
         media_resolution: "default"
+      });
+    }
+
+    if (resolvedImageUrl) {
+      parts.push({
+        type: "image_url",
+        image_url: {
+          url: resolvedImageUrl
+        }
       });
     }
 
@@ -422,10 +494,19 @@ const sanitizeMediaReferences = (value: unknown): unknown => {
       if (
         (key === "uri" || key === "url") &&
         typeof nestedValue === "string" &&
-        (nestedValue.startsWith("data:video/") ||
+          (nestedValue.startsWith("data:video/") ||
           (nestedValue.startsWith("/") && isVideoReference(nestedValue)))
       ) {
         return [key, "[attached_video]"];
+      }
+
+      if (
+        (key === "uri" || key === "url" || key === "image_uri" || key === "image_url") &&
+        typeof nestedValue === "string" &&
+        (nestedValue.startsWith("data:image/") ||
+          (nestedValue.startsWith("/") && isImageReference(nestedValue)))
+      ) {
+        return [key, "[attached_image]"];
       }
 
       return [key, sanitizeMediaReferences(nestedValue)];
@@ -594,7 +675,7 @@ const requestProviderJson = async (
       "Content-Type": "application/json"
     },
     body: method === "POST" ? JSON.stringify(body || {}) : undefined,
-    signal: AbortSignal.timeout(120_000)
+    signal: AbortSignal.timeout(providerConfig.timeoutMs || 300_000)
   });
   const responseBody = (await response.json().catch(() => ({}))) as
     | ChatCompletionResponse
@@ -625,7 +706,7 @@ export const requestMultimodalJson = async (
   payload: JsonObject
 ): Promise<JsonObject> => {
   const providerConfig = config.providers.v2.multimodal;
-  const mediaParts = collectVideoContentParts(payload);
+  const mediaParts = collectMediaContentParts(payload);
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -641,7 +722,7 @@ export const requestMultimodalJson = async (
             {
               task,
               payload: sanitizeMediaReferences(payload),
-              attached_video_count: mediaParts.length,
+              attached_media_count: mediaParts.length,
               output_format:
                 "只返回一个合法 JSON object。字段名可以是英文 snake_case；所有面向用户阅读的字段值、说明、文案、图片生成 prompt、图生视频 prompt 必须使用简体中文。"
             },

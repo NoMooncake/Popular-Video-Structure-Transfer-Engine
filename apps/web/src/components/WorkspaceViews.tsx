@@ -99,15 +99,6 @@ const slotGoalByType: Record<string, string> = {
   cta: "引导用户在评论区补充自家猫咪情况。"
 };
 
-const migrationRuleByType: Record<string, string> = {
-  risk_or_pain_hook: "把样例的风险前置结构迁移为新主题的购买风险提示。",
-  pain_desire: "把样例的背景铺垫压缩为用户需求分层说明。",
-  product_reveal: "把样例的多产品拆解迁移为短视频中的分类推荐卡片。",
-  proof_comparison: "把样例的解释段落迁移为可视化对比证明。",
-  decision_warning: "把样例的避坑知识迁移为消费决策前的提醒。",
-  cta: "把样例的评论互动结尾迁移为按猫咪情况咨询 of CTA。"
-};
-
 const gapCopyById: Record<
   string,
   {
@@ -152,10 +143,6 @@ const readableSlot = (block: CanvasBlock) => slotLabelByType[block.slot.slot_typ
 
 const readableGoal = (block: CanvasBlock) => {
   return slotGoalByType[block.slot.slot_type] ?? block.slot.content_goal;
-};
-
-const readableRule = (block: CanvasBlock) => {
-  return migrationRuleByType[block.slot.slot_type] ?? block.slot.migration_rule;
 };
 
 const readableGapMissing = (gapId: string, fallback: string) => {
@@ -631,7 +618,7 @@ const buildBackendSampleRows = (
     return {
       duration: formatShotRange(shot),
       image: keyframe?.media.uri ?? analysis.video.cover_frame.uri,
-      shotTitle: slot ? readableSlot({ id: slot.slot_id, label: slot.slot_type, slot, status: "partial", timeRange: formatShotRange(shot) }) : shot.shot_id,
+      shotTitle: slot ? readableSlot({ id: slot.slot_id, label: slot.slot_type, slot, status: "partial", timeRange: formatShotRange(shot), migrationResult: "", materialSummary: "", copy: "" }) : shot.shot_id,
       shotDescription: shot.description,
       migrationPossibility: slot?.migration_rule ?? slot?.content_goal ?? "等待结构提取结果。"
     };
@@ -1179,7 +1166,7 @@ const StructureMigrationView = ({
                         <span className="desc-tag-name">{readableSlot(block)}</span>
                         <span className="desc-tag-index">{index + 1}</span>
                       </div>
-                      <div className="desc-body">{readableRule(block)}</div>
+                      <div className="desc-body">{block.migrationResult}</div>
                     </div>
 
                     {/* 我的素材: 只读，过多时框内滚动 */}

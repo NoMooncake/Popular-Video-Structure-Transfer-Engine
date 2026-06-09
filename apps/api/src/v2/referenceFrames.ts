@@ -10,11 +10,20 @@ export type V2ReferenceFrame = {
   source_uri: string;
   source_label?: string;
   time_seconds: number;
+  file_path: string;
+  public_uri: string;
   mime_type: "image/jpeg";
   data_url: string;
 };
 
 const referenceFrameRootDir = path.join(storageConfig.outputDir, "v2-reference-frames");
+
+const buildReferenceFramePublicUri = (filePath: string): string => {
+  const runId = path.basename(path.dirname(filePath));
+  const filename = path.basename(filePath);
+
+  return `/api/v2/reference-frames/${encodeURIComponent(runId)}/${encodeURIComponent(filename)}`;
+};
 
 const isLocalVideoPath = (value: string | undefined): value is string => {
   return Boolean(
@@ -102,7 +111,7 @@ export const collectV2ReferenceFramesFromVideos = async (
   videoRefs: V2VideoRef[],
   maxFrames: number
 ): Promise<V2ReferenceFrame[]> => {
-  const frameLimit = Math.max(0, Math.min(6, Math.floor(maxFrames)));
+  const frameLimit = Math.max(0, Math.floor(maxFrames));
   if (frameLimit === 0) {
     return [];
   }
@@ -141,6 +150,8 @@ export const collectV2ReferenceFramesFromVideos = async (
           source_uri: videoRef.uri,
           source_label: videoRef.label,
           time_seconds: timestampSeconds,
+          file_path: outputPath,
+          public_uri: buildReferenceFramePublicUri(outputPath),
           mime_type: "image/jpeg",
           data_url: toJpegDataUrl(outputPath)
         });
@@ -158,6 +169,8 @@ export const collectV2ReferenceFramesFromVideos = async (
               source_uri: videoRef.uri,
               source_label: videoRef.label,
               time_seconds: 0,
+              file_path: fallbackOutputPath,
+              public_uri: buildReferenceFramePublicUri(fallbackOutputPath),
               mime_type: "image/jpeg",
               data_url: toJpegDataUrl(fallbackOutputPath)
             });
@@ -170,4 +183,22 @@ export const collectV2ReferenceFramesFromVideos = async (
   }
 
   return frames;
+};
+
+export const findV2ReferenceFrameFile = (
+  runId: string,
+  filename: string
+): string | undefined => {
+  const framePath = path.join(referenceFrameRootDir, runId, filename);
+  const normalizedRoot = path.resolve(referenceFrameRootDir);
+  const normalizedFramePath = path.resolve(framePath);
+
+  if (
+    !normalizedFramePath.startsWith(`${normalizedRoot}${path.sep}`) ||
+    !fs.existsSync(normalizedFramePath)
+  ) {
+    return undefined;
+  }
+
+  return normalizedFramePath;
 };

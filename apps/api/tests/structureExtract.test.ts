@@ -100,6 +100,56 @@ test("POST /api/structure/extract accepts sample analysis and returns slots", as
   assert.ok(body.slots.length > 0);
 });
 
+test("POST /api/structure/extract accepts multiple sample analyses", async () => {
+  const repoRoot = path.resolve(process.cwd(), "../..");
+  const firstSampleAnalysis = JSON.parse(
+    fs.readFileSync(
+      path.join(repoRoot, "examples/case_01/sample_analysis.mock.json"),
+      "utf-8"
+    )
+  ) as Record<string, unknown>;
+  const secondSampleAnalysis = {
+    ...firstSampleAnalysis,
+    id: "sample_analysis_case_02_mock"
+  };
+
+  const response = await postStructureExtract({
+    sample_analyses: [firstSampleAnalysis, secondSampleAnalysis],
+    vertical: "seeding_de_seeding",
+    category: "pet_food"
+  });
+  const body = (await response.json()) as {
+    sample_analysis_ref: string;
+    source: { ref_id: string };
+    slots: Array<{ source_evidence: string[] }>;
+  };
+
+  assert.equal(response.status, 200);
+  assert.equal(
+    body.sample_analysis_ref,
+    "sample_analysis_case_01_mock,sample_analysis_case_02_mock"
+  );
+  assert.equal(
+    body.source.ref_id,
+    "sample_analysis_case_01_mock,sample_analysis_case_02_mock"
+  );
+  assert.ok(body.slots.length > 0);
+  assert.ok(
+    body.slots[0]?.source_evidence.some((evidence) =>
+      evidence.includes("sample_2_analysis: sample_analysis_case_02_mock")
+    )
+  );
+
+  const validationResult = validateSchema("structure_blueprint", body);
+  assert.equal(
+    validationResult.valid,
+    true,
+    validationResult.valid
+      ? undefined
+      : JSON.stringify(validationResult.errors, null, 2)
+  );
+});
+
 test("POST /api/structure/extract rejects missing input", async () => {
   const response = await postStructureExtract({});
   const body = (await response.json()) as { error: { code: string } };

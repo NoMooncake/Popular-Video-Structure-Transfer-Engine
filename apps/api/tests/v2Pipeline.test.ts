@@ -12,6 +12,7 @@ import {
   assembleV2FinalVideo,
   attachProductionPromptsToMaterialCoverage,
   buildV2DeterministicMaterialCoverage,
+  buildV2ReferenceAnalysisTables,
   getAdaptiveSlotPlanningRules,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
@@ -197,12 +198,10 @@ test(
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 0);
     assert.deepEqual(coverage.slot_coverage[1]?.available_generation_paths, [
       "direct_video_from_material_frame",
-      "upload_image_then_video",
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
       "generate_direct_video_from_material_frame",
-      "upload_image_then_generate_video",
       "generate_image_then_video"
     ]);
     assert.equal(
@@ -311,6 +310,15 @@ test(
     assert.equal(coverage.slot_coverage[0]?.coverage_status, "covered");
     assert.equal(coverage.slot_coverage[0]?.frontend_coverage_status, "fully_matched");
     assert.equal(coverage.slot_coverage[0]?.frontend_coverage_label, "完全匹配");
+    assert.deepEqual(asRecord(coverage.slot_coverage[0]?.frontend_display), {
+      migration_result_title: "强视觉开场",
+      migration_result_description: "根据当前广告结构补足该槽位画面。",
+      duration_text: "3s",
+      shot_description: "待补充分镜描述",
+      material_summary: "ice_tea_material_01 3s",
+      copy: "待生成文案",
+      material_status: "完全匹配"
+    });
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 3);
     assert.equal(
       asRecordArray(coverage.slot_coverage[0]?.candidate_materials)[0]?.material_id,
@@ -331,6 +339,14 @@ test(
       coverage.slot_coverage[1]?.frontend_coverage_label,
       "结构完整，但时长不足"
     );
+    assert.equal(
+      asRecord(coverage.slot_coverage[1]?.frontend_display).material_status,
+      "结构完整，但时长不足"
+    );
+    assert.equal(
+      asRecord(coverage.slot_coverage[1]?.frontend_display).material_summary,
+      "ice_tea_material_01 2s"
+    );
     assert.equal(coverage.slot_coverage[1]?.matched_material_duration, 2);
     assert.equal(
       asRecordArray(coverage.slot_coverage[1]?.candidate_materials)[0]?.material_id,
@@ -340,12 +356,10 @@ test(
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
       "accept_current_material_as_sufficient",
       "generate_direct_video_from_material_frame",
-      "upload_image_then_generate_video",
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[1]?.available_generation_paths, [
       "direct_video_from_material_frame",
-      "upload_image_then_video",
       "generate_image_then_video"
     ]);
     assert.equal(coverage.slot_coverage[1]?.ai_completion_required_duration, 1);
@@ -354,14 +368,16 @@ test(
     assert.equal(coverage.slot_coverage[2]?.coverage_status, "missing");
     assert.equal(coverage.slot_coverage[2]?.frontend_coverage_status, "material_insufficient");
     assert.equal(coverage.slot_coverage[2]?.frontend_coverage_label, "素材不够");
+    assert.equal(
+      asRecord(coverage.slot_coverage[2]?.frontend_display).material_summary,
+      "空"
+    );
     assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
       "generate_direct_video_from_material_frame",
-      "upload_image_then_generate_video",
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[2]?.available_generation_paths, [
       "direct_video_from_material_frame",
-      "upload_image_then_video",
       "generate_image_then_video"
     ]);
     assert.equal(
@@ -1421,8 +1437,17 @@ test("v2 target duration keeps a 10 second user request", () => {
 test("v2 adaptive slot planning asks short videos to merge modules", () => {
   assert.equal(getAdaptiveSlotPlanningRules(7).target_slot_count_range, "3-5");
   assert.match(String(getAdaptiveSlotPlanningRules(7).rule), /不能机械拆成7个模块/);
+  assert.match(String(getAdaptiveSlotPlanningRules(7).rule), /用户需求/);
   assert.equal(getAdaptiveSlotPlanningRules(12).target_slot_count_range, "4-6");
+  assert.match(
+    String(getAdaptiveSlotPlanningRules(12).rule),
+    /不要把用户原始素材的镜头长短当作成片节奏结论/
+  );
   assert.equal(getAdaptiveSlotPlanningRules(20).target_slot_count_range, "6-7");
+  assert.match(
+    String(getAdaptiveSlotPlanningRules(20).rule),
+    /不能单独决定最终广告节奏/
+  );
 });
 
 test("v2 provider JSON extraction repairs common model JSON issues", () => {
@@ -1452,6 +1477,81 @@ test("v2 provider JSON extraction repairs common model JSON issues", () => {
     extractJsonObject('{"prompt":"第一行\n第二行"}', "test_json_newline").prompt,
     "第一行\n第二行"
   );
+});
+
+test("v2 reference analysis tables bind timeline rows to extracted frame URIs", () => {
+  const tables = buildV2ReferenceAnalysisTables(
+    [
+      {
+        reference_video_analysis: {
+          slot_timeline: [
+            {
+              slot_id: "ref_slot_01",
+              slot_type: "strong_hook",
+              start_time: "00:00",
+              end_time: "00:02",
+              visual_description: "冰镇产品强特写，水珠和冰块制造清爽感。",
+              migration_possibility: "可迁移为新广告的冰爽产品开场。"
+            },
+            {
+              slot_id: "ref_slot_02",
+              slot_type: "product_hero",
+              start_time: "00:02",
+              end_time: "00:05",
+              visual_description: "产品旋转展示，突出包装和质感。",
+              migration_possibility: "可迁移为新商品的主体亮相。"
+            }
+          ]
+        }
+      }
+    ],
+    [
+      {
+        file_id: "reference-file-id",
+        uri: "/tmp/reference.mp4",
+        role: "reference_sample",
+        label: "样例视频 1"
+      }
+    ],
+    [
+      [
+        {
+          frame_id: "reference_frame_01",
+          source_uri: "/tmp/reference.mp4",
+          source_label: "样例视频 1",
+          time_seconds: 1,
+          file_path: "/tmp/reference_01.jpg",
+          public_uri: "/api/v2/reference-frames/run/reference_01.jpg",
+          mime_type: "image/jpeg",
+          data_url: "data:image/jpeg;base64,aaa"
+        },
+        {
+          frame_id: "reference_frame_02",
+          source_uri: "/tmp/reference.mp4",
+          source_label: "样例视频 1",
+          time_seconds: 4,
+          file_path: "/tmp/reference_02.jpg",
+          public_uri: "/api/v2/reference-frames/run/reference_02.jpg",
+          mime_type: "image/jpeg",
+          data_url: "data:image/jpeg;base64,bbb"
+        }
+      ]
+    ],
+    20
+  );
+
+  assert.equal(tables.length, 1);
+  assert.deepEqual(tables[0]?.columns, ["时长", "样例视频", "分镜描述", "迁移可能性"]);
+  assert.equal(tables[0]?.file_id, "reference-file-id");
+
+  const rows = asRecordArray(tables[0]?.rows);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0]?.duration, "0 - 2s");
+  assert.equal(asRecord(asRecord(rows[0]?.sample_video).media).uri, "/api/v2/reference-frames/run/reference_01.jpg");
+  assert.equal(asRecord(asRecord(rows[1]?.sample_video).media).uri, "/api/v2/reference-frames/run/reference_02.jpg");
+  assert.equal(asRecord(rows[0]?.shot_description).title, "强 Hook");
+  assert.equal(rows[0]?.migration_possibility, "高度可迁移。可迁移为新广告的冰爽产品开场。");
+  assert.equal(rows[1]?.migration_possibility, "高度可迁移。可迁移为新商品的主体亮相。");
 });
 
 test("GET /api/v2/status exposes 4 as the default image candidate count", async () => {
@@ -1510,6 +1610,587 @@ test("POST /api/v2/generation/image-to-video rejects text-only video generation"
   assert.equal(body.error.code, "invalid_v2_image_to_video_input");
   assert.match(body.error.message, /source image is required/);
 });
+
+test(
+  "v2 script session saves edited duration and canvas revalidates against slot materials",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const firstFileId = createUploadedTestVideo(1);
+    const secondFileId = createUploadedTestVideo(1);
+
+    const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_request: {
+          goal: "冰红茶宣传片",
+          product_name: "冰红茶"
+        },
+        target_duration_seconds: 2,
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "product_hero",
+            slot_name: "产品亮相",
+            duration_seconds: 2,
+            shot_description: "冰红茶瓶身和冰块特写。",
+            copy: "冰爽一下。",
+            materials: [
+              {
+                material_id: "ice_tea_clip_01",
+                file_id: firstFileId,
+                uri: `/api/upload/files/${firstFileId}`,
+                label: "ice_tea_clip_01"
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const created = (await createResponse.json()) as {
+      session_id: string;
+      slots: Array<{
+        slot_id: string;
+        required_duration: number;
+        shot_description: string;
+      }>;
+    };
+
+    assert.equal(createResponse.status, 201);
+    assert.equal(created.slots[0]?.required_duration, 2);
+    assert.equal(created.slots[0]?.shot_description, "产品亮相¹\n冰红茶瓶身和冰块特写。");
+
+    const lockedResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          shot_description: "用户试图修改分镜"
+        })
+      }
+    );
+    const lockedBody = (await lockedResponse.json()) as {
+      error: {
+        code: string;
+        message: string;
+      };
+    };
+    assert.equal(lockedResponse.status, 400);
+    assert.equal(lockedBody.error.code, "invalid_v2_script_slot_input");
+    assert.match(lockedBody.error.message, /locked/);
+
+    const updateResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          required_duration: 0.5,
+          voiceover_text: "清凉马上回来。"
+        })
+      }
+    );
+    const updated = (await updateResponse.json()) as {
+      target_duration_seconds: number;
+      slots: Array<{
+        required_duration: number;
+        voiceover_text: string;
+      }>;
+    };
+    assert.equal(updateResponse.status, 200);
+    assert.equal(updated.target_duration_seconds, 0.5);
+    assert.equal(updated.slots[0]?.required_duration, 0.5);
+    assert.equal(updated.slots[0]?.voiceover_text, "清凉马上回来。");
+
+    const shortRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const shortRevalidate = (await shortRevalidateResponse.json()) as {
+      material_candidate_pool: {
+        candidate_pool_id: string;
+        summary: Record<string, unknown>;
+        refinement: Record<string, unknown>;
+      };
+      material_segments: Array<Record<string, unknown>>;
+      material_coverage: {
+        slot_coverage: Array<Record<string, unknown>>;
+        matching_source: string;
+      };
+      canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session_id: string;
+      canvas_session: {
+        canvas_session_id: string;
+        nodes: Array<Record<string, unknown>>;
+        edges: Array<Record<string, unknown>>;
+      };
+      cover_plan: Record<string, unknown>;
+    };
+
+    assert.equal(shortRevalidateResponse.status, 200);
+    assert.equal(shortRevalidate.material_candidate_pool.summary.segment_count, 1);
+    assert.equal(shortRevalidate.material_candidate_pool.summary.frame_count, 3);
+    assert.match(
+      String(shortRevalidate.material_candidate_pool.refinement.status),
+      /^deterministic_fallback$/
+    );
+    assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(shortRevalidate.cover_plan.cover_title, "冰红茶，一眼心动");
+    assert.ok(Array.isArray(shortRevalidate.cover_plan.cover_copy_options));
+    assert.match(
+      String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
+      /冰红茶/
+    );
+    assert.match(
+      String(asRecord(shortRevalidate.cover_plan.recommended_source).frame_uri),
+      /^\/api\/v2\/material-candidate-pools\//
+    );
+    assert.match(shortRevalidate.canvas_session_id, /^v2_canvas_/);
+    assert.equal(
+      shortRevalidate.canvas_session.canvas_session_id,
+      shortRevalidate.canvas_session_id
+    );
+    assert.ok(
+      shortRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "script_slot"
+      )
+    );
+    assert.ok(
+      shortRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "material_segment"
+      )
+    );
+    const savedCanvasResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${shortRevalidate.canvas_session_id}`
+    );
+    const savedCanvas = (await savedCanvasResponse.json()) as {
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    };
+    assert.equal(savedCanvasResponse.status, 200);
+    assert.equal(savedCanvas.nodes.length, shortRevalidate.canvas_session.nodes.length);
+    const updatedCanvasResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${shortRevalidate.canvas_session_id}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          nodes: [
+            {
+              ...savedCanvas.nodes[0],
+              position: {
+                x: 120,
+                y: 80
+              }
+            },
+            ...savedCanvas.nodes.slice(1)
+          ],
+          edges: savedCanvas.edges
+        })
+      }
+    );
+    const updatedCanvas = (await updatedCanvasResponse.json()) as {
+      nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(updatedCanvasResponse.status, 200);
+    assert.deepEqual(asRecord(updatedCanvas.nodes[0]?.position), { x: 120, y: 80 });
+    assert.equal(shortRevalidate.material_coverage.matching_source, "refined_material_segments");
+    assert.equal(shortRevalidate.material_coverage.slot_coverage[0]?.required_duration, 0.5);
+    assert.equal(
+      shortRevalidate.material_coverage.slot_coverage[0]?.matching_source,
+      "refined_material_segments"
+    );
+    assert.equal(
+      asRecordArray(shortRevalidate.material_coverage.slot_coverage[0]?.assigned_segments)
+        .length,
+      1
+    );
+    assert.equal(asRecordArray(shortRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
+    assert.equal(shortRevalidate.material_segments.length, 1);
+    assert.equal(
+      shortRevalidate.material_segments[0]?.segmentation_source,
+      "uniform_high_frequency_candidate_split"
+    );
+    assert.equal(
+      shortRevalidate.material_segments[0]?.pacing_inference_source,
+      "user_request_first_material_pacing_not_authoritative"
+    );
+    assert.deepEqual(
+      shortRevalidate.material_segments[0]?.high_frequency_frame_timestamps_seconds,
+      [0, 0.5, 1]
+    );
+    assert.ok(Array.isArray(shortRevalidate.material_segments[0]?.visual_tags));
+    assert.ok(Array.isArray(shortRevalidate.material_segments[0]?.usable_slot_types));
+    assert.equal(typeof shortRevalidate.material_segments[0]?.quality_score, "number");
+    assert.equal(typeof shortRevalidate.material_segments[0]?.content_summary, "string");
+    const frames = asRecordArray(shortRevalidate.material_segments[0]?.frames);
+    assert.equal(frames.length, 3);
+    assert.match(String(frames[0]?.uri), /^\/api\/v2\/material-candidate-pools\//);
+    assert.equal(frames[0]?.extraction_status, "extracted");
+
+    const frameResponse = await fetch(`${baseUrl}${String(frames[0]?.uri)}`);
+    assert.equal(frameResponse.status, 200);
+    assert.match(frameResponse.headers.get("content-type") || "", /image\/jpeg/);
+
+    const poolResponse = await fetch(
+      `${baseUrl}/api/v2/material-candidate-pools/${shortRevalidate.material_candidate_pool.candidate_pool_id}`
+    );
+    const pool = (await poolResponse.json()) as {
+      summary: Record<string, unknown>;
+    };
+    assert.equal(poolResponse.status, 200);
+    assert.equal(pool.summary.frame_count, 3);
+
+    const directPoolResponse = await fetch(
+      `${baseUrl}/api/v2/material-candidate-pools/from-script-session`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          session_id: created.session_id,
+          candidate_pool_id: `${created.session_id}_direct_test_pool`,
+          use_multimodal_provider: false
+        })
+      }
+    );
+    const directPool = (await directPoolResponse.json()) as {
+      summary: Record<string, unknown>;
+      refinement: Record<string, unknown>;
+      material_segments: Array<Record<string, unknown>>;
+    };
+    assert.equal(directPoolResponse.status, 201);
+    assert.equal(directPool.summary.segment_count, 1);
+    assert.equal(directPool.refinement.status, "deterministic_fallback");
+    assert.equal(directPool.material_segments[0]?.refinement_source, "deterministic_fallback");
+
+    await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        required_duration: 2
+      })
+    });
+
+    const longRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const longRevalidate = (await longRevalidateResponse.json()) as {
+      canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session_id: string;
+    };
+    assert.equal(longRevalidateResponse.status, 200);
+    assert.equal(
+      longRevalidate.canvas_nodes[0]?.coverage_status,
+      "structure_complete_duration_short"
+    );
+    assert.equal(longRevalidate.canvas_nodes[0]?.missing_duration, 1);
+    assert.equal(asRecordArray(longRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
+
+    const promptNodeResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          prompt_type: "video",
+          prompt: "冰红茶冰块飞溅，镜头快速推近瓶身，补足清凉冲击。"
+        })
+      }
+    );
+    const promptNodeBody = (await promptNodeResponse.json()) as {
+      prompt_node: Record<string, unknown>;
+    };
+    assert.equal(promptNodeResponse.status, 201);
+    assert.equal(promptNodeBody.prompt_node.node_type, "video_prompt");
+
+    const imagePromptNodeResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          prompt_type: "image",
+          prompt: "冰红茶瓶身、冰块和水珠的竖屏广告关键画面。"
+        })
+      }
+    );
+    assert.equal(imagePromptNodeResponse.status, 201);
+
+    const imageCandidatesResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/image-candidates`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          count: 4,
+          use_image_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const imageCandidatesBody = (await imageCandidatesResponse.json()) as {
+      image_candidate_nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(imageCandidatesResponse.status, 201);
+    assert.equal(imageCandidatesBody.image_candidate_nodes.length, 4);
+    assert.equal(imageCandidatesBody.image_candidate_nodes[0]?.node_type, "image_candidate");
+
+    const gapVideoResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/gap-video`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_01",
+          use_video_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const gapVideoBody = (await gapVideoResponse.json()) as {
+      generated_video_node: Record<string, unknown>;
+      generation_result: Record<string, unknown>;
+    };
+    assert.equal(gapVideoResponse.status, 200);
+    assert.equal(gapVideoBody.generated_video_node.node_type, "generated_video");
+    assert.equal(gapVideoBody.generation_result.status, "mock_ready");
+
+    const reviewTrimResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/generated-videos/review-trim`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          generated_video_node_id: gapVideoBody.generated_video_node.node_id,
+          video_uri: path.join(storageConfig.uploadDir, `${firstFileId}-sample.mp4`),
+          target_duration_seconds: 0.5,
+          use_multimodal_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const reviewTrimBody = (await reviewTrimResponse.json()) as {
+      generated_video_node: Record<string, unknown>;
+      usable_video_uri: string;
+    };
+    assert.equal(reviewTrimResponse.status, 200);
+    assert.match(reviewTrimBody.usable_video_uri, /^\/api\/v2\/generation\/trimmed-videos\//);
+    assert.equal(asRecord(reviewTrimBody.generated_video_node.data).trim_status, "trimmed");
+
+    const addMaterialResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01/materials`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          file_ids: [secondFileId]
+        })
+      }
+    );
+    assert.equal(addMaterialResponse.status, 201);
+
+    const completedRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const completedRevalidate = (await completedRevalidateResponse.json()) as {
+      canvas_nodes: Array<Record<string, unknown>>;
+      material_segments: Array<Record<string, unknown>>;
+      canvas_session_id: string;
+    };
+    assert.equal(completedRevalidateResponse.status, 200);
+    assert.equal(completedRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(completedRevalidate.material_segments.length, 2);
+    assert.equal(asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).length, 2);
+
+    const canvasAssemblyResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${completedRevalidate.canvas_session_id}/final-video`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          target_duration_seconds: 2,
+          resolution: "360x640",
+          fps: 12
+        })
+      }
+    );
+    const canvasAssembly = (await canvasAssemblyResponse.json()) as {
+      assembly_slots: Array<Record<string, unknown>>;
+      final_assembly: Record<string, unknown>;
+    };
+    assert.equal(canvasAssemblyResponse.status, 200);
+    assert.equal(canvasAssembly.assembly_slots.length, 2);
+    assert.match(String(canvasAssembly.final_assembly.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
+  }
+);
+
+test(
+  "v2 script slot order is persisted before canvas revalidation",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const hookFileId = createUploadedTestVideo(1);
+    const ctaFileId = createUploadedTestVideo(1);
+
+    const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_request: {
+          goal: "6 秒冰红茶广告"
+        },
+        target_duration_seconds: 2,
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "hook",
+            duration_seconds: 1,
+            shot_description: "开场冰块冲击。",
+            materials: [
+              {
+                material_id: "hook_clip",
+                file_id: hookFileId,
+                uri: `/api/upload/files/${hookFileId}`
+              }
+            ]
+          },
+          {
+            slot_id: "slot_02",
+            slot_type: "cta",
+            duration_seconds: 1,
+            shot_description: "结尾饮用动作。",
+            materials: [
+              {
+                material_id: "cta_clip",
+                file_id: ctaFileId,
+                uri: `/api/upload/files/${ctaFileId}`
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const created = (await createResponse.json()) as {
+      session_id: string;
+      slots: Array<Record<string, unknown>>;
+    };
+    assert.equal(createResponse.status, 201);
+    assert.deepEqual(
+      created.slots.map((slot) => slot.slot_id),
+      ["slot_01", "slot_02"]
+    );
+    assert.deepEqual(
+      created.slots.map((slot) => slot.display_order),
+      [1, 2]
+    );
+
+    const reorderResponse = await fetch(
+      `${baseUrl}/api/v2/script-sessions/${created.session_id}/slot-order`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_ids: ["slot_02", "slot_01"]
+        })
+      }
+    );
+    const reordered = (await reorderResponse.json()) as {
+      slots: Array<Record<string, unknown>>;
+    };
+    assert.equal(reorderResponse.status, 200);
+    assert.deepEqual(
+      reordered.slots.map((slot) => slot.slot_id),
+      ["slot_02", "slot_01"]
+    );
+    assert.deepEqual(
+      reordered.slots.map((slot) => slot.display_order),
+      [1, 2]
+    );
+
+    const revalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        extract_frames: false,
+        use_multimodal_provider: false
+      })
+    });
+    const revalidated = (await revalidateResponse.json()) as {
+      script_slots: Array<Record<string, unknown>>;
+      canvas_nodes: Array<Record<string, unknown>>;
+      material_segments: Array<Record<string, unknown>>;
+    };
+
+    assert.equal(revalidateResponse.status, 200);
+    assert.deepEqual(
+      revalidated.script_slots.map((slot) => slot.slot_id),
+      ["slot_02", "slot_01"]
+    );
+    assert.deepEqual(
+      revalidated.canvas_nodes.map((node) => node.slot_id),
+      ["slot_02", "slot_01"]
+    );
+    assert.equal(revalidated.material_segments[0]?.assigned_slot_id, "slot_02");
+    assert.equal(revalidated.material_segments[0]?.script_order_index, 0);
+    assert.equal(revalidated.material_segments[0]?.display_order, 1);
+  }
+);
 
 test(
   "POST /api/v2/generation/image-to-video can use an existing material frame",
@@ -1574,6 +2255,14 @@ test(
 
     assert.match(String(result.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
     assert.equal(result.planned_duration_seconds, 1);
+    assert.deepEqual(result.audio_policy, {
+      source_clip_audio: "muted",
+      per_clip_bgm: "disabled",
+      final_bgm: {
+        selection_mode: "ai_selected_at_final_assembly",
+        status: "pending_provider_integration"
+      }
+    });
     assert.ok(
       Math.abs(Number(result.final_duration_seconds) - 1) < 0.15,
       `expected final duration close to 1s, got ${result.final_duration_seconds}`

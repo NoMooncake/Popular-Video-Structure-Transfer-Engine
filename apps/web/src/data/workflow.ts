@@ -50,6 +50,9 @@ export const createCanvasBlocks = (blueprint: StructureBlueprint): CanvasBlock[]
   label: slot.slot_type,
   timeRange: formatTimeRange(slot.time_range),
   status: statusBySlotId[slot.slot_id] ?? "missing",
+  migrationResult: slot.migration_rule,
+  materialSummary: timelineBySlotId.get(slot.slot_id)?.visual_description ?? "待匹配素材",
+  copy: timelineBySlotId.get(slot.slot_id)?.subtitle || timelineBySlotId.get(slot.slot_id)?.voiceover || "待生成文案",
   slot,
   gap: gapBySlotId.get(slot.slot_id),
   timeline: timelineBySlotId.get(slot.slot_id)
