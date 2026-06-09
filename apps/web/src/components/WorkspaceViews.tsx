@@ -3,10 +3,10 @@ import type { ChangeEvent, KeyboardEvent } from "react";
 
 import type { WorkflowRunResult } from "../App";
 import {
-  analyzeSampleVideo,
+  analyzeV2Pipeline,
   assembleV2CanvasFinalVideo,
   assembleV2FinalVideo,
-  extractStructureBlueprint,
+  createV2ScriptSession,
   uploadMaterialFiles,
   uploadSampleVideos
 } from "../api/client";
@@ -24,7 +24,9 @@ import type {
   StepKey,
   StructureBlueprint,
   V2FinalAssemblySlot,
-  UploadedVideoFile
+  UploadedVideoFile,
+  V2PipelineResult,
+  V2ReferenceAnalysisTable
 } from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { VideoBlockCanvas } from "./VideoBlockCanvas";
@@ -44,6 +46,7 @@ type WorkspaceViewsProps = {
   selectedBlockId: string;
   structureBlueprint?: StructureBlueprint;
   workflowResult: WorkflowRunResult | null;
+  v2PipelineResult?: V2PipelineResult;
   projectName: string;
   onProjectNameChange: (name: string) => void;
 };
@@ -172,6 +175,34 @@ const toBackendCategory = (value: string) => {
   return value.trim() || "pet_food";
 };
 
+const getErrorMessage = (error: unknown) => {
+  return error instanceof Error ? error.message : "接口连接失败";
+};
+
+const getTargetDurationSeconds = (brief: string) => {
+  const match = brief.match(/(\d+(?:\.\d+)?)\s*(?:秒|s)/iu);
+  const duration = Number(match?.[1] ?? 20);
+
+  return Number.isFinite(duration) && duration > 0 ? duration : 20;
+};
+
+const readTextAssets = async (files: File[]) => {
+  const textFiles = files.filter(
+    (file) =>
+      file.type.startsWith("text/") ||
+      file.name.toLowerCase().endsWith(".txt") ||
+      file.name.toLowerCase().endsWith(".md")
+  );
+
+  return Promise.all(
+    textFiles.map(async (file, index) => ({
+      asset_id: `txt_${String(index + 1).padStart(2, "0")}`,
+      type: "note" as const,
+      content: await file.text()
+    }))
+  );
+};
+
 export const WorkspaceViews = ({
   activeStep,
   blocks,
@@ -187,6 +218,7 @@ export const WorkspaceViews = ({
   selectedBlockId,
   structureBlueprint,
   workflowResult,
+  v2PipelineResult,
   projectName,
   onProjectNameChange
 }: WorkspaceViewsProps) => {
@@ -207,6 +239,7 @@ export const WorkspaceViews = ({
         sampleAnalysis={sampleAnalysis}
         sampleFile={sampleFile}
         structureBlueprint={structureBlueprint}
+        v2PipelineResult={v2PipelineResult}
         projectName={projectName}
         onProjectNameChange={onProjectNameChange}
       />
@@ -375,56 +408,59 @@ const InputView = ({
           ? await uploadMaterialFiles(videoMaterialFiles)
           : { files: [] };
 
-      setPipelineStatus("analyzing");
-      setPipelineNote("正在解析样例视频");
-      const analysis = await analyzeSampleVideo(uploadedSampleFile.file_id);
-
       setPipelineStatus("extracting");
       setPipelineNote("正在调用 Mimo 提取结构");
-      let usedStructureFallback = false;
-      let blueprint: StructureBlueprint;
-      try {
-        blueprint = await extractStructureBlueprint(analysis, {
-          category: toBackendCategory(targetTopic),
-          useMock: false,
-          vertical: "seeding_de_seeding"
-        });
-      } catch {
-        usedStructureFallback = true;
-        blueprint = await extractStructureBlueprint(analysis, {
-          category: toBackendCategory(targetTopic),
-          useMock: true,
-          vertical: "seeding_de_seeding"
-        });
-      }
+      const textAssets = await readTextAssets(materialFiles);
+      const pipelineResult = await analyzeV2Pipeline({
+        reference_file_ids: uploadedSample.files.map((file) => file.file_id),
+        user_material_file_ids: uploadedMaterials.files.map((file) => file.file_id),
+        text_assets: [
+          {
+            asset_id: "brief_01",
+            type: "brief",
+            content: brief
+          },
+          ...textAssets
+        ],
+        user_request: {
+          goal: brief,
+          product_name: targetTopic,
+          style_preferences: [toBackendCategory(targetTopic)]
+        },
+        options: {
+          allow_fallback: true,
+          generate_image_candidates: false,
+          image_candidate_count: 4,
+          target_duration_seconds: getTargetDurationSeconds(brief)
+        }
+      });
+      const scriptSession = await createV2ScriptSession({
+        pipeline_result: pipelineResult,
+        user_request: {
+          goal: brief,
+          product_name: targetTopic
+        },
+        target_duration_seconds: pipelineResult.summary.target_duration_seconds
+      });
 
       setPipelineStatus("success");
       setPipelineNote(
-        usedStructureFallback
-          ? "Mimo 返回结构未通过后端 schema 校验，已回退到规则结构。"
-          : skippedMaterialCount > 0
+        skippedMaterialCount > 0
           ? `已完成分析；${skippedMaterialCount} 个非视频素材暂未上传到当前后端。`
           : "已完成真实接口分析"
       );
       onWorkflowReady({
         materialFiles: uploadedMaterials.files,
-        sampleAnalysis: analysis,
         sampleFile: uploadedSampleFile,
-        structureBlueprint: blueprint
+        scriptSession,
+        v2PipelineResult: pipelineResult
       });
       onNext();
     } catch (error) {
-      console.warn("Backend unavailable, falling back to UI preview mode.", error);
-      setPipelineStatus("success");
-      setPipelineNote("（纯UI预览模式）接口连接失败");
-      // Set to empty mock data so UI can still render
-      onWorkflowReady({
-        materialFiles: [],
-        sampleAnalysis: undefined,
-        sampleFile: undefined,
-        structureBlueprint: undefined
-      });
-      onNext();
+      console.warn("V2 pipeline failed.", error);
+      setPipelineStatus("error");
+      setPipelineNote("接口连接失败");
+      setPipelineError(getErrorMessage(error));
     }
   };
 
@@ -622,6 +658,18 @@ const buildBackendSampleRows = (
   });
 };
 
+const buildV2SampleRows = (tables: V2ReferenceAnalysisTable[]): SampleAnalysisRow[] => {
+  return tables.flatMap((table) =>
+    (table.rows ?? []).map((row, index) => ({
+      duration: row.duration ?? "",
+      image: row.sample_video?.media?.uri ?? figmaSampleImages[index % figmaSampleImages.length],
+      shotTitle: row.shot_description?.title ?? `分镜 ${index + 1}`,
+      shotDescription: row.shot_description?.description ?? "",
+      migrationPossibility: row.migration_possibility ?? ""
+    }))
+  );
+};
+
 const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
   1: [
     {
@@ -760,6 +808,7 @@ const FigmaSampleAnalysisView = ({
   sampleAnalysis,
   sampleFile,
   structureBlueprint,
+  v2PipelineResult,
   projectName,
   onProjectNameChange
 }: {
@@ -767,17 +816,23 @@ const FigmaSampleAnalysisView = ({
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
   structureBlueprint?: StructureBlueprint;
+  v2PipelineResult?: V2PipelineResult;
   projectName: string;
   onProjectNameChange: (name: string) => void;
 }) => {
-  const [activeSample, setActiveSample] = useState(2);
+  const [activeSample, setActiveSample] = useState(v2PipelineResult || sampleAnalysis ? 0 : 2);
   const [extraSamples, setExtraSamples] = useState<ExtraSample[]>([]);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [tempTitle, setTempTitle] = useState(projectName);
   const addSampleInputRef = useRef<HTMLInputElement>(null);
-  const backendRows = sampleAnalysis
-    ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
+  const v2Rows = v2PipelineResult?.stages.reference_analysis_tables
+    ? buildV2SampleRows(v2PipelineResult.stages.reference_analysis_tables)
     : null;
+  const backendRows = v2Rows?.length
+    ? v2Rows
+    : sampleAnalysis
+      ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
+      : null;
   const sourceLabel = projectName;
 
   const baseSampleCount = backendRows ? 1 : 3;

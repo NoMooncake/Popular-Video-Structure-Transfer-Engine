@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import { generateV2ImageCandidates, generateV2ImageToVideo } from "../api/client";
 import type { CanvasBlock } from "../types";
 
 type VideoBlockCanvasProps = {
@@ -20,6 +21,7 @@ type CanvasStatus = "matched" | "missing" | "partial" | "generating";
 
 type VideoGenerationPayload = {
   keyframe_image?: string;
+  source_video_uri?: string;
   video_prompt: string;
 };
 
@@ -97,6 +99,47 @@ const defaultVideoPromptFor = (block: CanvasBlock, index: number) =>
 
 const rotateCandidates = (seed: number) =>
   Array.from({ length: 4 }, (_, index) => aiCandidateImages[(seed + index) % aiCandidateImages.length]);
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const getStringField = (record: Record<string, unknown>, fields: string[]) => {
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+
+  return undefined;
+};
+
+const extractImageCandidateUris = (response: unknown): string[] => {
+  const record = asRecord(response);
+  const items = Array.isArray(record.data)
+    ? record.data
+    : Array.isArray(record.images)
+      ? record.images
+      : [];
+
+  return items
+    .map((item) => getStringField(asRecord(item), ["uri", "url", "image_url"]))
+    .filter((uri): uri is string => Boolean(uri));
+};
+
+const extractGeneratedVideoUri = (response: unknown): string | undefined => {
+  const record = asRecord(response);
+  const output = asRecord(record.output);
+  const data = asRecord(record.data);
+
+  return (
+    getStringField(record, ["video_uri", "uri", "url", "video_url"]) ||
+    getStringField(output, ["video_uri", "uri", "url", "video_url"]) ||
+    getStringField(data, ["video_uri", "uri", "url", "video_url"])
+  );
+};
 
 export const VideoBlockCanvas = ({
   blocks,
@@ -190,10 +233,14 @@ export const VideoBlockCanvas = ({
   };
 
   const getKeyframePrompt = (block: CanvasBlock, index: number) =>
-    keyframePrompts[block.id] ?? defaultKeyframePromptFor(block, index);
+    keyframePrompts[block.id] ??
+    block.v2?.coverageSlot?.recommended_aigc_prompt?.prompt ??
+    defaultKeyframePromptFor(block, index);
 
   const getVideoPrompt = (block: CanvasBlock, index: number) =>
-    videoPrompts[block.id] ?? defaultVideoPromptFor(block, index);
+    videoPrompts[block.id] ??
+    block.v2?.coverageSlot?.recommended_video_prompt?.prompt ??
+    defaultVideoPromptFor(block, index);
 
   const applyZoom = (
     nextZoom: number,
@@ -391,17 +438,37 @@ export const VideoBlockCanvas = ({
     setActiveEditorBlockId(canEdit ? blockId : null);
   };
 
-  const generateKeyframeCandidates = (blockId: string) => {
+  const generateKeyframeCandidates = async (blockId: string) => {
     setActiveEditorBlockId(blockId);
     setKeyframeLoadingBlockId(blockId);
     setSelectedCandidateUrl(null);
 
-    window.setTimeout(() => {
+    const blockIndex = blocks.findIndex((block) => block.id === blockId);
+    const block = blocks[blockIndex];
+    if (!block) {
+      setKeyframeLoadingBlockId(null);
+      return;
+    }
+
+    try {
+      const prompt =
+        block.v2?.coverageSlot?.recommended_aigc_prompt?.prompt ??
+        getKeyframePrompt(block, blockIndex);
+      const response = await generateV2ImageCandidates({
+        prompt,
+        count: 4,
+        allow_fallback: true,
+        reference_video_uris:
+          block.v2?.coverageSlot?.direct_video_reference_materials
+            ?.map((material) => material.uri)
+            .filter((uri): uri is string => Boolean(uri)) ?? []
+      });
+      const generatedUris = extractImageCandidateUris(response);
       setCandidateSeeds((current) => {
         const nextSeed = (current[blockId] ?? 0) + 1;
         setKeyframeCandidates((candidateMap) => ({
           ...candidateMap,
-          [blockId]: rotateCandidates(nextSeed)
+          [blockId]: generatedUris.length > 0 ? generatedUris : rotateCandidates(nextSeed)
         }));
         return {
           ...current,
@@ -413,8 +480,11 @@ export const VideoBlockCanvas = ({
         delete next[blockId];
         return next;
       });
+    } catch (error) {
+      console.warn("V2 image candidate generation failed.", error);
+    } finally {
       setKeyframeLoadingBlockId(null);
-    }, 500);
+    }
   };
 
   const openCandidateSelector = (blockId: string) => {
@@ -438,23 +508,43 @@ export const VideoBlockCanvas = ({
     setSelectedCandidateUrl(null);
   };
 
-  const generateVideo = (block: CanvasBlock, index: number) => {
+  const generateVideo = async (block: CanvasBlock, index: number) => {
     const videoPrompt = getVideoPrompt(block, index).trim();
     if (!videoPrompt || generatingVideoBlockId) {
       return;
     }
 
+    const sourceVideoUri = block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri;
+    const fallbackImage = keyframeCandidates[block.id]?.[0] ?? imageForBlock(index);
     const payload: VideoGenerationPayload = {
-      keyframe_image: selectedKeyframes[block.id],
+      keyframe_image: selectedKeyframes[block.id] ?? (sourceVideoUri ? undefined : fallbackImage),
+      source_video_uri: sourceVideoUri,
       video_prompt: videoPrompt
     };
 
     setGeneratingVideoBlockId(block.id);
     setActiveEditorBlockId(null);
 
-    window.setTimeout(() => {
+    try {
+      const response = await generateV2ImageToVideo({
+        approved_image_uri: payload.keyframe_image,
+        source_video_uri: payload.source_video_uri,
+        video_prompt: payload.video_prompt,
+        generation_mode: payload.keyframe_image ? "generated_image" : "direct_from_material_frame",
+        duration_seconds:
+          block.v2?.coverageSlot?.ai_completion_required_duration ??
+          block.v2?.coverageSlot?.required_duration ??
+          5,
+        slot_id: block.id,
+        slot_type: block.slot.slot_type,
+        slot_description: block.migrationResult,
+        allow_fallback: true
+      });
       const generatedThumbnail =
-        payload.keyframe_image ?? keyframeCandidates[block.id]?.[0] ?? imageForBlock(index);
+        extractGeneratedVideoUri(response) ??
+        payload.keyframe_image ??
+        keyframeCandidates[block.id]?.[0] ??
+        imageForBlock(index);
 
       setGeneratedVideoThumbs((current) => ({
         ...current,
@@ -475,7 +565,10 @@ export const VideoBlockCanvas = ({
       });
 
       setGeneratingVideoBlockId(null);
-    }, 900);
+    } catch (error) {
+      console.warn("V2 image-to-video generation failed.", error);
+      setGeneratingVideoBlockId(null);
+    }
   };
 
   const editorBlock = activeEditorBlockId

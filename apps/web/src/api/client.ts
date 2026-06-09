@@ -230,6 +230,36 @@ export type V2ImageToVideoRequest = {
   allow_fallback?: boolean;
 };
 
+export type V2ScriptSession = {
+  session_id: string;
+  created_at: string;
+  updated_at: string;
+  source_pipeline_id?: string;
+  target_duration_seconds: number;
+  user_request: Record<string, unknown>;
+  slots: Array<{
+    slot_id: string;
+    slot_type: string;
+    slot_name?: string;
+    display_order: number;
+    required_duration: number;
+    shot_description: string;
+    voiceover_text?: string;
+    copy?: string;
+    material_folder_id: string;
+    editable_fields: string[];
+    locked_fields: string[];
+    materials: Array<{
+      material_id: string;
+      file_id?: string;
+      uri: string;
+      label?: string;
+      role: "user_material";
+      assigned_at: string;
+    }>;
+  }>;
+};
+
 export const getV2Status = async <T = unknown>(): Promise<T> => {
   return toJson<T>(await fetch("/api/v2/status"));
 };
@@ -239,6 +269,22 @@ export const analyzeV2Pipeline = async (
 ): Promise<V2PipelineResult> => {
   return toJson<V2PipelineResult>(
     await fetch("/api/v2/pipeline/analyze", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const createV2ScriptSession = async (payload: {
+  pipeline_result: V2PipelineResult;
+  user_request?: Record<string, unknown>;
+  target_duration_seconds?: number;
+}): Promise<V2ScriptSession> => {
+  return toJson<V2ScriptSession>(
+    await fetch("/api/v2/script-sessions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
