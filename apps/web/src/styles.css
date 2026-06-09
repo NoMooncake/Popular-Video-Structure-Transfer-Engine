@@ -1274,7 +1274,8 @@ input {
   background: #0a0a0a;
   color: #ffffff;
   font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", sans-serif;
-  letter-spacing: -0.22px;
+  letter-spacing: 0;
+  font-weight: 400;
 }
 
 .figma-analysis-topbar {
@@ -1282,9 +1283,9 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  width: min(100%, 1632px);
-  height: 74px;
-  margin: 18px auto 0;
+  width: min(100%, 1728px);
+  height: 106px;
+  margin: 0 auto;
   padding: 0 64px;
 }
 
@@ -1292,15 +1293,34 @@ input {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px;
+  padding: 0;
 }
 
-.figma-analysis-brand span {
+.figma-analysis-brand span,
+.figma-brand-home {
   color: #fe2c55;
   font-size: 36px;
   font-weight: 400;
   line-height: 1.5;
-  letter-spacing: -0.396px;
+  letter-spacing: 0;
+}
+
+.figma-brand-home {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.2s, transform 0.15s;
+}
+
+.figma-brand-home:hover {
+  color: #ff5d78;
+}
+
+.figma-brand-home:active {
+  transform: scale(0.97);
 }
 
 .figma-analysis-brand strong {
@@ -1364,14 +1384,14 @@ input {
 
 .figma-migration-button {
   position: absolute;
-  top: 92px;
-  right: max(64px, calc((100vw - 1632px) / 2 + 64px));
+  top: 116px;
+  right: max(64px, calc((100vw - 1728px) / 2 + 64px));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  min-width: 120px;
-  height: 40px;
+  min-width: 140px;
+  height: 48px;
   border: 0;
   border-radius: 999px;
   padding: 0 16px;
@@ -1382,7 +1402,7 @@ input {
   font-size: 20px;
   font-weight: 700;
   line-height: 1.5;
-  letter-spacing: -0.22px;
+  letter-spacing: 0;
   z-index: 10;
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
@@ -1410,23 +1430,26 @@ input {
 }
 
 .figma-analysis-content {
-  display: flex;
+  display: block;
   flex: 1;
   overflow: hidden;
-  width: min(100%, 1632px);
+  width: min(100%, 1728px);
   margin: 0 auto;
   position: relative;
-  padding-top: 50px;
+  padding-top: 92px;
 }
 
 .figma-sample-nav {
-  width: 80px;
-  flex-shrink: 0;
+  position: fixed;
+  z-index: 9;
+  left: max(58px, calc((100vw - 1728px) / 2 + 58px));
+  top: 498px;
   display: flex;
   flex-direction: column;
   gap: 16px;
   align-items: center;
   justify-content: center;
+  width: 30px;
 }
 
 .figma-sample-nav button {
@@ -1444,7 +1467,7 @@ input {
   font-size: 20px;
   font-weight: 400;
   line-height: 30px;
-  letter-spacing: -0.22px;
+  letter-spacing: 0;
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s, transform 0.15s;
 }
@@ -1480,11 +1503,25 @@ input {
 }
 
 .figma-analysis-table-wrap {
-  flex: 1;
+  width: 1076px;
+  height: calc(100vh - 198px);
   overflow-y: auto;
   overflow-x: auto;
-  padding-bottom: 28px;
-  padding-right: 20px;
+  margin: 0 auto;
+  padding: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.figma-analysis-table-wrap::-webkit-scrollbar,
+.figma-analysis-content::-webkit-scrollbar,
+.figma-sample-nav::-webkit-scrollbar,
+.migration-scroll::-webkit-scrollbar,
+.migration-matrix-container::-webkit-scrollbar,
+.material-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .figma-analysis-table {
@@ -1496,7 +1533,7 @@ input {
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 0;
 }
 
 .figma-analysis-row {
@@ -1519,6 +1556,12 @@ input {
 
 .figma-analysis-head {
   min-height: 46px;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #0a0a0a;
+  border-radius: 14px 14px 0 0;
+  margin-bottom: 12px;
 }
 
 .figma-analysis-row > div {
@@ -1677,6 +1720,10 @@ input {
     font-size: 30px;
   }
 
+  .figma-brand-home {
+    font-size: 30px;
+  }
+
   .figma-analysis-brand strong {
     font-size: 18px;
   }
@@ -1687,12 +1734,19 @@ input {
   }
 
   .figma-analysis-content {
+    display: flex;
     flex-direction: column;
     overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
 
   .figma-sample-nav {
+    position: sticky;
+    top: 0;
+    z-index: 2;
     width: auto;
+    height: auto;
     flex-direction: row;
     padding-top: 0;
     padding: 16px 16px 0;
@@ -1701,8 +1755,10 @@ input {
 
   .figma-analysis-table-wrap {
     width: calc(100vw - 32px);
+    height: auto;
     margin: 16px auto 0;
     padding-right: 0;
+    overflow-y: visible;
   }
 }
 
@@ -3623,14 +3679,12 @@ input {
    the finished 样例解析 page. Fixed-width table scrolls horizontally on narrow
    screens (responsive skeleton untouched). === */
 
-/* Vertical scroll area inside the 100vh page shell */
-.migration-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+.migration-fixed-frame {
+  flex-shrink: 0;
   width: min(100%, 1728px);
+  height: 48px;
   margin: 0 auto;
-  padding: 0 0 64px;
+  padding: 0 64px;
 }
 
 .migration-toolbar {
@@ -3638,13 +3692,15 @@ input {
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  padding: 0 64px;
-  margin: 8px 0 18px;
+  height: 48px;
+  min-height: 48px;
+  margin: 0;
 }
 
 .migration-hint {
   color: #dddddd;
   font-size: 16px;
+  font-weight: 400;
   text-align: center;
 }
 
@@ -3661,11 +3717,11 @@ input {
   font-size: 20px;
   font-weight: 700;
   gap: 4px;
-  height: 40px;
+  height: 48px;
   justify-content: center;
-  letter-spacing: -0.22px;
+  letter-spacing: 0;
   line-height: 1.5;
-  min-width: 120px;
+  min-width: 146px;
   padding: 0 16px 2px;
   transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
   white-space: nowrap;
@@ -3694,46 +3750,104 @@ input {
 
 /* Horizontal scroll for the fixed-width matrix */
 .migration-matrix-container {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   overflow-x: auto;
-  padding: 0 64px;
+  overflow-y: hidden;
+  padding: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* Vertical scroll area inside the 100vh page shell. The fixed frame and
+   directory/header remain outside this scroll; only the blocks move. */
+.migration-scroll {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  width: min(100%, 1728px);
+  margin: 0 auto;
+  padding: 46px 0 0;
 }
 
 .migration-matrix {
-  min-width: 1560px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 1301px;
+  min-width: 1301px;
+  margin: 0 auto;
 }
 
 .migration-header {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
-  padding: 0 12px 4px;
+  height: 46px;
+  padding: 0 15px 0 12px;
+  background: #0a0a0a;
+  z-index: 4;
 }
 
 .migration-header .migration-col {
   color: #ffffff;
   font-size: 20px;
-  padding: 8px 12px;
+  font-weight: 400;
+  padding: 8px 0;
 }
 
 .migration-rows {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 0 52px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.migration-rows::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .migration-row {
   align-items: stretch;
   border: 1px solid #717375;
-  border-radius: 16px;
+  border-radius: 12px;
   cursor: grab;
   display: flex;
   gap: 8px;
+  flex: 0 0 244px;
+  height: 244px;
   overflow: hidden;
-  padding-right: 12px;
-  transition: border-color 150ms;
+  padding: 0 15px 0 12px;
+  background: transparent;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.migration-row:hover {
+  background: rgba(93, 95, 97, 0.28);
+  border-color: #8a8c8e;
+  border-radius: 24px;
+  box-shadow: none;
+  transform: translateY(-1px);
+}
+
+.migration-row:active {
+  transform: translateY(0);
 }
 
 .migration-row.selected {
-  border-color: #fe2c55;
+  background: rgba(93, 95, 97, 0.5);
+  border-color: #717375;
+  border-radius: 24px;
+  box-shadow: none;
   cursor: default;
 }
 
@@ -3755,6 +3869,7 @@ input {
   flex-direction: column;
   gap: 8px;
   justify-content: center;
+  font-weight: 400;
   text-align: center;
 }
 
@@ -3768,12 +3883,12 @@ input {
 }
 
 .col-desc {
-  flex: 0 0 280px;
+  flex: 0 0 300px;
   padding: 0 4px;
 }
 
 .col-material {
-  flex: 0 0 280px;
+  flex: 0 0 300px;
   padding: 0 8px;
 }
 
@@ -3782,7 +3897,7 @@ input {
   padding: 0 4px;
 }
 
-.col-status {
+.col-add {
   flex: 0 0 110px;
   padding: 0 4px;
 }
@@ -3790,22 +3905,19 @@ input {
 /* Thumbnail 312×240 (defines row height) */
 .migration-thumb-img {
   background: #5d5f61;
+  display: block;
   height: 240px;
+  object-fit: cover;
   width: 312px;
-}
-
-/* Editable cells get the gray fill only when the row is selected (Figma Variant2). */
-.migration-row.selected .col-duration,
-.migration-row.selected .col-voiceover {
-  background: rgba(93, 95, 97, 0.6);
-  border-radius: 8px;
 }
 
 .migration-duration-input {
   background: transparent;
   border: none;
   color: #ffffff;
+  font-family: inherit;
   font-size: 20px;
+  font-weight: 400;
   text-align: center;
   width: 100%;
 }
@@ -3818,7 +3930,9 @@ input {
   background: transparent;
   border: none;
   color: #ffffff;
+  font-family: inherit;
   font-size: 20px;
+  font-weight: 400;
   line-height: 30px;
   min-height: 90px;
   resize: none;
@@ -3841,16 +3955,21 @@ input {
 .desc-tag-name {
   color: #ffffff;
   font-size: 20px;
+  font-weight: 400;
 }
 
 .desc-tag-index {
   color: #ffffff;
   font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  padding-top: 2px;
 }
 
 .desc-body {
   color: #ffffff;
   font-size: 20px;
+  font-weight: 400;
   line-height: 30px;
 }
 
@@ -3870,13 +3989,45 @@ input {
 .material-note {
   color: #ffffff;
   font-size: 16px;
+  font-weight: 400;
   line-height: 24px;
+}
+
+.material-note {
+  color: #d8d8d8;
+  margin-top: 8px;
+}
+
+.migration-add-material {
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 26px;
+  font-weight: 400;
+  height: 32px;
+  line-height: 1;
+  padding: 0;
+  width: 32px;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.migration-add-material:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.migration-add-material:active {
+  background: rgba(254, 44, 85, 0.24);
 }
 
 /* 素材状态 (read-only plain text) */
 .status-text {
   color: #ffffff;
   font-size: 20px;
+  font-weight: 400;
 }
 
 /* TTS button (shown only on the selected row) */
