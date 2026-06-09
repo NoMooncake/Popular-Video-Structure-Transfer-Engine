@@ -808,6 +808,35 @@ const makeDirectVideoReferenceMaterialsFromSegments = (
   }));
 };
 
+const formatSegmentTimeRange = (segment: JsonObject): string => {
+  const sourceIn = getNumber(segment.source_in_seconds);
+  const sourceOut = getNumber(segment.source_out_seconds);
+  if (sourceOut > sourceIn) {
+    return `${sourceIn.toFixed(3).replace(/\.?0+$/u, "")}-${sourceOut
+      .toFixed(3)
+      .replace(/\.?0+$/u, "")}s`;
+  }
+
+  return "";
+};
+
+const buildAssignedMaterialSummary = (assignedSegments: JsonObject[]): string => {
+  return assignedSegments
+    .map((segment) => {
+      const label =
+        normalizeOptionalString(segment.label) ||
+        normalizeOptionalString(segment.file_id) ||
+        normalizeOptionalString(segment.source_material_id) ||
+        "素材";
+      const matchedDuration = getNumber(segment.matched_material_duration);
+      const timeRange = formatSegmentTimeRange(segment);
+      const durationText = matchedDuration > 0 ? `${matchedDuration}s` : "";
+
+      return [label, timeRange, durationText].filter(Boolean).join(" ");
+    })
+    .join("\n");
+};
+
 const getSegmentMaterialKey = (segment: JsonObject): string =>
   normalizeOptionalString(segment.source_material_id) ||
   normalizeOptionalString(segment.file_id) ||
@@ -1202,6 +1231,26 @@ const buildSegmentAwareMaterialCoverage = (
         : matchedMaterialDuration > 0
           ? `已匹配 ${matchedMaterialDuration}s，但该段需要 ${slot.required_duration}s。`
           : "该段文件夹内没有可用素材片段。";
+    const frontendDisplay = {
+      ...asJsonObject(base.frontend_display),
+      migration_result_title: slot.slot_name || slot.slot_type,
+      migration_result_description: slot.shot_description,
+      duration_text: `${slot.required_duration}s`,
+      shot_description: slot.shot_description,
+      material_summary: buildAssignedMaterialSummary(assignedSegments),
+      copy: slot.voiceover_text || slot.copy || "",
+      material_status:
+        frontendCoverageStatus === "fully_matched"
+          ? "完全匹配"
+          : frontendCoverageStatus === "structure_complete_duration_short"
+            ? "结构完整，但时长不足"
+            : "素材不够",
+      add_material_button: {
+        visible: true,
+        label: "添加素材",
+        action: "add_material"
+      }
+    };
 
     return {
       ...base,
@@ -1218,6 +1267,7 @@ const buildSegmentAwareMaterialCoverage = (
           : frontendCoverageStatus === "structure_complete_duration_short"
             ? "结构完整，但时长不足"
             : "素材不够",
+      frontend_display: frontendDisplay,
       missing_duration: missingDuration,
       raw_missing_duration: rawMissingDuration,
       ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
