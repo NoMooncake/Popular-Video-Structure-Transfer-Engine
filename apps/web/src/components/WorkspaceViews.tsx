@@ -32,6 +32,7 @@ import type {
   StructureBlueprint,
   V2CanvasFinalVideoResult,
   V2FinalAssemblySlot,
+  V2MaterialCoverageSlot,
   UploadedVideoFile,
   V2PipelineResult,
   V2ReferenceAnalysisTable
@@ -190,6 +191,70 @@ const sourceReferenceMarks = (block: CanvasBlock, fallbackIndex: number) => {
     .slice(0, 3)
     .map((_, index) => sourceMarks[index] ?? String(index + 1))
     .join("");
+};
+
+const formatMaterialSeconds = (value: number | undefined): string | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  return `${Number(value.toFixed(3))}s`;
+};
+
+type AssignedMaterial = NonNullable<V2MaterialCoverageSlot["assigned_materials"]>[number];
+
+const getAssignedMaterialRange = (material: AssignedMaterial): string | undefined => {
+  if (material.time_range) {
+    return material.time_range;
+  }
+
+  const start = material.source_in_seconds ?? material.start_seconds;
+  const end = material.source_out_seconds ?? material.end_seconds;
+  const startText = formatMaterialSeconds(start);
+  const endText = formatMaterialSeconds(end);
+
+  if (startText && endText) {
+    return `${startText} - ${endText}`;
+  }
+
+  const durationText = formatMaterialSeconds(material.matched_material_duration);
+  return durationText ? `匹配 ${durationText}` : undefined;
+};
+
+const getMigrationMaterialItems = (
+  block: CanvasBlock,
+  fallbackFile: UploadedVideoFile | undefined,
+  localMaterialNames: string[]
+): Array<{ name: string; note?: string }> => {
+  const assignedMaterials = block.v2?.coverageSlot?.assigned_materials ?? [];
+  const assignedItems = assignedMaterials.map((material, index) => ({
+    name:
+      material.label ||
+      material.material_id ||
+      material.segment_id ||
+      `匹配片段 ${index + 1}`,
+    note:
+      getAssignedMaterialRange(material) ||
+      material.visual_description ||
+      material.recommended_usage ||
+      material.content_summary
+  }));
+  const localItems = localMaterialNames.map((name) => ({ name }));
+
+  if (assignedItems.length > 0) {
+    return [...assignedItems, ...localItems];
+  }
+
+  const fallbackItems = fallbackFile
+    ? [{ name: fallbackFile.original_filename }]
+    : [{ name: "空" }];
+
+  return [...fallbackItems, ...localItems];
+};
+
+const getEditableVoiceoverText = (block: CanvasBlock): string => {
+  const value = (block.timeline?.voiceover || block.copy || "").trim();
+  return value === "待生成文案" ? "" : value;
 };
 
 const toBackendCategory = (value: string) => {
@@ -1407,10 +1472,12 @@ const StructureMigrationView = ({
             <div className="migration-rows">
               {blocks.map((block, index) => {
                 const isSelected = selectedRowId === block.id;
-                const voiceoverText = block.timeline?.voiceover ?? "";
-                const baseMaterialName = materialFiles[index]?.original_filename ?? `素材 ${index + 1}`;
-                const materialNames = [baseMaterialName, ...(localMaterials[block.id] ?? [])];
-                const materialNote = block.timeline?.visual_description || "00:00-00:03 裁切 + 加标题字";
+                const voiceoverText = getEditableVoiceoverText(block);
+                const materialItems = getMigrationMaterialItems(
+                  block,
+                  materialFiles[index],
+                  localMaterials[block.id] ?? []
+                );
                 const rowClass = [
                   "migration-row",
                   isSelected ? "selected" : "",
@@ -1507,12 +1574,17 @@ const StructureMigrationView = ({
                     {/* 我的素材: 只读，过多时框内滚动 */}
                     <div className="migration-col col-material">
                       <div className="material-scroll">
-                        {materialNames.map((materialName) => (
-                          <div className="material-name" key={`${block.id}-${materialName}`}>
-                            {materialName}
+                        {materialItems.map((material, materialIndex) => (
+                          <div
+                            className="material-item"
+                            key={`${block.id}-${material.name}-${materialIndex}`}
+                          >
+                            <div className="material-name">{material.name}</div>
+                            {material.note ? (
+                              <div className="material-note">{material.note}</div>
+                            ) : null}
                           </div>
                         ))}
-                        <div className="material-note">{materialNote}</div>
                       </div>
                     </div>
 

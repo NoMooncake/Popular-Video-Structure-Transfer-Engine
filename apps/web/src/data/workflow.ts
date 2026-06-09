@@ -86,6 +86,39 @@ const formatV2Duration = (slot: V2MaterialCoverageSlot): string => {
   return Number.isFinite(duration) ? `${duration}s` : "0s";
 };
 
+const normalizeV2Copy = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "待生成文案") {
+    return undefined;
+  }
+
+  return trimmed;
+};
+
+const getV2FallbackCopy = (slot: V2MaterialCoverageSlot): string => {
+  const focus =
+    slot.frontend_display?.shot_description ||
+    slot.visual_goal ||
+    slot.frontend_display?.migration_result_description ||
+    slot.slot_name ||
+    slot.slot_type;
+
+  if (/hook/iu.test(slot.slot_type)) {
+    return "先用一句话抓住注意力，突出产品最直接的吸引点。";
+  }
+
+  if (/cta|action/iu.test(slot.slot_type)) {
+    return "收束核心卖点，引导观众继续了解产品。";
+  }
+
+  return `突出${focus}，让观众快速理解这一段的产品卖点。`;
+};
+
+const getV2Copy = (slot: V2MaterialCoverageSlot): string =>
+  normalizeV2Copy(slot.frontend_display?.copy) ||
+  normalizeV2Copy(slot.copy_direction) ||
+  getV2FallbackCopy(slot);
+
 const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] => ({
   slot_id: slot.slot_id,
   slot_type: slot.slot_type,
@@ -156,23 +189,27 @@ const toV2TimelineItem = (
   slot: V2MaterialCoverageSlot,
   timeRange: string,
   gap?: GapItem
-): TimelineItem => ({
-  item_id: `tl_${slot.slot_id}`,
-  slot_id: slot.slot_id,
-  time_range: timeRange,
-  slot_type: slot.slot_type,
-  content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? slot.slot_name ?? slot.slot_type,
-  visual_source: slot.assigned_materials?.length ? "user_material" : "generated_graphic",
-  visual_description:
-    slot.frontend_display?.material_summary ??
-    slot.recommended_video_prompt?.prompt_description ??
-    slot.recommended_aigc_prompt?.prompt_description ??
-    "",
-  subtitle: slot.frontend_display?.copy ?? slot.copy_direction ?? "",
-  voiceover: slot.frontend_display?.copy ?? slot.copy_direction ?? "",
-  gap_ref: gap?.gap_id,
-  transition: "none"
-});
+): TimelineItem => {
+  const copy = getV2Copy(slot);
+
+  return {
+    item_id: `tl_${slot.slot_id}`,
+    slot_id: slot.slot_id,
+    time_range: timeRange,
+    slot_type: slot.slot_type,
+    content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? slot.slot_name ?? slot.slot_type,
+    visual_source: slot.assigned_materials?.length ? "user_material" : "generated_graphic",
+    visual_description:
+      slot.frontend_display?.material_summary ??
+      slot.recommended_video_prompt?.prompt_description ??
+      slot.recommended_aigc_prompt?.prompt_description ??
+      "",
+    subtitle: copy,
+    voiceover: copy,
+    gap_ref: gap?.gap_id,
+    transition: "none"
+  };
+};
 
 export const createCanvasBlocksFromV2Coverage = (
   slots: V2MaterialCoverageSlot[],

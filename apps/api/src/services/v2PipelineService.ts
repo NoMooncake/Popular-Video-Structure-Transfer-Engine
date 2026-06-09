@@ -2274,6 +2274,31 @@ const formatFrontendSeconds = (seconds: number): string => {
   return `${Number(seconds.toFixed(3))}s`;
 };
 
+const getFallbackSlotCopyDirection = (
+  normalized: Required<V2PipelineRequest>,
+  slotType: string,
+  slotName: string | undefined,
+  visualGoal: string | undefined
+): string => {
+  const productOrGoal =
+    normalized.user_request.product_name || normalized.user_request.goal || "目标产品";
+  const focus = (visualGoal || slotName || slotType).replace(/\s+/gu, " ").trim();
+
+  if (/hook/iu.test(slotType)) {
+    return `先用一句话抓住注意力，突出${productOrGoal}最直接的吸引点。`;
+  }
+
+  if (/cta|action/iu.test(slotType)) {
+    return `收束卖点并引导观众继续了解${productOrGoal}。`;
+  }
+
+  if (focus) {
+    return `突出${focus}，让观众快速理解这一段的产品卖点。`;
+  }
+
+  return `围绕${productOrGoal}补一句简短旁白，服务当前分镜节奏。`;
+};
+
 const formatFrontendMaterialSummary = (
   matches: JsonObject[],
   candidateMaterials: JsonObject[]
@@ -2833,6 +2858,9 @@ export const buildV2DeterministicMaterialCoverage = async (
       normalizeOptionalString(slot.subtitle_or_vo_direction) ||
       normalizeOptionalString(slot.narration_direction) ||
       normalizeOptionalString(slot.caption_direction);
+    const displayCopyDirection =
+      copyDirection ||
+      getFallbackSlotCopyDirection(normalized, slotType, slotName, visualGoal);
     const frontendCoverageLabel = getFrontendCoverageLabel(frontendCoverageStatus);
     const frontendMaterialSummary = formatFrontendMaterialSummary(
       matches,
@@ -2851,7 +2879,7 @@ export const buildV2DeterministicMaterialCoverage = async (
       slot_type: slotType,
       slot_name: slotName,
       visual_goal: visualGoal,
-      copy_direction: copyDirection,
+      copy_direction: displayCopyDirection,
       packaging_suggestions: normalizeOptionalString(slot.packaging_suggestions),
       source_reference_indices: sourceReferenceIndices,
       source_reference_superscript: sourceReferenceSuperscript,
@@ -2864,7 +2892,7 @@ export const buildV2DeterministicMaterialCoverage = async (
       frontend_display: {
         migration_result_title: slotName || slotType,
         migration_result_description:
-          visualGoal || copyDirection || gapReason || "根据当前广告结构补足该槽位画面。",
+          visualGoal || displayCopyDirection || gapReason || "根据当前广告结构补足该槽位画面。",
         duration_text: formatFrontendSeconds(requiredDuration),
         shot_description: visualGoal || "待补充分镜描述",
         ...(sourceReferenceIndices.length > 0
@@ -2874,7 +2902,7 @@ export const buildV2DeterministicMaterialCoverage = async (
             }
           : {}),
         material_summary: frontendMaterialSummary,
-        copy: copyDirection || "待生成文案",
+        copy: displayCopyDirection,
         material_status: frontendCoverageLabel,
         add_material_button: {
           visible: true,

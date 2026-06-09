@@ -238,7 +238,16 @@ export type V2MaterialCoverageSlot = {
   assigned_materials?: Array<{
     material_id: string;
     label?: string;
+    segment_id?: string;
+    time_range?: string;
+    start_seconds?: number;
+    end_seconds?: number;
+    source_in_seconds?: number;
+    source_out_seconds?: number;
     matched_material_duration?: number;
+    visual_description?: string;
+    recommended_usage?: string;
+    content_summary?: string;
   }>;
   candidate_materials?: Array<{
     material_id: string;

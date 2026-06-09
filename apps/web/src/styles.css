@@ -3890,6 +3890,7 @@ input {
 .col-desc {
   flex: 0 0 300px;
   padding: 0 4px;
+  overflow: hidden;
 }
 
 .col-material {
@@ -3944,8 +3945,12 @@ input {
   font-size: 20px;
   font-weight: 400;
   line-height: 30px;
+  max-height: 168px;
   min-height: 90px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   resize: none;
+  scrollbar-width: none;
   text-align: center;
   width: 100%;
 }
@@ -3954,12 +3959,18 @@ input {
   outline: none;
 }
 
+.migration-voiceover-input::-webkit-scrollbar {
+  display: none;
+}
+
 /* 分镜描述 (read-only) */
 .desc-tag {
   align-items: flex-start;
   display: flex;
+  flex-shrink: 0;
   gap: 4px;
   justify-content: center;
+  max-width: 100%;
 }
 
 .desc-tag-name {
@@ -3981,6 +3992,16 @@ input {
   font-size: 20px;
   font-weight: 400;
   line-height: 30px;
+  max-height: 168px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 0 4px;
+  scrollbar-width: none;
+  width: 100%;
+}
+
+.desc-body::-webkit-scrollbar {
+  display: none;
 }
 
 /* 我的素材: scroll inside the cell when overflowing, hide scrollbar */
@@ -3993,6 +4014,10 @@ input {
 
 .material-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.material-item + .material-item {
+  margin-top: 10px;
 }
 
 .material-name,
