@@ -204,6 +204,7 @@ test(
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
+      "add_material",
       "generate_direct_video_from_material_frame",
       "generate_image_then_video"
     ]);
@@ -224,6 +225,126 @@ test(
       String(asRecord(coverage.slot_coverage[1]?.recommended_aigc_prompt).prompt),
       /product_hero/
     );
+  }
+);
+
+test(
+  "v2 material coverage assigns user material segments and exposes reference superscripts",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(8);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          role: "user_material" as const,
+          label: "ice_tea_user_clip.mp4"
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "生成冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 5,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        editable_slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "product_hero",
+            duration_seconds: 2,
+            visual_direction: "产品瓶身冰镇特写"
+          },
+          {
+            slot_id: "slot_02",
+            slot_type: "usage_process",
+            duration_seconds: 3,
+            visual_direction: "年轻人饮用冰红茶"
+          }
+        ]
+      },
+      {
+        analysis: {
+          material_analysis: {
+            material_segments: [
+              {
+                material_id: "user_material_01",
+                segment_id: "seg_product",
+                start_time: 0,
+                end_time: 2,
+                duration_seconds: 2,
+                visual_description: "冰红茶瓶身和水珠特写",
+                candidate_slot_types: ["product_hero"],
+                recommended_usage: "裁切 + 加产品标题"
+              },
+              {
+                material_id: "user_material_01",
+                segment_id: "seg_drink",
+                start_time: 2,
+                end_time: 5,
+                duration_seconds: 3,
+                visual_description: "年轻人拿起冰红茶饮用",
+                candidate_slot_types: ["usage_process"],
+                recommended_usage: "快速剪辑 + 保留喝饮料动作"
+              }
+            ]
+          }
+        }
+      },
+      [
+        {
+          sample_index: 1,
+          rows: [
+            {
+              source_slot_type: "product_hero"
+            }
+          ]
+        },
+        {
+          sample_index: 3,
+          rows: [
+            {
+              source_slot_type: "usage_process"
+            }
+          ]
+        }
+      ]
+    );
+
+    const firstSlot = asRecord(coverage.slot_coverage[0]);
+    const secondSlot = asRecord(coverage.slot_coverage[1]);
+    assert.equal(firstSlot.coverage_status, "covered");
+    assert.equal(secondSlot.coverage_status, "covered");
+    assert.equal(asRecordArray(firstSlot.assigned_materials)[0]?.segment_id, "seg_product");
+    assert.equal(asRecordArray(secondSlot.assigned_materials)[0]?.segment_id, "seg_drink");
+    assert.match(String(asRecord(firstSlot.frontend_display).material_summary), /0 - 2s/);
+    assert.match(String(asRecord(secondSlot.frontend_display).material_summary), /快速剪辑/);
+    assert.deepEqual(firstSlot.source_reference_indices, [1]);
+    assert.equal(asRecord(firstSlot.frontend_display).source_reference_superscript, "¹");
+    assert.deepEqual(asRecord(asRecord(firstSlot.frontend_display).add_material_button), {
+      visible: true,
+      label: "添加素材",
+      action: "add_material"
+    });
+    assert.equal(
+      Array.isArray(firstSlot.available_user_actions) &&
+        firstSlot.available_user_actions.includes("add_material"),
+      true
+    );
+    assert.deepEqual(secondSlot.source_reference_indices, [3]);
+    assert.equal(asRecord(secondSlot.frontend_display).source_reference_superscript, "³");
   }
 );
 
@@ -320,7 +441,12 @@ test(
       shot_description: "待补充分镜描述",
       material_summary: "ice_tea_material_01 3s",
       copy: "待生成文案",
-      material_status: "完全匹配"
+      material_status: "完全匹配",
+      add_material_button: {
+        visible: true,
+        label: "添加素材",
+        action: "add_material"
+      }
     });
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 3);
     assert.equal(
@@ -357,6 +483,7 @@ test(
     );
     assert.equal(coverage.slot_coverage[1]?.gap_reason, "已匹配 2s，但该槽位需要 3s。");
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
+      "add_material",
       "accept_current_material_as_sufficient",
       "generate_direct_video_from_material_frame",
       "generate_image_then_video"
@@ -376,6 +503,7 @@ test(
       "空"
     );
     assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
+      "add_material",
       "generate_direct_video_from_material_frame",
       "generate_image_then_video"
     ]);
@@ -810,6 +938,7 @@ test(
     assert.equal(coverage.slot_coverage[0]?.needs_ai_completion, false);
     assert.equal(coverage.slot_coverage[0]?.ai_completion_required_duration, 0);
     assert.deepEqual(coverage.slot_coverage[0]?.available_user_actions, [
+      "add_material",
       "reopen_ai_completion"
     ]);
   }

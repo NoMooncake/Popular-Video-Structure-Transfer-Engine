@@ -962,6 +962,8 @@ const getArchitectureSlots = (
       fillableArchitecture.slot_planning) ||
     (Array.isArray(fillableArchitecture.planned_structure) &&
       fillableArchitecture.planned_structure) ||
+    (Array.isArray(fillableArchitecture.proposed_slots) &&
+      fillableArchitecture.proposed_slots) ||
     (Array.isArray(finalPlan.slot_planning) && finalPlan.slot_planning) ||
     (Array.isArray(resultAdStructure.slots) && resultAdStructure.slots) ||
     (Array.isArray(resultAdStructure.structure_slots) &&
@@ -975,6 +977,8 @@ const getArchitectureSlots = (
       nestedArchitecture.slot_planning) ||
     (Array.isArray(nestedArchitecture.planned_structure) &&
       nestedArchitecture.planned_structure) ||
+    (Array.isArray(nestedArchitecture.proposed_slots) &&
+      nestedArchitecture.proposed_slots) ||
     (Array.isArray(resultArchitecture.slots) && resultArchitecture.slots) ||
     (Array.isArray(resultArchitecture.structure_slots) &&
       resultArchitecture.structure_slots) ||
@@ -984,6 +988,8 @@ const getArchitectureSlots = (
       resultArchitecture.slot_planning) ||
     (Array.isArray(resultArchitecture.planned_structure) &&
       resultArchitecture.planned_structure) ||
+    (Array.isArray(resultArchitecture.proposed_slots) &&
+      resultArchitecture.proposed_slots) ||
     [];
 
   const slots = rawSlots.map((slot, index) => {
@@ -1014,6 +1020,8 @@ const getArchitectureSlots = (
       copy_direction:
         record.copy_direction ??
         record.subtitle_or_vo_direction ??
+        record.subtitle_or_voiceover ??
+        record.text_or_copy_direction ??
         record.caption_direction,
       materials:
         record.materials ??
@@ -1111,14 +1119,177 @@ const getSlotTypeTags = (record: JsonObject): string[] => {
       ...normalizeStringArray(record.usable_for_slots),
       ...normalizeStringArray(record.candidate_slot_types),
       ...normalizeStringArray(record.recommended_slot_types),
+      ...normalizeStringArray(record.recommended_for_slots),
+      ...normalizeStringArray(record.target_slot_types),
       ...normalizeStringArray(record.slot_types),
       ...normalizeStringArray(record.fit_slots),
       ...normalizeStringArray(record.applicable_slot_type),
-      ...normalizeStringArray(record.applicable_slot_types)
+      ...normalizeStringArray(record.applicable_slot_types),
+      ...normalizeSlotTypes(
+        record.slot_type ??
+          record.slot ??
+          record.target_slot ??
+          record.recommended_slot ??
+          record.matched_slot
+      )
     ]
       .map((slotType) => normalizeSlotType(slotType))
       .filter((slotType): slotType is string => Boolean(slotType)))
   );
+};
+
+const materialSegmentContainers = (root: JsonObject): unknown[] => [
+  root.material_segments,
+  root.segments,
+  root.clip_segments,
+  root.usable_segments,
+  root.user_material_segments,
+  root.segment_analysis,
+  root.material_segment_analysis,
+  asJsonObject(root.material_analysis).material_segments,
+  asJsonObject(root.analysis_result).material_segments,
+  asJsonObject(root.payload).material_segments,
+  asJsonObject(asJsonObject(root.payload).analysis_result).material_segments
+];
+
+const getSegmentDurationSeconds = (record: JsonObject): number | undefined => {
+  const explicitDuration = Number(
+    record.duration_seconds ?? record.duration ?? record.usable_duration_seconds
+  );
+  if (Number.isFinite(explicitDuration) && explicitDuration > 0) {
+    return Number(explicitDuration.toFixed(3));
+  }
+
+  const startSeconds = normalizeTimeValueSeconds(
+    record.start_time ?? record.start_seconds ?? record.start
+  );
+  const endSeconds = normalizeTimeValueSeconds(
+    record.end_time ?? record.end_seconds ?? record.end
+  );
+  if (endSeconds !== undefined && startSeconds !== undefined && endSeconds > startSeconds) {
+    return Number((endSeconds - startSeconds).toFixed(3));
+  }
+
+  return undefined;
+};
+
+const normalizeMaterialSegmentRecord = (
+  segment: JsonObject,
+  parentRecord?: JsonObject
+): JsonObject => {
+  const parentMaterialRef =
+    parentRecord?.material_id ??
+    parentRecord?.id ??
+    parentRecord?.asset_id ??
+    parentRecord?.material_ref ??
+    parentRecord?.material ??
+    parentRecord?.source;
+  const materialRef =
+    segment.material_id ??
+    segment.material_ref ??
+    segment.material ??
+    segment.source_material ??
+    segment.source ??
+    parentMaterialRef;
+  const materialId = normalizeMaterialReference(materialRef);
+  const startSeconds = normalizeTimeValueSeconds(
+    segment.start_time ?? segment.start_seconds ?? segment.start
+  );
+  const endSeconds = normalizeTimeValueSeconds(
+    segment.end_time ?? segment.end_seconds ?? segment.end
+  );
+  const durationSeconds = getSegmentDurationSeconds(segment);
+  const slotTypes = Array.from(
+    new Set([
+      ...getSlotTypeTags(segment),
+      ...inferSlotTypesFromText(segment.visual_description),
+      ...inferSlotTypesFromText(segment.description),
+      ...inferSlotTypesFromText(segment.recommended_usage),
+      ...inferSlotTypesFromText(segment.analysis)
+    ])
+  );
+
+  return {
+    ...segment,
+    material_id: materialId || materialRef,
+    material_ref: materialId || materialRef,
+    segment_id:
+      normalizeOptionalString(segment.segment_id) ||
+      normalizeOptionalString(segment.id) ||
+      undefined,
+    start_seconds: startSeconds,
+    end_seconds: endSeconds,
+    duration_seconds: durationSeconds,
+    candidate_slot_types: slotTypes,
+    visual_description:
+      normalizeOptionalString(segment.visual_description) ||
+      normalizeOptionalString(segment.description) ||
+      normalizeOptionalString(segment.content) ||
+      normalizeOptionalString(segment.summary),
+    recommended_usage:
+      normalizeOptionalString(segment.recommended_usage) ||
+      normalizeOptionalString(segment.usage_suggestion) ||
+      normalizeOptionalString(segment.recommendation),
+    confidence:
+      normalizeOptionalString(segment.confidence) ||
+      normalizeOptionalString(segment.confidence_label) ||
+      normalizeOptionalString(segment.match_confidence)
+  };
+};
+
+const collectMaterialSegmentRecords = (userMaterialAnalysis: JsonObject): JsonObject[] => {
+  const directAnalysis = asJsonObject(userMaterialAnalysis.analysis);
+  const roots = [
+    userMaterialAnalysis,
+    directAnalysis,
+    asJsonObject(directAnalysis.material_analysis),
+    asJsonObject(directAnalysis.analysis_result),
+    asJsonObject(userMaterialAnalysis.material_analysis),
+    asJsonObject(userMaterialAnalysis.analysis_result),
+    asJsonObject(userMaterialAnalysis.materials_analysis),
+    asJsonObject(userMaterialAnalysis.payload),
+    asJsonObject(asJsonObject(userMaterialAnalysis.payload).analysis_result)
+  ];
+  const segments: JsonObject[] = [];
+
+  for (const root of roots) {
+    for (const container of materialSegmentContainers(root)) {
+      for (const item of asJsonObjectArray(container)) {
+        segments.push(normalizeMaterialSegmentRecord(item));
+      }
+    }
+  }
+
+  for (const materialRecord of collectMaterialModelRecords(userMaterialAnalysis)) {
+    for (const container of materialSegmentContainers(materialRecord)) {
+      for (const item of asJsonObjectArray(container)) {
+        segments.push(normalizeMaterialSegmentRecord(item, materialRecord));
+      }
+    }
+  }
+
+  const seenSegmentKeys = new Set<string>();
+  return segments.filter((segment) => {
+    const materialId = normalizeOptionalString(segment.material_id);
+    if (!materialId) {
+      return false;
+    }
+
+    const key = [
+      materialId,
+      normalizeOptionalString(segment.segment_id) || "",
+      String(segment.start_seconds ?? ""),
+      String(segment.end_seconds ?? ""),
+      normalizeOptionalString(segment.visual_description) || ""
+    ].join("|");
+
+    if (seenSegmentKeys.has(key)) {
+      return false;
+    }
+
+    seenSegmentKeys.add(key);
+    return true;
+  });
 };
 
 const collectMaterialModelRecords = (userMaterialAnalysis: JsonObject): JsonObject[] => {
@@ -1484,7 +1655,8 @@ const collectCoverageHintsByMaterialRef = (
     [
       ...(Array.isArray(container.slots) ? container.slots : []),
       ...(Array.isArray(container.slot_planning) ? container.slot_planning : []),
-      ...(Array.isArray(container.planned_structure) ? container.planned_structure : [])
+      ...(Array.isArray(container.planned_structure) ? container.planned_structure : []),
+      ...(Array.isArray(container.proposed_slots) ? container.proposed_slots : [])
     ]
   );
 
@@ -1522,6 +1694,21 @@ const collectCoverageHintsByMaterialRef = (
       for (const slotType of slotTypes) {
         addCoverageHint(hints, materialRef, slotType);
       }
+    }
+  }
+
+  for (const segment of collectMaterialSegmentRecords(userMaterialAnalysis)) {
+    const materialRef = normalizeMaterialReference(
+      segment.material_id ?? segment.material_ref ?? segment.source_material
+    );
+    const slotTypes = getSlotTypeTags(segment);
+
+    if (!materialRef || slotTypes.length === 0) {
+      continue;
+    }
+
+    for (const slotType of slotTypes) {
+      addCoverageHint(hints, materialRef, slotType);
     }
   }
 
@@ -1572,7 +1759,113 @@ const findMaterialModelRecord = (
           getStringField(record, ["uri", "path", "url"]) === materialRef.uri)
       );
     }) || {}
+      );
+  };
+
+const materialSegmentBelongsToMaterial = (
+  segment: JsonObject,
+  materialRef: V2VideoRef,
+  fallbackMaterialId: string,
+  modelMaterialId: string
+): boolean => {
+  const fileId = materialRef.file_id || extractFileIdFromUploadUri(materialRef.uri);
+  const labelRef = normalizeMaterialReference(materialRef.label);
+  const segmentRefs = [
+    segment.material_id,
+    segment.material_ref,
+    segment.material,
+    segment.source_material,
+    segment.source,
+    segment.input_ref
+  ]
+    .map((value) => normalizeMaterialReference(value))
+    .filter((value): value is string => Boolean(value));
+  const materialIndex = Number(segment.material_index ?? segment.index);
+  const indexedMaterialRef =
+    Number.isFinite(materialIndex) && materialIndex > 0
+      ? `user_material_${String(materialIndex).padStart(2, "0")}`
+      : undefined;
+
+  return (
+    segmentRefs.includes(fallbackMaterialId) ||
+    segmentRefs.includes(modelMaterialId) ||
+    (labelRef ? segmentRefs.includes(labelRef) : false) ||
+    indexedMaterialRef === fallbackMaterialId ||
+    (fileId ? getStringField(segment, ["file_id", "fileId"]) === fileId : false) ||
+    (materialRef.uri
+      ? getStringField(segment, ["uri", "path", "url"]) === materialRef.uri
+      : false)
   );
+};
+
+const formatMaterialSegmentTimeRange = (segment: JsonObject): string | undefined => {
+  const startSeconds = Number(segment.start_seconds);
+  const endSeconds = Number(segment.end_seconds);
+
+  if (Number.isFinite(startSeconds) && Number.isFinite(endSeconds) && endSeconds > startSeconds) {
+    return formatTableDuration(startSeconds, endSeconds);
+  }
+
+  return undefined;
+};
+
+const normalizeSourceReferenceIndices = (value: unknown): number[] => {
+  const rawValues = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return Array.from(
+    new Set(
+      rawValues
+        .flatMap((item) => {
+          if (typeof item === "number") {
+            return [item];
+          }
+
+          const text = normalizeOptionalString(item);
+          if (!text) {
+            return [];
+          }
+
+          return Array.from(text.matchAll(/\d+/gu)).map((match) => Number(match[0]));
+        })
+        .filter((index) => Number.isInteger(index) && index > 0)
+    )
+  ).sort((first, second) => first - second);
+};
+
+const toSuperscript = (value: number): string =>
+  String(value).replace(/[0-9]/gu, (digit) => "⁰¹²³⁴⁵⁶⁷⁸⁹"[Number(digit)] || digit);
+
+const getSlotSourceReferenceIndices = (
+  slot: JsonObject,
+  slotType: string,
+  referenceAnalysisTables: JsonObject[]
+): number[] => {
+  const explicitIndices = normalizeSourceReferenceIndices(
+    slot.source_reference_indices ??
+      slot.source_reference_index ??
+      slot.reference_indices ??
+      slot.reference_index ??
+      slot.source_references ??
+      slot.reference_sources ??
+      slot.derived_from_references
+  );
+
+  if (explicitIndices.length > 0) {
+    return explicitIndices;
+  }
+
+  return referenceAnalysisTables
+    .map((table, index) => {
+      const sampleIndex = Number(table.sample_index || index + 1);
+      const hasMatchingSlot = asJsonObjectArray(table.rows).some((row) => {
+        const rowSlotType = normalizeSlotType(row.source_slot_type);
+        const rowTitle = normalizeSlotType(asJsonObject(row.shot_description).title);
+
+        return rowSlotType === slotType || rowTitle === slotType;
+      });
+
+      return hasMatchingSlot && Number.isInteger(sampleIndex) ? sampleIndex : undefined;
+    })
+    .filter((index): index is number => Boolean(index));
 };
 
 const getPromptSlotTypes = (promptRecord: JsonObject): string[] => {
@@ -1966,8 +2259,17 @@ const formatFrontendMaterialSummary = (
           normalizeOptionalString(match.material_id) ||
           "已分配素材";
         const duration = Number(match.matched_material_duration || 0);
+        const timeRange = normalizeOptionalString(match.time_range);
+        const editInstruction = normalizeOptionalString(match.edit_instruction);
 
-        return `${label} ${formatFrontendSeconds(duration)}`;
+        if (!timeRange && !editInstruction) {
+          return `${label} ${formatFrontendSeconds(duration)}`;
+        }
+
+        return [
+          `${label}${timeRange ? ` ${timeRange}` : ""}`,
+          `${formatFrontendSeconds(duration)}${editInstruction ? ` ${editInstruction}` : ""}`
+        ].join("\n");
       })
       .join("\n");
   }
@@ -1981,6 +2283,26 @@ const formatFrontendMaterialSummary = (
           normalizeOptionalString(material.material_id) ||
           "候选素材";
         const duration = Number(material.duration_seconds || 0);
+        const candidateSegments = asJsonObjectArray(material.candidate_segments);
+        if (candidateSegments.length > 0) {
+          return candidateSegments
+            .map((segment) => {
+              const timeRange = normalizeOptionalString(segment.time_range);
+              const segmentDuration = Number(segment.duration_seconds || 0);
+              const description =
+                normalizeOptionalString(segment.recommended_usage) ||
+                normalizeOptionalString(segment.visual_description) ||
+                "候选片段";
+
+              return [
+                `${label}${timeRange ? ` ${timeRange}` : ""}`,
+                segmentDuration > 0
+                  ? `候选 ${formatFrontendSeconds(segmentDuration)} ${description}`
+                  : `候选 ${description}`
+              ].join("\n");
+            })
+            .join("\n");
+        }
 
         return duration > 0 ? `${label} 候选 ${formatFrontendSeconds(duration)}` : `${label} 候选`;
       })
@@ -2078,11 +2400,13 @@ const getSlotFallbackVideoPrompt = (
 export const buildV2DeterministicMaterialCoverage = async (
   normalized: Required<V2PipelineRequest>,
   fillableArchitecture: JsonObject,
-  userMaterialAnalysis: JsonObject
+  userMaterialAnalysis: JsonObject,
+  referenceAnalysisTables: JsonObject[] = []
 ): Promise<V2MaterialCoverage> => {
   const targetDuration = Number(normalized.options.target_duration_seconds || 30);
   const slots = getArchitectureSlots(fillableArchitecture, targetDuration);
   const modelRecords = collectMaterialModelRecords(userMaterialAnalysis);
+  const modelSegmentRecords = collectMaterialSegmentRecords(userMaterialAnalysis);
   const coverageHintsByMaterialRef = collectCoverageHintsByMaterialRef(userMaterialAnalysis);
   for (const [materialRef, slotTypes] of collectCoverageHintsByMaterialRef(fillableArchitecture)) {
     for (const slotType of slotTypes) {
@@ -2105,10 +2429,43 @@ export const buildV2DeterministicMaterialCoverage = async (
       const durationSeconds = await readLocalVideoDurationSeconds(localPath);
       const modelMaterialId =
         getStringField(modelRecord, ["material_id", "id", "asset_id"]) || materialId;
+      const modelSegments = modelSegmentRecords
+        .filter((segment) =>
+          materialSegmentBelongsToMaterial(segment, materialRef, materialId, modelMaterialId)
+        )
+        .map((segment, segmentIndex) => {
+          const candidateSlotTypes = Array.from(
+            new Set([
+              ...getSlotTypeTags(segment),
+              ...inferSlotTypesFromText(segment.visual_description),
+              ...inferSlotTypesFromText(segment.recommended_usage)
+            ])
+          );
+          const segmentId =
+            normalizeOptionalString(segment.segment_id) ||
+            `${modelMaterialId}_segment_${String(segmentIndex + 1).padStart(2, "0")}`;
+
+          return {
+            ...segment,
+            segment_id: segmentId,
+            material_id: modelMaterialId,
+            label:
+              normalizeOptionalString(segment.label) ||
+              normalizeOptionalString(segment.segment_label) ||
+              materialRef.label ||
+              modelMaterialId,
+            time_range: formatMaterialSegmentTimeRange(segment),
+            duration_seconds: getSegmentDurationSeconds(segment),
+            candidate_slot_types: candidateSlotTypes
+          };
+        });
       const labelMaterialRef = normalizeMaterialReference(materialRef.label);
       const slotTags = Array.from(
         new Set([
           ...getSlotTypeTags(modelRecord),
+          ...modelSegments.flatMap((segment) =>
+            normalizeStringArray(segment.candidate_slot_types)
+          ),
           ...(coverageHintsByMaterialRef.get(modelMaterialId) || []),
           ...(coverageHintsByMaterialRef.get(materialId) || []),
           ...(labelMaterialRef ? coverageHintsByMaterialRef.get(labelMaterialRef) || [] : [])
@@ -2145,6 +2502,7 @@ export const buildV2DeterministicMaterialCoverage = async (
         usable_duration_seconds: durationSeconds || 0,
         frame_sample_timestamps_seconds: getFrameSampleTimestamps(durationSeconds),
         candidate_slot_types: slotTags,
+        material_segments: modelSegments,
         content_labels: contentLabels,
         frame_sampling_status: localPath
           ? durationSeconds
@@ -2161,6 +2519,18 @@ export const buildV2DeterministicMaterialCoverage = async (
       Number(asset.usable_duration_seconds || 0)
     ])
   );
+  const remainingSegmentDurations = new Map<string, number>();
+  for (const asset of materialAssets) {
+    const materialId = String(asset.material_id);
+    for (const segment of asJsonObjectArray(asset.material_segments)) {
+      const segmentId = normalizeOptionalString(segment.segment_id);
+      const segmentDuration = Number(segment.duration_seconds || 0);
+
+      if (segmentId && Number.isFinite(segmentDuration) && segmentDuration > 0) {
+        remainingSegmentDurations.set(`${materialId}:${segmentId}`, segmentDuration);
+      }
+    }
+  }
 
   const slotCoverage = slots.map((slot, index) => {
     const slotType =
@@ -2186,8 +2556,36 @@ export const buildV2DeterministicMaterialCoverage = async (
     let requiredRemaining = requiredDuration;
     const matches: JsonObject[] = [];
     const unknownCandidateRefs: string[] = [];
-    const candidateMaterials = materialAssets
-      .filter((asset) => normalizeStringArray(asset.candidate_slot_types).includes(slotType))
+    const preferredMaterialRefs = Array.from(
+      new Set([
+        ...normalizeStringArray(
+          slot.materials ?? slot.material_ids ?? slot.source_material ?? slot.source_materials
+        )
+          .map((materialRef) => normalizeMaterialReference(materialRef))
+          .filter((materialRef): materialRef is string => Boolean(materialRef)),
+        ...extractMaterialReferences(slot.material_needed),
+        ...extractMaterialReferences(slot.suggested_material),
+        ...extractMaterialReferences(slot.visual_direction),
+        ...extractMaterialReferences(slot.description)
+      ])
+    );
+    const getPreferredMaterialScore = (asset: JsonObject): number =>
+      preferredMaterialRefs.includes(String(asset.material_id)) ? 1 : 0;
+    const orderedMaterialAssets = materialAssets
+      .slice()
+      .sort(
+        (first, second) =>
+          getPreferredMaterialScore(second) - getPreferredMaterialScore(first)
+      );
+    const candidateMaterials = orderedMaterialAssets
+      .filter((asset) => {
+        const assetSlotTypes = normalizeStringArray(asset.candidate_slot_types);
+        const segmentSlotTypes = asJsonObjectArray(asset.material_segments).flatMap((segment) =>
+          normalizeStringArray(segment.candidate_slot_types)
+        );
+
+        return assetSlotTypes.includes(slotType) || segmentSlotTypes.includes(slotType);
+      })
       .map((asset) => ({
         material_id: asset.material_id,
         label: asset.label,
@@ -2195,16 +2593,76 @@ export const buildV2DeterministicMaterialCoverage = async (
         duration_seconds: asset.duration_seconds,
         duration_status: asset.duration_status,
         candidate_slot_types: asset.candidate_slot_types,
+        candidate_segments: asJsonObjectArray(asset.material_segments)
+          .filter((segment) =>
+            normalizeStringArray(segment.candidate_slot_types).includes(slotType)
+          )
+          .map((segment) => ({
+            segment_id: segment.segment_id,
+            time_range: segment.time_range,
+            duration_seconds: segment.duration_seconds,
+            visual_description: segment.visual_description,
+            recommended_usage: segment.recommended_usage
+          })),
         fit_reason: asset.model_description,
         quality: asset.model_quality
       }));
 
-    for (const asset of materialAssets) {
+    for (const asset of orderedMaterialAssets) {
       const materialId = String(asset.material_id);
       const candidateSlotTypes = normalizeStringArray(asset.candidate_slot_types);
-      const isCandidate = candidateSlotTypes.includes(slotType);
+      const candidateSegments = asJsonObjectArray(asset.material_segments).filter((segment) =>
+        normalizeStringArray(segment.candidate_slot_types).includes(slotType)
+      );
+      const isCandidate = candidateSlotTypes.includes(slotType) || candidateSegments.length > 0;
 
       if (!isCandidate) {
+        continue;
+      }
+
+      if (candidateSegments.length > 0) {
+        for (const segment of candidateSegments) {
+          const segmentId = normalizeOptionalString(segment.segment_id);
+          if (!segmentId) {
+            continue;
+          }
+
+          const segmentKey = `${materialId}:${segmentId}`;
+          const remainingSegmentDuration = remainingSegmentDurations.get(segmentKey) || 0;
+          if (remainingSegmentDuration <= 0) {
+            continue;
+          }
+
+          if (requiredRemaining <= 0) {
+            continue;
+          }
+
+          const allocatedDuration = Number(
+            Math.min(requiredRemaining, remainingSegmentDuration).toFixed(3)
+          );
+          remainingSegmentDurations.set(
+            segmentKey,
+            Number((remainingSegmentDuration - allocatedDuration).toFixed(3))
+          );
+          requiredRemaining = Number((requiredRemaining - allocatedDuration).toFixed(3));
+          matches.push({
+            material_id: materialId,
+            label: asset.label,
+            model_label: asset.model_label,
+            segment_id: segmentId,
+            time_range: segment.time_range,
+            start_seconds: segment.start_seconds,
+            end_seconds: segment.end_seconds,
+            visual_description: segment.visual_description,
+            edit_instruction:
+              normalizeOptionalString(segment.recommended_usage) ||
+              normalizeOptionalString(segment.edit_instruction) ||
+              "裁切并适配该分镜节奏",
+            matched_material_duration: allocatedDuration,
+            remaining_segment_duration_after_match: remainingSegmentDurations.get(segmentKey)
+          });
+        }
+
         continue;
       }
 
@@ -2289,9 +2747,12 @@ export const buildV2DeterministicMaterialCoverage = async (
                 : []),
               "generate_image_then_video"
             ]
-          : durationShortAccepted
-            ? ["reopen_ai_completion"]
-            : [];
+        : durationShortAccepted
+          ? ["reopen_ai_completion"]
+          : [];
+    const frontendUserActions = Array.from(
+      new Set(["add_material", ...availableUserActions])
+    );
     const promptRecord = aigcPromptsBySlot.get(slotType);
     const prompt =
       normalizeOptionalString(promptRecord?.prompt) ||
@@ -2349,6 +2810,12 @@ export const buildV2DeterministicMaterialCoverage = async (
       matches,
       candidateMaterials
     );
+    const sourceReferenceIndices = getSlotSourceReferenceIndices(
+      slot,
+      slotType,
+      referenceAnalysisTables
+    );
+    const sourceReferenceSuperscript = sourceReferenceIndices.map(toSuperscript).join(",");
 
     return {
       slot_id:
@@ -2358,9 +2825,9 @@ export const buildV2DeterministicMaterialCoverage = async (
       visual_goal: visualGoal,
       copy_direction: copyDirection,
       packaging_suggestions: normalizeOptionalString(slot.packaging_suggestions),
-      source_material_refs: normalizeStringArray(
-        slot.materials ?? slot.material_ids ?? slot.source_material ?? slot.source_materials
-      ),
+      source_reference_indices: sourceReferenceIndices,
+      source_reference_superscript: sourceReferenceSuperscript,
+      source_material_refs: preferredMaterialRefs,
       required_duration: requiredDuration,
       matched_material_duration: matchedMaterialDuration,
       coverage_status: coverageStatus,
@@ -2372,9 +2839,20 @@ export const buildV2DeterministicMaterialCoverage = async (
           visualGoal || copyDirection || gapReason || "根据当前广告结构补足该槽位画面。",
         duration_text: formatFrontendSeconds(requiredDuration),
         shot_description: visualGoal || "待补充分镜描述",
+        ...(sourceReferenceIndices.length > 0
+          ? {
+              source_reference_indices: sourceReferenceIndices,
+              source_reference_superscript: sourceReferenceSuperscript
+            }
+          : {}),
         material_summary: frontendMaterialSummary,
         copy: copyDirection || "待生成文案",
-        material_status: frontendCoverageLabel
+        material_status: frontendCoverageLabel,
+        add_material_button: {
+          visible: true,
+          label: "添加素材",
+          action: "add_material"
+        }
       },
       user_duration_short_decision: durationShortAccepted
         ? "accepted_as_sufficient"
@@ -2383,7 +2861,7 @@ export const buildV2DeterministicMaterialCoverage = async (
           : "not_applicable",
       missing_duration: missingDuration,
       ai_completion_required_duration: aiCompletionRequiredDuration,
-      available_user_actions: availableUserActions,
+      available_user_actions: frontendUserActions,
       candidate_materials: candidateMaterials,
       assigned_materials: matches,
       matched_materials: matches,
@@ -3174,6 +3652,10 @@ export const runV2Pipeline = async (
   const referenceVideoAnalyses = referenceStage.referenceVideoAnalyses;
   const referenceAnalysisTables = referenceStage.referenceAnalysisTables;
   fallbackReasons.push(...referenceStage.fallbackReasons);
+  const userMaterialFramesByVideo = await collectReferenceFramesByVideo(
+    normalized.user_materials,
+    6
+  );
 
   const userMaterialAnalysisResult = await callMultimodalWithFallback(
     "analyze_user_request_and_materials",
@@ -3185,9 +3667,14 @@ export const runV2Pipeline = async (
       material_understanding_policy: materialUnderstandingPolicy,
       user_request: normalized.user_request,
       user_materials: normalized.user_materials,
+      user_material_frames: normalized.user_materials.map((materialRef, index) => ({
+        material_id: `user_material_${String(index + 1).padStart(2, "0")}`,
+        label: materialRef.label,
+        frames: buildReferenceFramePromptPayload(userMaterialFramesByVideo[index] || [], true)
+      })),
       text_assets: normalized.text_assets,
       instruction:
-        "先分析用户想要什么，再分析用户素材能支撑一个商业广告短视频中的哪些槽位。最终成片节奏优先服从用户描述、目标时长和信息密度；用户素材的时长、是否一镜到底、是否碎片化都不能单独决定成片是快切还是慢节奏。请把素材当作待理解内容，统一按高频候选帧/片段或完整素材阅读来判断画面类型、动作、产品、场景和质量。reusable_slot_type_reference 只是槽位类型参考；请根据用户需求、目标时长、信息密度和素材质量判断哪些槽位应该合并、保留或舍弃。请用中文返回可用素材、弱素材、缺失素材、素材到槽位的建议。所有说明和后续 prompt 必须中文。"
+        "先分析用户想要什么，再分析用户素材能支撑一个商业广告短视频中的哪些槽位。必须阅读 user_materials 和已附加的 user_material_frames；user_material_frames 是每条用户素材按时间抽出的关键帧，不能说未提供素材内容。必须返回 material_segments 数组，对每条用户素材做分段拆解；每个片段必须包含 material_id、segment_id、start_time、end_time、duration_seconds、visual_description、candidate_slot_types、recommended_usage、confidence。candidate_slot_types 必须从 reusable_slot_type_reference 中选择，可多选。最终成片节奏优先服从用户描述、目标时长和信息密度；用户素材的时长、是否一镜到底、是否碎片化都不能单独决定成片是快切还是慢节奏。请把素材当作待理解内容，统一按高频候选帧/片段或完整素材阅读来判断画面类型、动作、产品、场景和质量。reusable_slot_type_reference 只是槽位类型参考；请根据用户需求、目标时长、信息密度和素材质量判断哪些槽位应该合并、保留或舍弃。请用中文返回可用素材、弱素材、缺失素材、素材到槽位的建议。所有说明和后续 prompt 必须中文。"
     },
     allowFallback,
     (reason) => makeFallbackMaterialAnalysis(normalized, reason)
@@ -3210,7 +3697,7 @@ export const runV2Pipeline = async (
       reference_analysis_tables: referenceAnalysisTables,
       user_material_analysis: userMaterialAnalysis,
       instruction:
-        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。成片节奏和结构取舍必须优先服从用户需求、目标时长和信息密度；如果用户没有明确节奏要求，再把样例和素材作为弱参考。不要根据用户原始素材的长短或一镜到底形式直接判定成片节奏。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
+        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。每个 editable slot 必须包含 source_reference_indices 数组，标明该分镜结构参考自第几个样例视频；如果同时迁移多个样例的同类分镜，可返回多个编号。成片节奏和结构取舍必须优先服从用户需求、目标时长和信息密度；如果用户没有明确节奏要求，再把样例和素材作为弱参考。不要根据用户原始素材的长短或一镜到底形式直接判定成片节奏。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
     },
     allowFallback,
     (reason) =>
@@ -3229,7 +3716,8 @@ export const runV2Pipeline = async (
   const baseMaterialCoverage = await buildV2DeterministicMaterialCoverage(
     normalized,
     fillableArchitecture,
-    userMaterialAnalysis
+    userMaterialAnalysis,
+    referenceAnalysisTables
   );
 
   const productionPlanResult = await callMultimodalWithFallback(
@@ -3262,7 +3750,8 @@ export const runV2Pipeline = async (
     {
       ...userMaterialAnalysis,
       production_plan: productionPlanResult.output
-    }
+    },
+    referenceAnalysisTables
   );
   const materialCoverage = attachProductionPromptsToMaterialCoverage(
     productionAwareMaterialCoverage,
