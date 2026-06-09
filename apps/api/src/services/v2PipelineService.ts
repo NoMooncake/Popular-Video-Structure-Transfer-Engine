@@ -4179,7 +4179,7 @@ const makeFallbackGeneratedVideoTrimAnalysis = (
   };
 };
 
-const normalizeTrimRecommendation = (
+export const normalizeTrimRecommendation = (
   rawAnalysis: JsonObject,
   targetDurationSeconds: number,
   videoDurationSeconds: number
@@ -4197,19 +4197,8 @@ const normalizeTrimRecommendation = (
     ]) ?? 0;
   const maxStart = Math.max(0, videoDurationSeconds - boundedTargetDuration);
   const startSeconds = Number(Math.max(0, Math.min(rawStart, maxStart)).toFixed(3));
-  const rawEnd =
-    getTrimTime(rawAnalysis, [
-      "recommended_end_seconds",
-      "end_seconds",
-      "trim_end_seconds",
-      "end_time_seconds"
-    ]) ?? startSeconds + boundedTargetDuration;
-  const minimumEnd = startSeconds + boundedTargetDuration;
   const endSeconds = Number(
-    Math.min(
-      videoDurationSeconds,
-      Math.max(minimumEnd, rawEnd)
-    ).toFixed(3)
+    Math.min(videoDurationSeconds, startSeconds + boundedTargetDuration).toFixed(3)
   );
   const normalizedDuration = Number((endSeconds - startSeconds).toFixed(3));
 

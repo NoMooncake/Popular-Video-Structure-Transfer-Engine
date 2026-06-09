@@ -17,6 +17,7 @@ import {
   buildV2ReferenceAnalysisTables,
   getAdaptiveSlotPlanningRules,
   isErroredV2ReferenceAnalysisOutput,
+  normalizeTrimRecommendation,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
 import {
@@ -122,6 +123,23 @@ test("v2 volcengine video duration is normalized to supported provider lengths",
   assert.equal(normalizeVolcengineVideoDurationSeconds(5), 5);
   assert.equal(normalizeVolcengineVideoDurationSeconds(5.1), 10);
   assert.equal(normalizeVolcengineVideoDurationSeconds(12), 10);
+});
+
+test("v2 generated video trim keeps AI-selected start but clamps to target duration", () => {
+  const recommendation = normalizeTrimRecommendation(
+    {
+      recommended_start_seconds: 3,
+      recommended_end_seconds: 5.125,
+      recommended_duration_seconds: 2.125,
+      quality_status: "good"
+    },
+    1.917,
+    5.125
+  );
+
+  assert.equal(recommendation.recommended_start_seconds, 3);
+  assert.equal(recommendation.recommended_end_seconds, 4.917);
+  assert.equal(recommendation.recommended_duration_seconds, 1.917);
 });
 
 test(
