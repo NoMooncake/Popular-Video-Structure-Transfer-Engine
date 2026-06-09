@@ -2269,6 +2269,9 @@ test(
     const longRevalidate = (await longRevalidateResponse.json()) as {
       canvas_nodes: Array<Record<string, unknown>>;
       canvas_session_id: string;
+      canvas_session: {
+        nodes: Array<Record<string, unknown>>;
+      };
     };
     assert.equal(longRevalidateResponse.status, 200);
     assert.equal(
@@ -2276,7 +2279,23 @@ test(
       "structure_complete_duration_short"
     );
     assert.equal(longRevalidate.canvas_nodes[0]?.missing_duration, 1);
+    assert.match(
+      String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_video_prompt).prompt),
+      /冰红茶/
+    );
+    assert.match(
+      String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_aigc_prompt).prompt),
+      /冰红茶/
+    );
     assert.equal(asRecordArray(longRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
+    const longMissingNode = longRevalidate.canvas_session.nodes.find(
+      (node) => node.node_type === "missing_material"
+    );
+    assert.equal(asRecord(longMissingNode?.data).prompt_ready, true);
+    assert.equal(
+      asRecord(asRecord(longMissingNode?.data).gap_display).title,
+      "缺少必要素材，试试AI补齐吧！"
+    );
 
     const promptNodeResponse = await fetch(
       `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
@@ -2415,6 +2434,61 @@ test(
     assert.equal(completedRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(completedRevalidate.material_segments.length, 2);
     assert.equal(asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).length, 2);
+    assert.deepEqual(
+      new Set(
+        asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).map(
+          (segment) => segment.file_id
+        )
+      ),
+      new Set([firstFileId, secondFileId])
+    );
+
+    await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        required_duration: 2.4
+      })
+    });
+
+    const tinyGapRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const tinyGapRevalidate = (await tinyGapRevalidateResponse.json()) as {
+      canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session: {
+        nodes: Array<Record<string, unknown>>;
+      };
+    };
+    assert.equal(tinyGapRevalidateResponse.status, 200);
+    assert.equal(tinyGapRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(tinyGapRevalidate.canvas_nodes[0]?.missing_duration, 0);
+    assert.equal(tinyGapRevalidate.canvas_nodes[0]?.ignored_missing_duration, 0.4);
+    assert.equal(
+      tinyGapRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "missing_material"
+      ),
+      false
+    );
+
+    await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        required_duration: 2
+      })
+    });
 
     const canvasAssemblyResponse = await fetch(
       `${baseUrl}/api/v2/canvas-sessions/${completedRevalidate.canvas_session_id}/final-video`,

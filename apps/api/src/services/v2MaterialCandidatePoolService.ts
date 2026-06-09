@@ -314,10 +314,12 @@ const buildMaterialSegments = async (
         file_id: material.file_id,
         uri: material.uri,
         label: material.label,
+        assigned_at: material.assigned_at,
         assigned_slot_id: slot.slot_id,
         assigned_slot_type: slot.slot_type,
         script_order_index: slotIndex,
         display_order: displayOrder,
+        slot_material_order_index: materialIndex,
         local_path_resolved: true,
         metadata,
         high_frequency_frame_interval_seconds: highFrequencyFrameIntervalSeconds,
@@ -361,6 +363,9 @@ const buildMaterialSegments = async (
           source_material_id: material.material_id,
           file_id: material.file_id,
           uri: material.uri,
+          label: material.label,
+          material_assigned_at: material.assigned_at,
+          slot_material_order_index: materialIndex,
           assigned_slot_id: slot.slot_id,
           assigned_slot_type: slot.slot_type,
           script_order_index: slotIndex,
@@ -580,6 +585,12 @@ const refineMaterialSegments = async (
       buildRefinementProviderPayload(session, candidatePoolId, materialSegments)
     );
     const refinements = normalizeProviderSegmentRefinements(providerResponse);
+    const refinementStatus =
+      refinements.size === materialSegments.length
+        ? "refined"
+        : refinements.size > 0
+          ? "partially_refined"
+          : "deterministic_fallback";
 
     return {
       material_segments: materialSegments.map((segment) => {
@@ -590,8 +601,8 @@ const refineMaterialSegments = async (
           : getFallbackSegmentRefinement(segment, "provider omitted this segment");
       }),
       refinement: {
-        status: "refined",
-        provider_used: true,
+        status: refinementStatus,
+        provider_used: refinements.size > 0,
         provider_response_segment_count: refinements.size
       }
     };

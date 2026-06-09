@@ -734,6 +734,8 @@ const getSlotCoverageKey = (slotId: string, slotType: string): string[] => [
   slotType
 ];
 
+const minimumAiCompletionGapSeconds = 0.5;
+
 const isAcceptedDurationShortSlot = (
   acceptedSlots: Set<string>,
   slotId: string,
@@ -771,6 +773,9 @@ const makeSegmentAssignment = (
   source_material_id: segment.source_material_id,
   file_id: segment.file_id,
   uri: segment.uri,
+  label: segment.label,
+  material_assigned_at: segment.material_assigned_at,
+  slot_material_order_index: segment.slot_material_order_index,
   source_in_seconds: segment.final_source_in_seconds ?? segment.source_in_seconds,
   source_out_seconds: segment.final_source_out_seconds ?? segment.source_out_seconds,
   matched_material_duration: matchedDuration,
@@ -803,6 +808,202 @@ const makeDirectVideoReferenceMaterialsFromSegments = (
   }));
 };
 
+const getSegmentMaterialKey = (segment: JsonObject): string =>
+  normalizeOptionalString(segment.source_material_id) ||
+  normalizeOptionalString(segment.file_id) ||
+  normalizeOptionalString(segment.uri) ||
+  normalizeOptionalString(segment.segment_id) ||
+  "unknown_material";
+
+const getSegmentAssignedAtMs = (segment: JsonObject): number => {
+  const assignedAt = normalizeOptionalString(segment.material_assigned_at);
+  if (!assignedAt) {
+    return 0;
+  }
+
+  const timestamp = Date.parse(assignedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const compareCandidateSegments = (left: JsonObject, right: JsonObject): number => {
+  const leftAssignedAt = getSegmentAssignedAtMs(left);
+  const rightAssignedAt = getSegmentAssignedAtMs(right);
+  if (leftAssignedAt !== rightAssignedAt) {
+    return rightAssignedAt - leftAssignedAt;
+  }
+
+  const leftOrder = getNumber(left.slot_material_order_index, 0);
+  const rightOrder = getNumber(right.slot_material_order_index, 0);
+  if (leftOrder !== rightOrder) {
+    return rightOrder - leftOrder;
+  }
+
+  const qualityDelta = getNumber(right.quality_score, 0.5) - getNumber(left.quality_score, 0.5);
+  if (qualityDelta !== 0) {
+    return qualityDelta;
+  }
+
+  return getNumber(left.source_in_seconds, 0) - getNumber(right.source_in_seconds, 0);
+};
+
+const allocateSegmentsForSlot = (
+  slot: V2ScriptSlot,
+  candidateSegments: JsonObject[]
+): JsonObject[] => {
+  const remainingBySegmentId = new Map<string, number>();
+  for (const segment of candidateSegments) {
+    const segmentId = normalizeOptionalString(segment.segment_id);
+    if (!segmentId) {
+      continue;
+    }
+
+    remainingBySegmentId.set(segmentId, getSegmentFinalDuration(segment));
+  }
+
+  let requiredRemaining = slot.required_duration;
+  const assignedSegments: JsonObject[] = [];
+  const exactAssignedSegments = candidateSegments.filter(
+    (segment) => normalizeOptionalString(segment.assigned_slot_id) === slot.slot_id
+  );
+  const materialKeys = Array.from(
+    new Set(exactAssignedSegments.map((segment) => getSegmentMaterialKey(segment)))
+  ).sort((left, right) => {
+    const newestLeft = Math.max(
+      ...exactAssignedSegments
+        .filter((segment) => getSegmentMaterialKey(segment) === left)
+        .map((segment) => getSegmentAssignedAtMs(segment))
+    );
+    const newestRight = Math.max(
+      ...exactAssignedSegments
+        .filter((segment) => getSegmentMaterialKey(segment) === right)
+        .map((segment) => getSegmentAssignedAtMs(segment))
+    );
+
+    return newestRight - newestLeft;
+  });
+
+  const allocateFromSegment = (segment: JsonObject, maxDuration?: number): void => {
+    if (requiredRemaining <= 0) {
+      return;
+    }
+
+    const segmentId = normalizeOptionalString(segment.segment_id);
+    if (!segmentId) {
+      return;
+    }
+
+    const remainingSegmentDuration = remainingBySegmentId.get(segmentId) || 0;
+    if (remainingSegmentDuration <= 0) {
+      return;
+    }
+
+    const matchedDuration = Number(
+      Math.min(requiredRemaining, remainingSegmentDuration, maxDuration ?? Number.POSITIVE_INFINITY)
+        .toFixed(3)
+    );
+    if (matchedDuration <= 0) {
+      return;
+    }
+
+    const existingAssignment = assignedSegments.find(
+      (assignment) => normalizeOptionalString(assignment.segment_id) === segmentId
+    );
+    if (existingAssignment) {
+      existingAssignment.matched_material_duration = Number(
+        (getNumber(existingAssignment.matched_material_duration) + matchedDuration).toFixed(3)
+      );
+    } else {
+      assignedSegments.push(makeSegmentAssignment(segment, matchedDuration));
+    }
+    remainingBySegmentId.set(
+      segmentId,
+      Number((remainingSegmentDuration - matchedDuration).toFixed(3))
+    );
+    requiredRemaining = Number((requiredRemaining - matchedDuration).toFixed(3));
+  };
+
+  if (materialKeys.length > 1) {
+    const fairShareDuration = Number((slot.required_duration / materialKeys.length).toFixed(3));
+    for (const materialKey of materialKeys) {
+      let materialRemaining = Math.min(fairShareDuration, requiredRemaining);
+      const segmentsForMaterial = exactAssignedSegments
+        .filter((segment) => getSegmentMaterialKey(segment) === materialKey)
+        .sort(compareCandidateSegments);
+
+      for (const segment of segmentsForMaterial) {
+        if (materialRemaining <= 0 || requiredRemaining <= 0) {
+          break;
+        }
+
+        const before = requiredRemaining;
+        allocateFromSegment(segment, materialRemaining);
+        const allocated = Number((before - requiredRemaining).toFixed(3));
+        materialRemaining = Number((materialRemaining - allocated).toFixed(3));
+      }
+    }
+  }
+
+  for (const segment of candidateSegments.sort(compareCandidateSegments)) {
+    if (requiredRemaining <= 0) {
+      break;
+    }
+
+    allocateFromSegment(segment);
+  }
+
+  return assignedSegments;
+};
+
+const getCanvasFallbackImagePrompt = (
+  session: V2ScriptSession,
+  slot: V2ScriptSlot
+): JsonObject => {
+  const productName =
+    normalizeOptionalString(session.user_request.product_name) ||
+    normalizeOptionalString(session.user_request.target_product) ||
+    "目标产品";
+
+  return {
+    prompt_ref: `${slot.slot_type}_canvas_gap_image`,
+    prompt_source: "deterministic_canvas_gap_fallback",
+    prompt: [
+      `竖屏 9:16 商业广告补帧关键图，产品是${productName}。`,
+      `对应分镜：${slot.shot_description}`,
+      slot.voiceover_text ? `字幕/旁白方向：${slot.voiceover_text}` : undefined,
+      "画面需要真实商业摄影质感，主体清晰，保留字幕安全区。",
+      "不要生成无关品牌、错误包装、乱码文字或与现有素材冲突的人物场景。"
+    ]
+      .filter(Boolean)
+      .join("\n")
+  };
+};
+
+const getCanvasFallbackVideoPrompt = (
+  session: V2ScriptSession,
+  slot: V2ScriptSlot,
+  missingDuration: number
+): JsonObject => {
+  const productName =
+    normalizeOptionalString(session.user_request.product_name) ||
+    normalizeOptionalString(session.user_request.target_product) ||
+    "目标产品";
+
+  return {
+    prompt_ref: `${slot.slot_type}_canvas_gap_video`,
+    prompt_source: "deterministic_canvas_gap_fallback",
+    prompt: [
+      `使用现有素材帧或已确认图片，生成 ${slot.slot_type} 分镜缺口视频；产品是${productName}。`,
+      `目标补全时长约 ${missingDuration}s。`,
+      `分镜画面方向：${slot.shot_description}`,
+      slot.voiceover_text ? `字幕/旁白方向：${slot.voiceover_text}` : undefined,
+      "保持竖屏 9:16、真实商业广告质感、主体稳定清晰，动作自然延展。",
+      "不要纯文字生成；不要生成无关品牌、错误包装、乱码文字或畸形手部。"
+    ]
+      .filter(Boolean)
+      .join("\n")
+  };
+};
+
 const buildSegmentAwareMaterialCoverage = (
   session: V2ScriptSession,
   materialSegments: JsonObject[],
@@ -832,35 +1033,21 @@ const buildSegmentAwareMaterialCoverage = (
     const candidateSegments = materialSegments
       .filter((segment) => isSegmentUsableForSlot(asJsonObject(segment), slot))
       .map(asJsonObject)
-      .sort(
-        (left, right) =>
-          getNumber(right.quality_score, 0.5) - getNumber(left.quality_score, 0.5)
-      );
-    let requiredRemaining = slot.required_duration;
-    const assignedSegments: JsonObject[] = [];
-
-    for (const segment of candidateSegments) {
-      if (requiredRemaining <= 0) {
-        break;
-      }
-
-      const segmentDuration = getSegmentFinalDuration(segment);
-      if (segmentDuration <= 0) {
-        continue;
-      }
-
-      const matchedDuration = Number(Math.min(requiredRemaining, segmentDuration).toFixed(3));
-      assignedSegments.push(makeSegmentAssignment(segment, matchedDuration));
-      requiredRemaining = Number((requiredRemaining - matchedDuration).toFixed(3));
-    }
+      .sort(compareCandidateSegments);
+    const assignedSegments = allocateSegmentsForSlot(slot, candidateSegments);
 
     const matchedMaterialDuration = Number(
       assignedSegments
         .reduce((total, segment) => total + getNumber(segment.matched_material_duration), 0)
         .toFixed(3)
     );
+    const rawMissingDuration = Number(
+      Math.max(0, slot.required_duration - matchedMaterialDuration).toFixed(3)
+    );
+    const ignoredSmallGap =
+      rawMissingDuration > 0 && rawMissingDuration < minimumAiCompletionGapSeconds;
     const coverageStatus =
-      matchedMaterialDuration >= slot.required_duration
+      matchedMaterialDuration >= slot.required_duration || ignoredSmallGap
         ? "covered"
         : matchedMaterialDuration > 0
           ? "partial"
@@ -873,14 +1060,22 @@ const buildSegmentAwareMaterialCoverage = (
         ? "fully_matched"
         : coverageStatus === "partial"
           ? "structure_complete_duration_short"
-          : "material_insufficient";
-    const missingDuration = Number(
-      Math.max(0, slot.required_duration - matchedMaterialDuration).toFixed(3)
-    );
+            : "material_insufficient";
+    const missingDuration = ignoredSmallGap ? 0 : rawMissingDuration;
     const directVideoReferenceMaterials = makeDirectVideoReferenceMaterialsFromSegments(
       assignedSegments,
       candidateSegments
     );
+    const baseVideoPrompt = asJsonObject(base.recommended_video_prompt);
+    const baseImagePrompt = asJsonObject(base.recommended_aigc_prompt);
+    const recommendedVideoPrompt =
+      normalizeOptionalString(baseVideoPrompt.prompt)
+        ? baseVideoPrompt
+        : getCanvasFallbackVideoPrompt(session, slot, missingDuration || rawMissingDuration);
+    const recommendedAigcPrompt =
+      normalizeOptionalString(baseImagePrompt.prompt)
+        ? baseImagePrompt
+        : getCanvasFallbackImagePrompt(session, slot);
     const availableGenerationPaths =
       frontendCoverageStatus === "fully_matched"
         ? []
@@ -912,6 +1107,8 @@ const buildSegmentAwareMaterialCoverage = (
     const gapReason =
       frontendCoverageStatus === "fully_matched"
         ? undefined
+        : ignoredSmallGap
+          ? `剩余缺口 ${rawMissingDuration}s 小于 ${minimumAiCompletionGapSeconds}s，已忽略。`
         : matchedMaterialDuration > 0
           ? `已匹配 ${matchedMaterialDuration}s，但该段需要 ${slot.required_duration}s。`
           : "该段文件夹内没有可用素材片段。";
@@ -932,10 +1129,15 @@ const buildSegmentAwareMaterialCoverage = (
             ? "结构完整，但时长不足"
             : "素材不够",
       missing_duration: missingDuration,
+      raw_missing_duration: rawMissingDuration,
+      ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
+      minimum_ai_completion_gap_seconds: minimumAiCompletionGapSeconds,
       ai_completion_required_duration:
         frontendCoverageStatus === "fully_matched"
           ? 0
           : missingDuration || slot.required_duration,
+      recommended_video_prompt: recommendedVideoPrompt,
+      recommended_aigc_prompt: recommendedAigcPrompt,
       assigned_segments: assignedSegments,
       matched_material_segments: assignedSegments,
       candidate_material_segments: candidateSegments,
@@ -946,8 +1148,23 @@ const buildSegmentAwareMaterialCoverage = (
       available_generation_paths: availableGenerationPaths,
       available_user_actions: availableUserActions,
       direct_video_reference_materials: directVideoReferenceMaterials,
+      gap_display:
+        frontendCoverageStatus === "fully_matched"
+          ? undefined
+          : {
+              visible: true,
+              title: "缺少必要素材，试试AI补齐吧！",
+              missing_duration_seconds: missingDuration,
+              prompt_ready: Boolean(
+                normalizeOptionalString(recommendedVideoPrompt.prompt) &&
+                  normalizeOptionalString(recommendedAigcPrompt.prompt)
+              ),
+              available_generation_paths: availableGenerationPaths
+            },
       user_duration_short_decision: durationShortAccepted
         ? "accepted_as_sufficient"
+        : ignoredSmallGap
+          ? "ignored_tiny_gap"
         : coverageStatus === "partial"
           ? "pending"
           : "not_applicable",
@@ -1192,7 +1409,10 @@ export const revalidateV2CanvasFromScript = async (
       required_duration: coverage.required_duration,
       matched_material_duration: coverage.matched_material_duration,
       missing_duration: coverage.missing_duration,
+      raw_missing_duration: coverage.raw_missing_duration,
+      ignored_missing_duration: coverage.ignored_missing_duration,
       needs_ai_completion: coverage.needs_ai_completion,
+      gap_display: coverage.gap_display,
       recommended_video_prompt: coverage.recommended_video_prompt,
       recommended_aigc_prompt: coverage.recommended_aigc_prompt,
       available_generation_paths: coverage.available_generation_paths,

@@ -166,9 +166,20 @@ const buildInitialCanvasNodes = (
           required_duration: coverage.required_duration,
           matched_material_duration: coverage.matched_material_duration,
           missing_duration: coverage.missing_duration,
+          raw_missing_duration: coverage.raw_missing_duration,
+          ignored_missing_duration: coverage.ignored_missing_duration,
           coverage_status: coverage.frontend_coverage_status,
+          gap_display: coverage.gap_display || {
+            visible: true,
+            title: "缺少必要素材，试试AI补齐吧！",
+            missing_duration_seconds: coverage.missing_duration
+          },
           recommended_video_prompt: coverage.recommended_video_prompt,
           recommended_aigc_prompt: coverage.recommended_aigc_prompt,
+          prompt_ready: Boolean(
+            normalizeOptionalString(asJsonObject(coverage.recommended_video_prompt).prompt) &&
+              normalizeOptionalString(asJsonObject(coverage.recommended_aigc_prompt).prompt)
+          ),
           available_generation_paths: coverage.available_generation_paths,
           direct_video_reference_materials: coverage.direct_video_reference_materials
         }
