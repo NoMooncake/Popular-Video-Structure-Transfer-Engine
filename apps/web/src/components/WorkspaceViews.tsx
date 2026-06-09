@@ -274,9 +274,15 @@ export const WorkspaceViews = ({
   if (activeStep === "input") {
     return (
       <InputView
+        hasExistingCanvas={Boolean(
+          workflowResult?.canvasSession ||
+            workflowResult?.canvasSessionId ||
+            workflowResult?.canvasRevalidateResult
+        )}
         onNext={() => onStepChange("analysis")}
         onStepChange={onStepChange}
         onWorkflowReady={onWorkflowReady}
+        projectName={projectName}
       />
     );
   }
@@ -404,13 +410,17 @@ const CanvasTopBar = ({
 };
 
 const InputView = ({
+  hasExistingCanvas,
   onNext,
   onStepChange,
-  onWorkflowReady
+  onWorkflowReady,
+  projectName
 }: {
+  hasExistingCanvas: boolean;
   onNext: () => void;
   onStepChange: (step: StepKey) => void;
   onWorkflowReady: (result: WorkflowRunResult) => void;
+  projectName: string;
 }) => {
   const [brief, setBrief] = useState(
     "开始一次分镜迁移：我想基于几条爆款样例，生成一条“新手养猫怎么选猫粮”的 20 秒短视频。"
@@ -523,7 +533,9 @@ const InputView = ({
   return (
     <div className="page-shell input-page-redesign">
       <header className="simple-top-bar">
-        <div className="brand-mark">ShotSwift</div>
+        <button className="home-brand-button" onClick={() => onStepChange("input")} type="button">
+          迁镜
+        </button>
         <div className="figma-avatar">F</div>
       </header>
 
@@ -619,17 +631,21 @@ const InputView = ({
           </div>
         </section>
 
+        {hasExistingCanvas ? (
         <section className="canvas-section">
           <h3>画布初始</h3>
           <div className="existing-canvases-scroll">
-            {figmaSampleImages.map((src, i) => (
+            {figmaSampleImages.slice(0, 3).map((src, i) => (
               <div className="canvas-card" key={i}>
                 <img src={src} alt="Canvas placeholder" />
-                <div className="canvas-card-title">未命名项目 {i + 1}</div>
+                <div className="canvas-card-title">
+                  {i === 0 ? projectName || "未命名项目" : ["Vlog", "TF口红", "Canvas广告"][i - 1] ?? `画布 ${i + 1}`}
+                </div>
               </div>
             ))}
           </div>
         </section>
+        ) : null}
       </main>
 
       {showModal && (
@@ -1594,7 +1610,7 @@ const GapFillView = ({
       <VideoBlockCanvas
         blocks={blocks}
         canvasSessionId={canvasSession?.canvas_session_id}
-        onBack={() => onStepChange("migration")}
+        onBack={() => onStepChange("input")}
         onCanvasSessionChange={(nextCanvasSession) =>
           onWorkflowPatch({ canvasSession: nextCanvasSession })
         }

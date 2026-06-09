@@ -25,7 +25,7 @@ type CanvasPosition = {
   y: number;
 };
 
-type CanvasStatus = "matched" | "missing" | "partial" | "generating";
+type CanvasStatus = "matched" | "missing" | "generating";
 
 type VideoGenerationPayload = {
   keyframe_image?: string;
@@ -82,11 +82,10 @@ const labelForBlock = (block: CanvasBlock, index: number) =>
 
 const imageForBlock = (index: number) => cardImages[index % cardImages.length];
 
-const portColorByStatus: Record<CanvasStatus, "matched" | "missing" | "partial"> = {
+const portColorByStatus: Record<CanvasStatus, "matched" | "missing"> = {
   matched: "matched",
-  partial: "partial",
   missing: "missing",
-  generating: "partial"
+  generating: "missing"
 };
 
 const clampZoom = (value: number) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value));
@@ -221,15 +220,7 @@ export const VideoBlockCanvas = ({
       return "matched";
     }
 
-    if (index === 1 || block.status === "missing") {
-      return "missing";
-    }
-
-    if (block.status === "partial") {
-      return "partial";
-    }
-
-    return "matched";
+    return block.status === "matched" ? "matched" : "missing";
   };
 
   const needsCompletion = (block: CanvasBlock, index: number) =>
@@ -716,10 +707,10 @@ export const VideoBlockCanvas = ({
                     <line
                       className={solid ? "solid" : "dashed"}
                       key={`${block.id}-${nextBlock.id}`}
-                      x1={from.x + 286}
-                      x2={to.x + 4}
-                      y1={from.y + 131}
-                      y2={to.y + 131}
+                      x1={from.x + 283}
+                      x2={to.x + 3}
+                      y1={from.y + 130}
+                      y2={to.y + 130}
                     />
                   );
                 })}

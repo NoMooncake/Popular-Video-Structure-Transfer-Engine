@@ -4725,3 +4725,393 @@ input {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Requested Figma refinements: fixed navigation padding, home layout, stable analysis nav, and two-state canvas. */
+.simple-top-bar,
+.figma-analysis-topbar,
+.figma-canvas-topbar,
+.preview-topbar {
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
+.figma-migration-button {
+  right: max(48px, calc((100vw - 1728px) / 2 + 48px));
+}
+
+.migration-fixed-frame {
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
+.preview-action-row {
+  left: 48px;
+  right: max(48px, calc((100vw - 1632px) / 2 + 48px));
+}
+
+.input-page-redesign {
+  max-width: none;
+  min-height: 100vh;
+  padding: 0 48px 64px;
+  background: #0a0a0a;
+}
+
+.simple-top-bar {
+  position: fixed;
+  z-index: 20;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 88px;
+  margin: 0;
+  padding-top: 16px;
+  padding-bottom: 16px;
+  background: #0a0a0a;
+}
+
+.home-brand-button {
+  border: 0;
+  background: transparent;
+  color: #fe2c55;
+  font-family: inherit;
+  font-size: 36px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  padding: 10px;
+}
+
+.input-page-redesign .content-container {
+  width: min(100%, 1398px);
+  max-width: 1398px;
+  gap: 56px;
+  padding-top: 219px;
+}
+
+.input-page-redesign .main-section {
+  width: min(100%, 1000px);
+  margin: 0 auto;
+}
+
+.input-page-redesign .hero-simple {
+  margin: 0 0 24px;
+  padding: 10px;
+}
+
+.input-page-redesign .hero-simple h2 {
+  margin: 0;
+  color: #ffffff;
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.input-page-redesign .hero-simple h2 {
+  font-size: 0;
+}
+
+.input-page-redesign .hero-simple h2::before {
+  content: "今天想做个什么样的视频？";
+  font-size: 40px;
+}
+
+.input-page-redesign .hero-simple p {
+  display: none;
+}
+
+.input-page-redesign .prompt-box-wide {
+  height: 120px;
+  margin: 0 0 32px;
+  border: 0;
+  border-radius: 16px;
+  background: rgba(93, 95, 97, 0.6);
+  padding: 8px;
+}
+
+.input-page-redesign .prompt-box-wide textarea {
+  height: 72px;
+  padding: 10px;
+  color: #dddddd;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.input-page-redesign .prompt-box-wide textarea::placeholder {
+  color: #dddddd;
+}
+
+.input-page-redesign .submit-arrow-btn {
+  right: 8px;
+  bottom: 8px;
+  width: 30px;
+  height: 30px;
+  background: rgba(113, 115, 117, 0.5);
+  box-shadow: none;
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.input-page-redesign .upload-section-large {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 480px));
+  justify-content: center;
+  gap: 32px;
+  height: auto;
+}
+
+.input-page-redesign .upload-card-large {
+  position: relative;
+  width: 480px;
+  height: 264px;
+  overflow: visible;
+  border: 2px solid #27272a;
+  border-radius: 16px;
+  background: transparent;
+  padding: 8px 12px;
+}
+
+.input-page-redesign .upload-card-large::before {
+  position: absolute;
+  left: 0;
+  top: -28px;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.input-page-redesign .upload-card-large:nth-child(1)::before {
+  content: "参考素材";
+}
+
+.input-page-redesign .upload-card-large:nth-child(2)::before {
+  content: "真实素材";
+}
+
+.input-page-redesign .upload-card-large.has-media {
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.input-page-redesign .materials-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  width: 100%;
+  max-height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.input-page-redesign .materials-list::-webkit-scrollbar {
+  display: none;
+}
+
+.input-page-redesign .material-item-preview {
+  flex: 0 0 220px;
+  width: 220px;
+  height: 45px;
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 17px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.input-page-redesign .material-item-preview img,
+.input-page-redesign .material-item-preview video,
+.input-page-redesign .material-item-preview .text-preview {
+  flex: 0 0 45px;
+  width: 45px;
+  height: 45px;
+  border-radius: 4px;
+}
+
+.input-page-redesign .file-name {
+  min-width: 0;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.input-page-redesign .upload-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 218px;
+}
+
+.input-page-redesign .upload-placeholder strong {
+  height: 58px;
+  margin: 0;
+  color: #ffffff;
+  font-size: 48px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.input-page-redesign .upload-placeholder span {
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.input-page-redesign .icon-video,
+.input-page-redesign .icon-materials {
+  display: none;
+}
+
+.input-page-redesign .canvas-section {
+  width: min(100%, 1398px);
+  margin: 0 auto;
+}
+
+.input-page-redesign .canvas-section h3 {
+  margin: 0 0 16px;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.input-page-redesign .existing-canvases-scroll {
+  gap: 24px;
+  padding: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.input-page-redesign .existing-canvases-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.input-page-redesign .canvas-card {
+  flex: 0 0 450px;
+  width: 450px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+}
+
+.input-page-redesign .canvas-card img {
+  height: 330px;
+  border-radius: 8px;
+  opacity: 1;
+}
+
+.input-page-redesign .canvas-card-title {
+  padding: 4px 0 0;
+  color: #ffffff;
+  font-size: 16px;
+  line-height: 1.5;
+  text-align: right;
+}
+
+.figma-analysis-page {
+  overscroll-behavior: none;
+}
+
+.figma-analysis-content {
+  height: calc(100vh - 106px);
+  overflow: hidden;
+}
+
+.figma-sample-nav {
+  position: fixed;
+  transform: none;
+  will-change: auto;
+}
+
+.figma-analysis-table-wrap {
+  overscroll-behavior: contain;
+}
+
+.figma-structure-card.status-missing .figma-card-frame,
+.figma-structure-card.status-generating .figma-card-frame {
+  border-color: #fe2c55;
+}
+
+.figma-structure-card.status-matched .figma-card-frame,
+.figma-structure-card.ai-completed .figma-card-frame {
+  border-color: #34b77a;
+}
+
+.figma-structure-card.selected .figma-card-frame {
+  border-color: #fe2c55;
+  box-shadow: none;
+}
+
+.figma-port.partial,
+.figma-port.missing {
+  background: #fe2c55;
+}
+
+.figma-port.matched {
+  background: #34b77a;
+}
+
+.figma-port.left,
+.figma-port.right {
+  background: currentColor;
+}
+
+.figma-port.left.matched,
+.figma-port.right.matched {
+  background: #34b77a;
+}
+
+.figma-port.left.missing,
+.figma-port.right.missing {
+  background: #fe2c55;
+}
+
+.figma-canvas-lines line {
+  stroke: #fafafa;
+}
+
+.figma-canvas-lines line.solid {
+  stroke: #34b77a;
+}
+
+.figma-canvas-lines line.dashed {
+  stroke: #fafafa;
+  stroke-dasharray: 6 8;
+}
+
+.figma-canvas-status {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .input-page-redesign {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .input-page-redesign .content-container {
+    padding-top: 160px;
+  }
+
+  .input-page-redesign .upload-section-large {
+    grid-template-columns: 1fr;
+  }
+
+  .input-page-redesign .upload-card-large {
+    width: 100%;
+  }
+}
