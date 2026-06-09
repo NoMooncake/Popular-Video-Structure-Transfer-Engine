@@ -203,6 +203,36 @@ const formatMaterialSeconds = (value: number | undefined): string | undefined =>
 
 type AssignedMaterial = NonNullable<V2MaterialCoverageSlot["assigned_materials"]>[number];
 
+const getAssignedMaterials = (
+  slot: V2MaterialCoverageSlot | undefined
+): AssignedMaterial[] => {
+  if (!slot) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return [
+    ...(slot.assigned_segments ?? []),
+    ...(slot.matched_material_segments ?? []),
+    ...(slot.assigned_materials ?? [])
+  ].filter((material) => {
+    const key = [
+      material.segment_id,
+      material.material_id,
+      material.source_material_id,
+      material.file_id,
+      material.uri,
+      material.source_in_seconds,
+      material.source_out_seconds
+    ].join(":");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
 const getAssignedMaterialRange = (material: AssignedMaterial): string | undefined => {
   if (material.time_range) {
     return material.time_range;
@@ -221,16 +251,30 @@ const getAssignedMaterialRange = (material: AssignedMaterial): string | undefine
   return durationText ? `匹配 ${durationText}` : undefined;
 };
 
+const isAssignedMaterialSegment = (material: AssignedMaterial): boolean => {
+  const start = material.source_in_seconds ?? material.start_seconds;
+  const end = material.source_out_seconds ?? material.end_seconds;
+  return (
+    Boolean(material.time_range) ||
+    (typeof start === "number" && typeof end === "number" && end > start) ||
+    (typeof material.matched_material_duration === "number" &&
+      material.matched_material_duration > 0)
+  );
+};
+
 const getMigrationMaterialItems = (
   block: CanvasBlock,
   fallbackFile: UploadedVideoFile | undefined,
   localMaterialNames: string[]
 ): Array<{ name: string; note?: string }> => {
-  const assignedMaterials = block.v2?.coverageSlot?.assigned_materials ?? [];
+  const assignedMaterials = getAssignedMaterials(block.v2?.coverageSlot)
+    .filter(isAssignedMaterialSegment);
   const assignedItems = assignedMaterials.map((material, index) => ({
     name:
       material.label ||
       material.material_id ||
+      material.source_material_id ||
+      material.file_id ||
       material.segment_id ||
       `匹配片段 ${index + 1}`,
     note:
@@ -245,7 +289,9 @@ const getMigrationMaterialItems = (
     return [...assignedItems, ...localItems];
   }
 
-  const fallbackItems = fallbackFile
+  const fallbackItems = block.v2?.coverageSlot
+    ? [{ name: "空" }]
+    : fallbackFile
     ? [{ name: fallbackFile.original_filename }]
     : [{ name: "空" }];
 
@@ -1662,7 +1708,6 @@ const GapFillView = ({
 }) => {
   const exportFinalVideo = async () => {
     if (!canvasSession) {
-      onStepChange("demo");
       return;
     }
 
@@ -1673,16 +1718,19 @@ const GapFillView = ({
           generate_bgm: true
         }
       );
+      if (!finalVideo.final_assembly?.final_video_url) {
+        throw new Error("V2 final assembly did not return a final video URL.");
+      }
       onWorkflowPatch({
         canvasSession: finalVideo.canvas_session,
         canvasSessionId: finalVideo.canvas_session?.canvas_session_id,
         finalAssembly: finalVideo.final_assembly,
         finalVideo
       });
+      onStepChange("demo");
     } catch (error) {
       console.warn("V2 final assembly failed.", error);
     }
-    onStepChange("demo");
   };
 
   return (

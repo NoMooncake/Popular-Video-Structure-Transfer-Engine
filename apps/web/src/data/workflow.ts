@@ -47,6 +47,42 @@ const formatTimeRange = (timeRange: CanvasBlock["slot"]["time_range"]): string =
   return `${timeRange.start_seconds}-${timeRange.end_seconds}s`;
 };
 
+const getV2AssignedMaterials = (slot: V2MaterialCoverageSlot) => {
+  const seen = new Set<string>();
+  return [
+    ...(slot.assigned_segments ?? []),
+    ...(slot.matched_material_segments ?? []),
+    ...(slot.assigned_materials ?? [])
+  ].filter((material) => {
+    const key = [
+      material.segment_id,
+      material.material_id,
+      material.source_material_id,
+      material.file_id,
+      material.uri,
+      material.source_in_seconds,
+      material.source_out_seconds
+    ].join(":");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+const hasV2AssignedSegment = (slot: V2MaterialCoverageSlot): boolean =>
+  getV2AssignedMaterials(slot).some((material) => {
+    const start = material.source_in_seconds ?? material.start_seconds;
+    const end = material.source_out_seconds ?? material.end_seconds;
+    return (
+      Boolean(material.time_range) ||
+      (typeof start === "number" && typeof end === "number" && end > start) ||
+      (typeof material.matched_material_duration === "number" &&
+        material.matched_material_duration > 0)
+    );
+  });
+
 export const createCanvasBlocks = (blueprint: StructureBlueprint): CanvasBlock[] => blueprint.slots.map((slot) => ({
   id: slot.slot_id,
   label: slot.slot_type,
@@ -63,6 +99,10 @@ export const createCanvasBlocks = (blueprint: StructureBlueprint): CanvasBlock[]
 const toV2MatchStatus = (slot: V2MaterialCoverageSlot): MatchStatus => {
   if (slot.frontend_coverage_status === "fully_matched" || slot.coverage_status === "covered") {
     return "matched";
+  }
+
+  if (hasV2AssignedSegment(slot)) {
+    return "partial";
   }
 
   if (
@@ -198,7 +238,7 @@ const toV2TimelineItem = (
     time_range: timeRange,
     slot_type: slot.slot_type,
     content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? slot.slot_name ?? slot.slot_type,
-    visual_source: slot.assigned_materials?.length ? "user_material" : "generated_graphic",
+    visual_source: hasV2AssignedSegment(slot) ? "user_material" : "generated_graphic",
     visual_description:
       slot.frontend_display?.material_summary ??
       slot.recommended_video_prompt?.prompt_description ??

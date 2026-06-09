@@ -416,7 +416,7 @@ export const generateV2CanvasImageCandidates = async (
   const result = await generateV2ImageCandidates({
     prompt,
     count: getNumber(payload.count, 4),
-    allow_fallback: payload.allow_fallback !== false,
+    allow_fallback: payload.allow_fallback === true,
     use_image_provider: payload.use_image_provider !== false
   });
   const rawCandidates = Array.isArray(result.candidates)
@@ -544,7 +544,7 @@ export const generateV2CanvasGapVideo = async (
     slot_description: slotDescription,
     auto_trim_review: payload.auto_trim_review !== false,
     generation_mode: imageUri ? "generated_image" : "direct_from_material_frame",
-    allow_fallback: payload.allow_fallback !== false,
+    allow_fallback: payload.allow_fallback === true,
     use_video_provider: payload.use_video_provider !== false
   });
   const generatedVideoNode = upsertNode(session, {
@@ -689,7 +689,7 @@ export const reviewAndTrimV2CanvasGeneratedVideo = async (
     generation_prompt: normalizeOptionalString(generatedVideoNode.data.video_prompt),
     slot_description: normalizeOptionalString(missingNode?.data.slot_type),
     trim_video: payload.trim_video !== false,
-    allow_fallback: payload.allow_fallback !== false,
+    allow_fallback: payload.allow_fallback === true,
     use_multimodal_provider: payload.use_multimodal_provider !== false
   });
   const trimmedVideoPath = normalizeOptionalString(trimResult.trimmed_video_path);

@@ -166,6 +166,35 @@ export type TimelinePlan = {
   timeline: TimelineItem[];
 };
 
+export type V2MaterialAssignment = {
+  material_id?: string;
+  source_material_id?: string;
+  file_id?: string;
+  uri?: string;
+  label?: string;
+  segment_id?: string;
+  time_range?: string;
+  start_seconds?: number;
+  end_seconds?: number;
+  source_in_seconds?: number;
+  source_out_seconds?: number;
+  matched_material_duration?: number;
+  visual_description?: string;
+  recommended_usage?: string;
+  content_summary?: string;
+  frames?: Array<{
+    frame_id?: string;
+    time_seconds?: number;
+    uri?: string;
+    image_uri?: string;
+    public_uri?: string;
+    media?: {
+      uri?: string;
+      mime_type?: string;
+    };
+  }>;
+};
+
 export type CanvasBlock = {
   id: string;
   label: string;
@@ -241,20 +270,10 @@ export type V2MaterialCoverageSlot = {
   gap_reason?: string;
   available_user_actions?: string[];
   available_generation_paths?: string[];
-  assigned_materials?: Array<{
-    material_id: string;
-    label?: string;
-    segment_id?: string;
-    time_range?: string;
-    start_seconds?: number;
-    end_seconds?: number;
-    source_in_seconds?: number;
-    source_out_seconds?: number;
-    matched_material_duration?: number;
-    visual_description?: string;
-    recommended_usage?: string;
-    content_summary?: string;
-  }>;
+  assigned_materials?: V2MaterialAssignment[];
+  assigned_segments?: V2MaterialAssignment[];
+  matched_material_segments?: V2MaterialAssignment[];
+  candidate_material_segments?: V2MaterialAssignment[];
   candidate_materials?: Array<{
     material_id: string;
     label?: string;

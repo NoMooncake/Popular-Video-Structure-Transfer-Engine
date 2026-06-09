@@ -1,12 +1,10 @@
 import { useMemo, useRef, useState } from "react";
 import {
   generateV2CanvasGapVideo,
-  generateV2CanvasImageCandidates,
-  generateV2ImageCandidates,
-  generateV2ImageToVideo
+  generateV2CanvasImageCandidates
 } from "../api/client";
 import type { V2CanvasSession } from "../api/client";
-import type { CanvasBlock } from "../types";
+import type { CanvasBlock, V2MaterialAssignment } from "../types";
 
 type VideoBlockCanvasProps = {
   blocks: CanvasBlock[];
@@ -46,17 +44,6 @@ const cardImages = [
   "https://www.figma.com/api/mcp/asset/27f882c5-4b54-4e3e-b9b7-811c7dfe6429"
 ];
 
-const aiCandidateImages = [
-  "https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1512496015851-a90fb38ba796?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1512207128881-1baee87126fb?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1541643600914-78b084683601?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1505577058444-a3dab90d4253?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1000&q=80"
-];
-
 const figmaLabels = ["Hook", "产品介入", "感官特写", "使用动作", "使用动作", "行动引导"];
 
 const initialPositions: Record<string, CanvasPosition> = {
@@ -82,6 +69,97 @@ const labelForBlock = (block: CanvasBlock, index: number) =>
 
 const imageForBlock = (index: number) => cardImages[index % cardImages.length];
 
+const getBlockMaterialAssignments = (block: CanvasBlock): V2MaterialAssignment[] => {
+  const slot = block.v2?.coverageSlot;
+  if (!slot) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return [
+    ...(slot.assigned_segments ?? []),
+    ...(slot.matched_material_segments ?? []),
+    ...(slot.assigned_materials ?? [])
+  ].filter((material) => {
+    const key = [
+      material.segment_id,
+      material.material_id,
+      material.source_material_id,
+      material.file_id,
+      material.uri,
+      material.source_in_seconds,
+      material.source_out_seconds
+    ].join(":");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+const hasMaterialSegment = (block: CanvasBlock) =>
+  getBlockMaterialAssignments(block).some((material) => {
+    const start = material.source_in_seconds ?? material.start_seconds;
+    const end = material.source_out_seconds ?? material.end_seconds;
+    return (
+      Boolean(material.time_range) ||
+      (typeof start === "number" && typeof end === "number" && end > start) ||
+      (typeof material.matched_material_duration === "number" &&
+        material.matched_material_duration > 0)
+    );
+  });
+
+const frameUriFromMaterial = (material: V2MaterialAssignment): string | undefined => {
+  const frames = material.frames ?? [];
+  for (const frame of frames) {
+    const uri = frame.uri || frame.image_uri || frame.public_uri || frame.media?.uri;
+    if (uri) {
+      return uri;
+    }
+  }
+
+  return undefined;
+};
+
+const materialImageForBlock = (block: CanvasBlock): string | undefined => {
+  for (const material of getBlockMaterialAssignments(block)) {
+    const frameUri = frameUriFromMaterial(material);
+    if (frameUri) {
+      return frameUri;
+    }
+  }
+
+  return undefined;
+};
+
+const browserPlayableUri = (uri: string | undefined): string | undefined => {
+  if (!uri) {
+    return undefined;
+  }
+
+  if (/^(?:https?:|blob:|data:)/iu.test(uri) || uri.startsWith("/api/")) {
+    return uri;
+  }
+
+  return undefined;
+};
+
+const materialVideoForBlock = (block: CanvasBlock): string | undefined => {
+  for (const material of getBlockMaterialAssignments(block)) {
+    const uri = browserPlayableUri(material.uri);
+    if (uri) {
+      return uri;
+    }
+
+    if (material.file_id) {
+      return `/api/upload/files/${encodeURIComponent(material.file_id)}`;
+    }
+  }
+
+  return undefined;
+};
+
 const portColorByStatus: Record<CanvasStatus, "matched" | "missing" | "partial"> = {
   matched: "matched",
   partial: "partial",
@@ -104,9 +182,6 @@ const defaultVideoPromptFor = (block: CanvasBlock, index: number) =>
         block,
         index
       )}”的重要性。我们的产品具有清晰的卖点和自然的使用场景，画面需要承接前后镜头，突出产品如何提升用户体验，并保持广告整体节奏连贯。`;
-
-const rotateCandidates = (seed: number) =>
-  Array.from({ length: 4 }, (_, index) => aiCandidateImages[(seed + index) % aiCandidateImages.length]);
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -191,7 +266,7 @@ export const VideoBlockCanvas = ({
   const [keyframeCandidates, setKeyframeCandidates] = useState<Record<string, string[]>>({});
   const [selectedKeyframes, setSelectedKeyframes] = useState<Record<string, string>>({});
   const [generatedVideoThumbs, setGeneratedVideoThumbs] = useState<Record<string, string>>({});
-  const [candidateSeeds, setCandidateSeeds] = useState<Record<string, number>>({});
+  const [generatedVideoUris, setGeneratedVideoUris] = useState<Record<string, string>>({});
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
@@ -212,28 +287,32 @@ export const VideoBlockCanvas = ({
 
   const selectedBlock = blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
 
-  const getCanvasStatus = (block: CanvasBlock, index: number): CanvasStatus => {
+  const getCanvasStatus = (block: CanvasBlock): CanvasStatus => {
     if (generatingVideoBlockId === block.id) {
       return "generating";
     }
 
-    if (generatedVideoThumbs[block.id]) {
+    if (generatedVideoUris[block.id]) {
       return "matched";
     }
 
-    if (index === 1 || block.status === "missing") {
-      return "missing";
+    if (block.status === "matched") {
+      return "matched";
     }
 
-    if (block.status === "partial") {
+    if (block.status === "partial" || hasMaterialSegment(block)) {
       return "partial";
     }
 
-    return "matched";
+    if (block.status === "missing") {
+      return "missing";
+    }
+
+    return "missing";
   };
 
-  const needsCompletion = (block: CanvasBlock, index: number) =>
-    getCanvasStatus(block, index) !== "matched";
+  const needsCompletion = (block: CanvasBlock) =>
+    getCanvasStatus(block) !== "matched";
 
   const statusTextFor = (status: CanvasStatus, aiCompleted: boolean) => {
     if (status === "generating") {
@@ -452,11 +531,11 @@ export const VideoBlockCanvas = ({
 
     const blockIndex = blocks.findIndex((block) => block.id === blockId);
     const block = blocks[blockIndex];
-    const status = block ? getCanvasStatus(block, blockIndex) : null;
+    const status = block ? getCanvasStatus(block) : null;
     const canEdit =
       block &&
       status !== "generating" &&
-      needsCompletion(block, blockIndex);
+      needsCompletion(block);
 
     setActiveEditorBlockId(canEdit ? blockId : null);
   };
@@ -477,37 +556,24 @@ export const VideoBlockCanvas = ({
       const prompt =
         block.v2?.coverageSlot?.recommended_aigc_prompt?.prompt ??
         getKeyframePrompt(block, blockIndex);
-      const response: unknown = canvasSessionId
-        ? await generateV2CanvasImageCandidates(canvasSessionId, {
-            slot_id: block.id,
-            prompt,
-            count: 4,
-            allow_fallback: true
-          })
-        : await generateV2ImageCandidates({
-            prompt,
-            count: 4,
-            allow_fallback: true,
-            reference_video_uris:
-              block.v2?.coverageSlot?.direct_video_reference_materials
-                ?.map((material) => material.uri)
-                .filter((uri): uri is string => Boolean(uri)) ?? []
-          });
+      if (!canvasSessionId) {
+        throw new Error("V2 canvas session is required for image generation.");
+      }
+
+      const response: unknown = await generateV2CanvasImageCandidates(canvasSessionId, {
+        slot_id: block.id,
+        prompt,
+        count: 4,
+        allow_fallback: false
+      });
       if (hasCanvasSession(response)) {
         onCanvasSessionChange?.(response.canvas_session);
       }
       const generatedUris = extractImageCandidateUris(getImageGenerationPayload(response));
-      setCandidateSeeds((current) => {
-        const nextSeed = (current[blockId] ?? 0) + 1;
-        setKeyframeCandidates((candidateMap) => ({
-          ...candidateMap,
-          [blockId]: generatedUris.length > 0 ? generatedUris : rotateCandidates(nextSeed)
-        }));
-        return {
-          ...current,
-          [blockId]: nextSeed
-        };
-      });
+      setKeyframeCandidates((candidateMap) => ({
+        ...candidateMap,
+        [blockId]: generatedUris
+      }));
       setSelectedKeyframes((current) => {
         const next = { ...current };
         delete next[blockId];
@@ -548,7 +614,8 @@ export const VideoBlockCanvas = ({
     }
 
     const sourceVideoUri = block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri;
-    const fallbackImage = keyframeCandidates[block.id]?.[0] ?? imageForBlock(index);
+    const fallbackImage =
+      keyframeCandidates[block.id]?.[0] ?? materialImageForBlock(block) ?? imageForBlock(index);
     const payload: VideoGenerationPayload = {
       keyframe_image: selectedKeyframes[block.id] ?? (sourceVideoUri ? undefined : fallbackImage),
       source_video_uri: sourceVideoUri,
@@ -563,38 +630,38 @@ export const VideoBlockCanvas = ({
         block.v2?.coverageSlot?.ai_completion_required_duration ??
         block.v2?.coverageSlot?.required_duration ??
         5;
-      const response: unknown = canvasSessionId
-        ? await generateV2CanvasGapVideo(canvasSessionId, {
-            approved_image_uri: payload.keyframe_image,
-            duration_seconds: durationSeconds,
-            slot_id: block.id,
-            video_prompt: payload.video_prompt,
-            allow_fallback: true
-          })
-        : await generateV2ImageToVideo({
-            approved_image_uri: payload.keyframe_image,
-            source_video_uri: payload.source_video_uri,
-            video_prompt: payload.video_prompt,
-            generation_mode: payload.keyframe_image ? "generated_image" : "direct_from_material_frame",
-            duration_seconds: durationSeconds,
-            slot_id: block.id,
-            slot_type: block.slot.slot_type,
-            slot_description: block.migrationResult,
-            allow_fallback: true
-          });
+      if (!canvasSessionId) {
+        throw new Error("V2 canvas session is required for video generation.");
+      }
+
+      const response: unknown = await generateV2CanvasGapVideo(canvasSessionId, {
+        approved_image_uri: payload.keyframe_image,
+        duration_seconds: durationSeconds,
+        slot_id: block.id,
+        video_prompt: payload.video_prompt,
+        allow_fallback: false
+      });
       if (hasCanvasSession(response)) {
         onCanvasSessionChange?.(response.canvas_session);
       }
+      const generatedVideoUri = extractGeneratedVideoUri(getVideoGenerationPayload(response));
+      if (!generatedVideoUri) {
+        throw new Error("V2 video generation did not return a video URI.");
+      }
       const generatedThumbnail =
-        extractGeneratedVideoUri(getVideoGenerationPayload(response)) ??
-        payload.keyframe_image ??
-        keyframeCandidates[block.id]?.[0] ??
-        imageForBlock(index);
+        payload.keyframe_image ?? materialImageForBlock(block) ?? keyframeCandidates[block.id]?.[0];
 
-      setGeneratedVideoThumbs((current) => ({
+      setGeneratedVideoUris((current) => ({
         ...current,
-        [block.id]: generatedThumbnail
+        [block.id]: generatedVideoUri
       }));
+
+      if (generatedThumbnail) {
+        setGeneratedVideoThumbs((current) => ({
+          ...current,
+          [block.id]: generatedThumbnail
+        }));
+      }
 
       onUpdateBlock({
         ...block,
@@ -620,7 +687,7 @@ export const VideoBlockCanvas = ({
     ? blocks.find((block) => block.id === activeEditorBlockId)
     : null;
   const editorIndex = editorBlock ? blocks.findIndex((block) => block.id === editorBlock.id) : -1;
-  const editorStatus = editorBlock ? getCanvasStatus(editorBlock, editorIndex) : null;
+  const editorStatus = editorBlock ? getCanvasStatus(editorBlock) : null;
   const editorCanOpen =
     editorBlock &&
     editorStatus &&
@@ -638,7 +705,7 @@ export const VideoBlockCanvas = ({
     ? blocks.findIndex((block) => block.id === selectorBlock.id)
     : -1;
   const selectorCandidates = selectorBlockId
-    ? keyframeCandidates[selectorBlockId] ?? rotateCandidates(candidateSeeds[selectorBlockId] ?? 0)
+    ? keyframeCandidates[selectorBlockId] ?? []
     : [];
 
   return (
@@ -705,8 +772,8 @@ export const VideoBlockCanvas = ({
                   const from = positions[block.id] ?? basePositions[block.id];
                   const to = positions[nextBlock.id] ?? basePositions[nextBlock.id];
                   const solid =
-                    getCanvasStatus(block, index) === "matched" &&
-                    getCanvasStatus(nextBlock, index + 1) === "matched";
+                    getCanvasStatus(block) === "matched" &&
+                    getCanvasStatus(nextBlock) === "matched";
 
                   if (!from || !to) {
                     return null;
@@ -729,12 +796,25 @@ export const VideoBlockCanvas = ({
             {blocks.map((block, index) => {
               const pos = positions[block.id] ?? basePositions[block.id] ?? { x: 0, y: 0 };
               const selected = selectedBlockId === block.id;
-              const image = generatedVideoThumbs[block.id] ?? imageForBlock(index);
-              const canvasStatus = getCanvasStatus(block, index);
-              const gap = needsCompletion(block, index);
+              const hasAssignedMaterial = hasMaterialSegment(block);
+              const image =
+                generatedVideoThumbs[block.id] ??
+                materialImageForBlock(block) ??
+                (block.v2 ? undefined : imageForBlock(index));
+              const cardVideo = image
+                ? undefined
+                : generatedVideoUris[block.id] ?? materialVideoForBlock(block);
+              const canvasStatus = getCanvasStatus(block);
+              const gap = needsCompletion(block);
+              const showGapPlaceholder =
+                canvasStatus === "missing" ||
+                (canvasStatus === "partial" && !hasAssignedMaterial && !cardVideo);
               const portTone = portColorByStatus[canvasStatus];
-              const aiCompleted = Boolean(generatedVideoThumbs[block.id]);
-              const playable = canvasStatus === "matched";
+              const aiCompleted = Boolean(generatedVideoUris[block.id]);
+              const playable =
+                Boolean(generatedVideoUris[block.id]) ||
+                Boolean(materialVideoForBlock(block)) ||
+                (canvasStatus === "matched" && hasAssignedMaterial);
               const isGeneratingVideo = canvasStatus === "generating";
 
               return (
@@ -760,7 +840,7 @@ export const VideoBlockCanvas = ({
                         <span aria-hidden="true" />
                         <strong>Generating</strong>
                       </div>
-                    ) : gap ? (
+                    ) : showGapPlaceholder ? (
                       <div className="figma-gap-card">
                         <p>
                           缺少必要素材，
@@ -768,9 +848,13 @@ export const VideoBlockCanvas = ({
                           试试AI补齐吧！
                         </p>
                       </div>
+                    ) : cardVideo ? (
+                      <video muted playsInline preload="metadata" src={cardVideo} />
                     ) : (
                       <>
-                        <img alt={labelForBlock(block, index)} draggable={false} src={image} />
+                        {image ? (
+                          <img alt={labelForBlock(block, index)} draggable={false} src={image} />
+                        ) : null}
                         {playable ? (
                           <button
                             type="button"
@@ -1003,25 +1087,41 @@ export const VideoBlockCanvas = ({
       {playbackBlockId ? (
         <div className="figma-playback-modal" role="dialog" aria-modal="true" aria-label="视频播放预览">
           <div className="figma-playback-panel">
+            {(() => {
+              const playbackBlock =
+                blocks.find((block) => block.id === playbackBlockId) ?? blocks[0];
+              const playbackIndex = blocks.findIndex((block) => block.id === playbackBlockId);
+              const videoSrc =
+                generatedVideoUris[playbackBlockId] ?? materialVideoForBlock(playbackBlock);
+              const poster =
+                generatedVideoThumbs[playbackBlockId] ??
+                materialImageForBlock(playbackBlock);
+
+              return (
+                <>
             <div className="figma-ai-modal-head">
               <div>
                 <span>视频预览</span>
                 <h2>
-                  {labelForBlock(
-                    blocks.find((block) => block.id === playbackBlockId) ?? blocks[0],
-                    blocks.findIndex((block) => block.id === playbackBlockId)
-                  )}
+                  {labelForBlock(playbackBlock, playbackIndex)}
                 </h2>
               </div>
               <button type="button" onClick={() => setPlaybackBlockId(null)} aria-label="关闭">
                 ×
               </button>
             </div>
-            <div className="figma-video-placeholder">
-              <span aria-hidden="true" />
-              <strong>播放接口待接入</strong>
-              <p>这里预留后端视频 URL 接入点；拿到生成结果后可替换为真实 video 播放。</p>
-            </div>
+            {videoSrc ? (
+              <video className="figma-video-player" controls poster={poster} src={videoSrc} />
+            ) : (
+              <div className="figma-video-placeholder">
+                <span aria-hidden="true" />
+                <strong>播放接口待接入</strong>
+                <p>这里预留后端视频 URL 接入点；拿到生成结果后可替换为真实 video 播放。</p>
+              </div>
+            )}
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}
@@ -1030,11 +1130,11 @@ export const VideoBlockCanvas = ({
         <div className="figma-canvas-status" aria-live="polite">
           {(() => {
             const index = blocks.findIndex((block) => block.id === selectedBlock.id);
-            const status = getCanvasStatus(selectedBlock, index);
+            const status = getCanvasStatus(selectedBlock);
             return (
               <>
                 <span>{labelForBlock(selectedBlock, index)}</span>
-                <strong>{statusTextFor(status, Boolean(generatedVideoThumbs[selectedBlock.id]))}</strong>
+                <strong>{statusTextFor(status, Boolean(generatedVideoUris[selectedBlock.id]))}</strong>
               </>
             );
           })()}
