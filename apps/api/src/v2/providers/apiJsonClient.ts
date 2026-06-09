@@ -615,18 +615,35 @@ const withImageCandidateInstruction = (
     .join("\n");
 };
 
+export const normalizeVolcengineVideoDurationSeconds = (
+  durationSeconds: number
+): number => {
+  const supportedDurations = [5, 10];
+  const finiteDuration =
+    Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : 5;
+
+  return (
+    supportedDurations.find((supportedDuration) => finiteDuration <= supportedDuration) ||
+    supportedDurations[supportedDurations.length - 1]
+  );
+};
+
 const withVolcengineVideoPromptOptions = (
   prompt: string,
   durationSeconds: number,
+  aspectRatio: string,
   cameraFixed: boolean,
   watermark: boolean
 ): string => {
-  const boundedDuration = Math.max(1, Math.min(30, Math.round(durationSeconds)));
+  const providerDuration = normalizeVolcengineVideoDurationSeconds(durationSeconds);
   const hasDurationFlag = /--duration\s+\d+/iu.test(prompt);
+  const hasRatioFlag = /--ratio\s+\d+\s*:\s*\d+/iu.test(prompt);
   const hasCameraFixedFlag = /--camerafixed\s+(?:true|false)/iu.test(prompt);
   const hasWatermarkFlag = /--watermark\s+(?:true|false)/iu.test(prompt);
+  const normalizedAspectRatio = normalizeOptionalString(aspectRatio) || "9:16";
   const optionParts = [
-    hasDurationFlag ? undefined : `--duration ${boundedDuration}`,
+    hasDurationFlag ? undefined : `--duration ${providerDuration}`,
+    hasRatioFlag ? undefined : `--ratio ${normalizedAspectRatio}`,
     hasCameraFixedFlag ? undefined : `--camerafixed ${cameraFixed ? "true" : "false"}`,
     hasWatermarkFlag ? undefined : `--watermark ${watermark ? "true" : "false"}`
   ].filter((part): part is string => Boolean(part));
@@ -879,6 +896,7 @@ export const requestImageToVideo = async (
       normalizeOptionalString(payload.image_uri) ||
       normalizeOptionalString(payload.approved_image_uri);
     const durationSeconds = Number(payload.duration_seconds || 5);
+    const aspectRatio = normalizeOptionalString(payload.aspect_ratio) || "9:16";
     const cameraFixed = normalizeBoolean(payload.camera_fixed ?? payload.camerafixed, false);
     const watermark = normalizeBoolean(payload.watermark, true);
     const content: JsonObject[] = [];
@@ -889,6 +907,7 @@ export const requestImageToVideo = async (
         text: withVolcengineVideoPromptOptions(
           prompt,
           Number.isFinite(durationSeconds) ? durationSeconds : 5,
+          aspectRatio,
           cameraFixed,
           watermark
         )

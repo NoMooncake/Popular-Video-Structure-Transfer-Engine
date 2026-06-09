@@ -993,7 +993,7 @@ const getCanvasFallbackVideoPrompt = (
     prompt_source: "deterministic_canvas_gap_fallback",
     prompt: [
       `使用现有素材帧或已确认图片，生成 ${slot.slot_type} 分镜缺口视频；产品是${productName}。`,
-      `目标补全时长约 ${missingDuration}s。`,
+      `最终剪入缺口时长约 ${missingDuration}s；若视频模型需要生成更长素材，请确保前 ${missingDuration}s 就能完整覆盖该缺口，后续可被裁剪。`,
       `分镜画面方向：${slot.shot_description}`,
       slot.voiceover_text ? `字幕/旁白方向：${slot.voiceover_text}` : undefined,
       "保持竖屏 9:16、真实商业广告质感、主体稳定清晰，动作自然延展。",

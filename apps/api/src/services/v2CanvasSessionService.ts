@@ -524,12 +524,24 @@ export const generateV2CanvasGapVideo = async (
     );
   }
 
+  const gapDurationSeconds =
+    getNumber(payload.duration_seconds, getNumber(missingNode.data.missing_duration, 5)) || 5;
+  const slotType = normalizeOptionalString(missingNode.data.slot_type);
+  const slotDescription =
+    normalizeOptionalString(missingNode.data.shot_description) ||
+    normalizeOptionalString(missingNode.data.slot_description) ||
+    normalizeOptionalString(missingNode.data.visual_description) ||
+    normalizeOptionalString(missingNode.data.description);
   const generationResult = await generateV2ImageToVideo({
     video_prompt: videoPrompt,
     approved_image_uri: imageUri,
     source_video_uri: sourceVideoUri,
-    duration_seconds:
-      getNumber(payload.duration_seconds, getNumber(missingNode.data.missing_duration, 5)) || 5,
+    duration_seconds: gapDurationSeconds,
+    target_duration_seconds: gapDurationSeconds,
+    slot_id: missingNode.slot_id,
+    slot_type: slotType,
+    slot_description: slotDescription,
+    auto_trim_review: payload.auto_trim_review !== false,
     generation_mode: imageUri ? "generated_image" : "direct_from_material_frame",
     allow_fallback: payload.allow_fallback !== false,
     use_video_provider: payload.use_video_provider !== false
@@ -549,6 +561,10 @@ export const generateV2CanvasGapVideo = async (
       source_image_node_id: imageCandidateNode?.node_id,
       video_prompt_node_id: videoPromptNode?.node_id,
       missing_node_id: missingNode.node_id,
+      missing_duration: gapDurationSeconds,
+      target_duration_seconds: gapDurationSeconds,
+      slot_type: slotType,
+      slot_description: slotDescription,
       generation_result: generationResult,
       created_at: new Date().toISOString()
     }

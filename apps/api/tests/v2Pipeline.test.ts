@@ -19,7 +19,10 @@ import {
   isErroredV2ReferenceAnalysisOutput,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
-import { extractJsonObject } from "../src/v2/providers/apiJsonClient.js";
+import {
+  extractJsonObject,
+  normalizeVolcengineVideoDurationSeconds
+} from "../src/v2/providers/apiJsonClient.js";
 import type { V2MaterialCoverage, V2PipelineRequest } from "../src/v2/types.js";
 
 let server: Server;
@@ -113,6 +116,13 @@ const asRecord = (value: unknown): Record<string, unknown> => {
     ? (value as Record<string, unknown>)
     : {};
 };
+
+test("v2 volcengine video duration is normalized to supported provider lengths", () => {
+  assert.equal(normalizeVolcengineVideoDurationSeconds(1.417), 5);
+  assert.equal(normalizeVolcengineVideoDurationSeconds(5), 5);
+  assert.equal(normalizeVolcengineVideoDurationSeconds(5.1), 10);
+  assert.equal(normalizeVolcengineVideoDurationSeconds(12), 10);
+});
 
 test(
   "v2 deterministic material coverage blocks short material from covering longer target",
@@ -2285,7 +2295,7 @@ test(
     );
     assert.match(
       String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_video_prompt).prompt),
-      /目标补全时长约 1s/
+      /最终剪入缺口时长约 1s/
     );
     assert.match(
       String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_aigc_prompt).prompt),
@@ -2380,6 +2390,8 @@ test(
     assert.equal(gapVideoResponse.status, 200);
     assert.equal(gapVideoBody.generated_video_node.node_type, "generated_video");
     assert.equal(gapVideoBody.generation_result.status, "mock_ready");
+    assert.equal(asRecord(gapVideoBody.generated_video_node.data).target_duration_seconds, 1);
+    assert.equal(asRecord(gapVideoBody.generated_video_node.data).missing_duration, 1);
 
     const reviewTrimResponse = await fetch(
       `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/generated-videos/review-trim`,
@@ -2652,6 +2664,7 @@ test(
         video_prompt: "基于已有冰红茶素材截图生成补齐视频",
         generation_mode: "direct_from_material_frame",
         duration_seconds: 2,
+        use_video_provider: false,
         allow_fallback: true
       })
     });
