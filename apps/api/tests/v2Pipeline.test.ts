@@ -30,6 +30,7 @@ let server: Server;
 let baseUrl: string;
 
 const generatedFileIds: string[] = [];
+const generatedTempPaths: string[] = [];
 
 const getServerPort = (httpServer: Server): number => {
   const address = httpServer.address();
@@ -70,6 +71,10 @@ after(async () => {
     }
   }
 
+  for (const tempPath of generatedTempPaths) {
+    fs.rmSync(tempPath, { force: true });
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
@@ -106,6 +111,31 @@ const createUploadedTestVideo = (durationSeconds: number): string => {
 
   generatedFileIds.push(fileId);
   return fileId;
+};
+
+const createTestAudio = (durationSeconds: number): string => {
+  fs.mkdirSync(storageConfig.outputDir, { recursive: true });
+  const audioPath = path.join(storageConfig.outputDir, `${crypto.randomUUID()}-bgm.m4a`);
+
+  execFileSync(
+    "ffmpeg",
+    [
+      "-f",
+      "lavfi",
+      "-i",
+      `sine=frequency=440:duration=${durationSeconds}:sample_rate=44100`,
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-y",
+      audioPath
+    ],
+    { stdio: "ignore" }
+  );
+
+  generatedTempPaths.push(audioPath);
+  return audioPath;
 };
 
 const asRecordArray = (value: unknown): Array<Record<string, unknown>> => {
@@ -2244,7 +2274,7 @@ test(
     assert.equal(shortRevalidate.material_segments.length, 1);
     assert.equal(
       shortRevalidate.material_segments[0]?.segmentation_source,
-      "uniform_high_frequency_candidate_split"
+      "coherent_whole_material_segment"
     );
     assert.equal(
       shortRevalidate.material_segments[0]?.pacing_inference_source,
@@ -2575,6 +2605,94 @@ test(
 );
 
 test(
+  "v2 canvas material allocation does not reuse overlapping source ranges across slots",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(8);
+
+    const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_request: {
+          goal: "冰红茶宣传片",
+          product_name: "冰红茶"
+        },
+        target_duration_seconds: 8,
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "product_hero",
+            duration_seconds: 4,
+            shot_description: "倒入冰红茶的完整动作前半段。",
+            materials: [
+              {
+                material_id: "same_clip_slot_01",
+                file_id: fileId,
+                uri: `/api/upload/files/${fileId}`,
+                label: "same_clip.mp4"
+              }
+            ]
+          },
+          {
+            slot_id: "slot_02",
+            slot_type: "usage_process",
+            duration_seconds: 4,
+            shot_description: "继续使用冰红茶素材。",
+            materials: [
+              {
+                material_id: "same_clip_slot_02",
+                file_id: fileId,
+                uri: `/api/upload/files/${fileId}`,
+                label: "same_clip.mp4"
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const created = (await createResponse.json()) as { session_id: string };
+    assert.equal(createResponse.status, 201);
+
+    const revalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const revalidated = (await revalidateResponse.json()) as {
+      material_segments: Array<Record<string, unknown>>;
+      material_coverage: {
+        slot_coverage: Array<Record<string, unknown>>;
+      };
+    };
+    assert.equal(revalidateResponse.status, 200);
+    assert.equal(revalidated.material_segments.length, 2);
+    assert.ok(
+      revalidated.material_segments.every(
+        (segment) => segment.segmentation_source === "coherent_whole_material_segment"
+      )
+    );
+
+    const firstCoverage = asRecord(revalidated.material_coverage.slot_coverage[0]);
+    const secondCoverage = asRecord(revalidated.material_coverage.slot_coverage[1]);
+    assert.equal(firstCoverage.coverage_status, "covered");
+    assert.equal(firstCoverage.matched_material_duration, 4);
+    assert.equal(asRecordArray(firstCoverage.assigned_segments).length, 1);
+    assert.equal(secondCoverage.coverage_status, "missing");
+    assert.equal(secondCoverage.matched_material_duration, 0);
+    assert.equal(asRecordArray(secondCoverage.assigned_segments).length, 0);
+    assert.equal(secondCoverage.missing_duration, 4);
+  }
+);
+
+test(
   "v2 script slot order is persisted before canvas revalidation",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {
@@ -2733,6 +2851,7 @@ test(
   async () => {
     const firstFileId = createUploadedTestVideo(0.5);
     const secondFileId = createUploadedTestVideo(0.5);
+    const bgmAudioPath = createTestAudio(1);
 
     const result = await assembleV2FinalVideo({
       target_duration_seconds: 1,
@@ -2740,6 +2859,7 @@ test(
       fps: 24,
       generate_bgm: true,
       bgm_prompt: "清爽夏日冰红茶广告背景音乐，无人声主唱。",
+      bgm_audio_uri: bgmAudioPath,
       slots: [
         {
           slot_id: "slot_01",
@@ -2765,9 +2885,9 @@ test(
     assert.equal(finalBgm.status, "mixed");
     assert.equal(finalBgm.prompt, "清爽夏日冰红茶广告背景音乐，无人声主唱。");
     assert.equal(finalBgm.audio_stream_present, true);
-    assert.equal(bgmProviderResult.status, "generated");
-    assert.equal(asRecord(bgmProviderResult.source).type, "local_fallback_synth");
-    assert.match(String(bgmProviderResult.audio_path), /generated_bgm_.*\.m4a$/u);
+    assert.equal(bgmProviderResult.status, "provided");
+    assert.equal(asRecord(bgmProviderResult.source).type, "provided_audio");
+    assert.equal(bgmProviderResult.audio_path, bgmAudioPath);
     assert.ok(
       Math.abs(Number(result.final_duration_seconds) - 1) < 0.15,
       `expected final duration close to 1s, got ${result.final_duration_seconds}`

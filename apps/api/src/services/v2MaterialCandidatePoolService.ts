@@ -13,8 +13,10 @@ import type { JsonObject } from "../v2/types.js";
 const candidatePoolRootDir = path.join(storageConfig.outputDir, "v2-material-candidate-pools");
 const candidatePoolFrameRootDir = path.join(storageConfig.outputDir, "v2-material-candidate-frames");
 
-const maxCandidateSegmentDurationSeconds = 1.5;
+const coherentMaterialSegmentDurationSeconds = 6;
+const preserveWholeMaterialDurationSeconds = 10;
 const highFrequencyFrameIntervalSeconds = 0.5;
+const maxFramesPerCandidateSegment = 8;
 
 const normalizeOptionalString = (value: unknown): string | undefined => {
   if (typeof value !== "string") {
@@ -149,9 +151,19 @@ const getSegmentRanges = (durationSeconds: number): Array<{
   source_out_seconds: number;
   usable_duration_seconds: number;
 }> => {
+  if (durationSeconds <= preserveWholeMaterialDurationSeconds) {
+    return [
+      {
+        source_in_seconds: 0,
+        source_out_seconds: Number(durationSeconds.toFixed(3)),
+        usable_duration_seconds: Number(durationSeconds.toFixed(3))
+      }
+    ];
+  }
+
   const segmentCount = Math.max(
     1,
-    Math.ceil(durationSeconds / maxCandidateSegmentDurationSeconds)
+    Math.ceil(durationSeconds / coherentMaterialSegmentDurationSeconds)
   );
   const segmentDuration = durationSeconds / segmentCount;
 
@@ -167,6 +179,20 @@ const getSegmentRanges = (durationSeconds: number): Array<{
       usable_duration_seconds: Number((sourceOut - sourceIn).toFixed(3))
     };
   });
+};
+
+const limitCandidateFrameTimestamps = (timestamps: number[]): number[] => {
+  if (timestamps.length <= maxFramesPerCandidateSegment) {
+    return timestamps;
+  }
+
+  const selected = new Set<number>();
+  const maxIndex = timestamps.length - 1;
+  for (let index = 0; index < maxFramesPerCandidateSegment; index += 1) {
+    selected.add(timestamps[Math.round((index * maxIndex) / (maxFramesPerCandidateSegment - 1))]);
+  }
+
+  return Array.from(selected).sort((left, right) => left - right);
 };
 
 const extractFrame = async (
@@ -344,10 +370,11 @@ const buildMaterialSegments = async (
             range.source_out_seconds
           ])
         ).sort((left, right) => left - right);
-        const frameTimestamps =
+        const rawFrameTimestamps =
           segmentFrameTimestamps.length > 0
             ? segmentFrameTimestamps
             : representativeFrameTimestamps;
+        const frameTimestamps = limitCandidateFrameTimestamps(rawFrameTimestamps);
         const frameRefs = await buildFrameRefs(
           candidatePoolId,
           localPath,
@@ -375,8 +402,12 @@ const buildMaterialSegments = async (
           usable_duration_seconds: range.usable_duration_seconds,
           representative_frame_timestamps_seconds: representativeFrameTimestamps,
           high_frequency_frame_timestamps_seconds: frameTimestamps,
+          raw_high_frequency_frame_timestamps_seconds: rawFrameTimestamps,
           frames: frameRefs,
-          segmentation_source: "uniform_high_frequency_candidate_split",
+          segmentation_source:
+            metadata.duration_seconds <= preserveWholeMaterialDurationSeconds
+              ? "coherent_whole_material_segment"
+              : "coherent_action_candidate_split",
           pacing_inference_source: "user_request_first_material_pacing_not_authoritative",
           status: extractFrames
             ? "candidate_pool_ready"
@@ -669,9 +700,11 @@ export const buildV2MaterialCandidatePool = async (
       generated_structure_pacing: "user_request_first",
       source_material_pacing_is_authoritative: false,
       source_material_understanding:
-        "uniform_high_frequency_candidate_frames_then_multimodal_refinement",
-      segment_max_duration_seconds: maxCandidateSegmentDurationSeconds,
+        "coherent_action_segments_then_multimodal_refinement",
+      preserve_whole_material_duration_seconds: preserveWholeMaterialDurationSeconds,
+      coherent_segment_duration_seconds: coherentMaterialSegmentDurationSeconds,
       frame_interval_seconds: highFrequencyFrameIntervalSeconds,
+      max_frames_per_candidate_segment: maxFramesPerCandidateSegment,
       refinement_enabled: refineSegments
     },
     material_assets: segmentResult.material_assets,

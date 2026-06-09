@@ -815,6 +815,79 @@ const getSegmentMaterialKey = (segment: JsonObject): string =>
   normalizeOptionalString(segment.segment_id) ||
   "unknown_material";
 
+const getSegmentPhysicalMaterialKey = (segment: JsonObject): string =>
+  normalizeOptionalString(segment.file_id) ||
+  normalizeOptionalString(segment.uri) ||
+  normalizeOptionalString(segment.source_material_id) ||
+  normalizeOptionalString(segment.segment_id) ||
+  "unknown_material";
+
+type UsedMaterialRange = {
+  source_in_seconds: number;
+  source_out_seconds: number;
+  slot_id: string;
+  segment_id?: string;
+};
+
+const getSegmentFinalRange = (
+  segment: JsonObject
+): { source_in_seconds: number; source_out_seconds: number; duration_seconds: number } => {
+  const sourceIn = getNumber(
+    segment.final_source_in_seconds,
+    getNumber(segment.source_in_seconds)
+  );
+  const sourceOut = getNumber(
+    segment.final_source_out_seconds,
+    getNumber(segment.source_out_seconds)
+  );
+  const duration = Number(Math.max(0, sourceOut - sourceIn).toFixed(3));
+
+  return {
+    source_in_seconds: sourceIn,
+    source_out_seconds: sourceOut,
+    duration_seconds: duration
+  };
+};
+
+const materialRangesOverlap = (
+  left: { source_in_seconds: number; source_out_seconds: number },
+  right: { source_in_seconds: number; source_out_seconds: number }
+): boolean => {
+  const overlapSeconds = Math.min(left.source_out_seconds, right.source_out_seconds) -
+    Math.max(left.source_in_seconds, right.source_in_seconds);
+
+  return overlapSeconds > 0.05;
+};
+
+const isSegmentRangeAvailable = (
+  segment: JsonObject,
+  usedMaterialRangesByKey: Map<string, UsedMaterialRange[]>
+): boolean => {
+  const materialKey = getSegmentPhysicalMaterialKey(segment);
+  const usedRanges = usedMaterialRangesByKey.get(materialKey) || [];
+  const segmentRange = getSegmentFinalRange(segment);
+
+  return !usedRanges.some((usedRange) => materialRangesOverlap(segmentRange, usedRange));
+};
+
+const markSegmentRangeUsed = (
+  slot: V2ScriptSlot,
+  segment: JsonObject,
+  usedMaterialRangesByKey: Map<string, UsedMaterialRange[]>
+): void => {
+  const materialKey = getSegmentPhysicalMaterialKey(segment);
+  const usedRanges = usedMaterialRangesByKey.get(materialKey) || [];
+  const segmentRange = getSegmentFinalRange(segment);
+
+  usedRanges.push({
+    source_in_seconds: segmentRange.source_in_seconds,
+    source_out_seconds: segmentRange.source_out_seconds,
+    slot_id: slot.slot_id,
+    segment_id: normalizeOptionalString(segment.segment_id)
+  });
+  usedMaterialRangesByKey.set(materialKey, usedRanges);
+};
+
 const getSegmentAssignedAtMs = (segment: JsonObject): number => {
   const assignedAt = normalizeOptionalString(segment.material_assigned_at);
   if (!assignedAt) {
@@ -848,7 +921,8 @@ const compareCandidateSegments = (left: JsonObject, right: JsonObject): number =
 
 const allocateSegmentsForSlot = (
   slot: V2ScriptSlot,
-  candidateSegments: JsonObject[]
+  candidateSegments: JsonObject[],
+  usedMaterialRangesByKey: Map<string, UsedMaterialRange[]>
 ): JsonObject[] => {
   const remainingBySegmentId = new Map<string, number>();
   for (const segment of candidateSegments) {
@@ -892,6 +966,10 @@ const allocateSegmentsForSlot = (
       return;
     }
 
+    if (!isSegmentRangeAvailable(segment, usedMaterialRangesByKey)) {
+      return;
+    }
+
     const remainingSegmentDuration = remainingBySegmentId.get(segmentId) || 0;
     if (remainingSegmentDuration <= 0) {
       return;
@@ -913,7 +991,12 @@ const allocateSegmentsForSlot = (
         (getNumber(existingAssignment.matched_material_duration) + matchedDuration).toFixed(3)
       );
     } else {
-      assignedSegments.push(makeSegmentAssignment(segment, matchedDuration));
+      assignedSegments.push({
+        ...makeSegmentAssignment(segment, matchedDuration),
+        allocation_policy: "coherent_non_overlapping_material_range",
+        physical_material_key: getSegmentPhysicalMaterialKey(segment)
+      });
+      markSegmentRangeUsed(slot, segment, usedMaterialRangesByKey);
     }
     remainingBySegmentId.set(
       segmentId,
@@ -1025,6 +1108,7 @@ const buildSegmentAwareMaterialCoverage = (
     }
   }
 
+  const usedMaterialRangesByKey = new Map<string, UsedMaterialRange[]>();
   const slotCoverage = session.slots.map((slot) => {
     const base =
       baseCoverageByKey.get(slot.slot_id) ||
@@ -1034,7 +1118,11 @@ const buildSegmentAwareMaterialCoverage = (
       .filter((segment) => isSegmentUsableForSlot(asJsonObject(segment), slot))
       .map(asJsonObject)
       .sort(compareCandidateSegments);
-    const assignedSegments = allocateSegmentsForSlot(slot, candidateSegments);
+    const assignedSegments = allocateSegmentsForSlot(
+      slot,
+      candidateSegments,
+      usedMaterialRangesByKey
+    );
 
     const matchedMaterialDuration = Number(
       assignedSegments
@@ -1134,6 +1222,10 @@ const buildSegmentAwareMaterialCoverage = (
       raw_missing_duration: rawMissingDuration,
       ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
       minimum_ai_completion_gap_seconds: minimumAiCompletionGapSeconds,
+      material_reuse_policy: {
+        mode: "coherent_non_overlapping_ranges",
+        physical_material_keys_seen_so_far: Array.from(usedMaterialRangesByKey.keys())
+      },
       ai_completion_required_duration:
         frontendCoverageStatus === "fully_matched"
           ? 0
