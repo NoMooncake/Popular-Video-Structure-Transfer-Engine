@@ -2,27 +2,35 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { after, before, test } from "node:test";
 
 import { app } from "../src/app.js";
+import { config } from "../src/config/index.js";
 import { storageConfig } from "../src/config/storage.js";
 import {
+  analyzeV2ReferenceVideos,
   assembleV2FinalVideo,
   attachProductionPromptsToMaterialCoverage,
   buildV2DeterministicMaterialCoverage,
   buildV2ReferenceAnalysisTables,
   getAdaptiveSlotPlanningRules,
+  isErroredV2ReferenceAnalysisOutput,
+  normalizeTrimRecommendation,
   normalizeV2TargetDurationSeconds
 } from "../src/services/v2PipelineService.js";
-import { extractJsonObject } from "../src/v2/providers/apiJsonClient.js";
+import {
+  extractJsonObject,
+  normalizeVolcengineVideoDurationSeconds
+} from "../src/v2/providers/apiJsonClient.js";
 import type { V2MaterialCoverage, V2PipelineRequest } from "../src/v2/types.js";
 
 let server: Server;
 let baseUrl: string;
 
 const generatedFileIds: string[] = [];
+const generatedTempPaths: string[] = [];
 
 const getServerPort = (httpServer: Server): number => {
   const address = httpServer.address();
@@ -63,6 +71,10 @@ after(async () => {
     }
   }
 
+  for (const tempPath of generatedTempPaths) {
+    fs.rmSync(tempPath, { force: true });
+  }
+
   await new Promise<void>((resolve, reject) => {
     server.close((error) => {
       if (error) {
@@ -101,6 +113,31 @@ const createUploadedTestVideo = (durationSeconds: number): string => {
   return fileId;
 };
 
+const createTestAudio = (durationSeconds: number): string => {
+  fs.mkdirSync(storageConfig.outputDir, { recursive: true });
+  const audioPath = path.join(storageConfig.outputDir, `${crypto.randomUUID()}-bgm.m4a`);
+
+  execFileSync(
+    "ffmpeg",
+    [
+      "-f",
+      "lavfi",
+      "-i",
+      `sine=frequency=440:duration=${durationSeconds}:sample_rate=44100`,
+      "-c:a",
+      "aac",
+      "-b:a",
+      "128k",
+      "-y",
+      audioPath
+    ],
+    { stdio: "ignore" }
+  );
+
+  generatedTempPaths.push(audioPath);
+  return audioPath;
+};
+
 const asRecordArray = (value: unknown): Array<Record<string, unknown>> => {
   return Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [];
 };
@@ -110,6 +147,30 @@ const asRecord = (value: unknown): Record<string, unknown> => {
     ? (value as Record<string, unknown>)
     : {};
 };
+
+test("v2 volcengine video duration is normalized to supported provider lengths", () => {
+  assert.equal(normalizeVolcengineVideoDurationSeconds(1.417), 5);
+  assert.equal(normalizeVolcengineVideoDurationSeconds(5), 5);
+  assert.equal(normalizeVolcengineVideoDurationSeconds(5.1), 10);
+  assert.equal(normalizeVolcengineVideoDurationSeconds(12), 10);
+});
+
+test("v2 generated video trim keeps AI-selected start but clamps to target duration", () => {
+  const recommendation = normalizeTrimRecommendation(
+    {
+      recommended_start_seconds: 3,
+      recommended_end_seconds: 5.125,
+      recommended_duration_seconds: 2.125,
+      quality_status: "good"
+    },
+    1.917,
+    5.125
+  );
+
+  assert.equal(recommendation.recommended_start_seconds, 3);
+  assert.equal(recommendation.recommended_end_seconds, 4.917);
+  assert.equal(recommendation.recommended_duration_seconds, 1.917);
+});
 
 test(
   "v2 deterministic material coverage blocks short material from covering longer target",
@@ -201,6 +262,7 @@ test(
       "generate_image_then_video"
     ]);
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
+      "add_material",
       "generate_direct_video_from_material_frame",
       "generate_image_then_video"
     ]);
@@ -221,6 +283,209 @@ test(
       String(asRecord(coverage.slot_coverage[1]?.recommended_aigc_prompt).prompt),
       /product_hero/
     );
+  }
+);
+
+test(
+  "v2 material coverage assigns user material segments and exposes reference superscripts",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(8);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          role: "user_material" as const,
+          label: "ice_tea_user_clip.mp4"
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "生成冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 5,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        editable_slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "product_hero",
+            duration_seconds: 2,
+            visual_direction: "产品瓶身冰镇特写"
+          },
+          {
+            slot_id: "slot_02",
+            slot_type: "usage_process",
+            duration_seconds: 3,
+            visual_direction: "年轻人饮用冰红茶"
+          }
+        ]
+      },
+      {
+        analysis: {
+          material_analysis: {
+            material_segments: [
+              {
+                material_id: "user_material_01",
+                segment_id: "seg_product",
+                start_time: 0,
+                end_time: 2,
+                duration_seconds: 2,
+                visual_description: "冰红茶瓶身和水珠特写",
+                candidate_slot_types: ["product_hero"],
+                recommended_usage: "裁切 + 加产品标题"
+              },
+              {
+                material_id: "user_material_01",
+                segment_id: "seg_drink",
+                start_time: 2,
+                end_time: 5,
+                duration_seconds: 3,
+                visual_description: "年轻人拿起冰红茶饮用",
+                candidate_slot_types: ["usage_process"],
+                recommended_usage: "快速剪辑 + 保留喝饮料动作"
+              }
+            ]
+          }
+        }
+      },
+      [
+        {
+          sample_index: 1,
+          rows: [
+            {
+              source_slot_type: "product_hero"
+            }
+          ]
+        },
+        {
+          sample_index: 3,
+          rows: [
+            {
+              source_slot_type: "usage_process"
+            }
+          ]
+        }
+      ]
+    );
+
+    const firstSlot = asRecord(coverage.slot_coverage[0]);
+    const secondSlot = asRecord(coverage.slot_coverage[1]);
+    assert.equal(firstSlot.coverage_status, "covered");
+    assert.equal(secondSlot.coverage_status, "covered");
+    assert.equal(asRecordArray(firstSlot.assigned_materials)[0]?.segment_id, "seg_product");
+    assert.equal(asRecordArray(secondSlot.assigned_materials)[0]?.segment_id, "seg_drink");
+    assert.match(String(asRecord(firstSlot.frontend_display).material_summary), /0 - 2s/);
+    assert.match(String(asRecord(secondSlot.frontend_display).material_summary), /快速剪辑/);
+    assert.deepEqual(firstSlot.source_reference_indices, [1]);
+    assert.equal(asRecord(firstSlot.frontend_display).source_reference_superscript, "¹");
+    assert.deepEqual(asRecord(asRecord(firstSlot.frontend_display).add_material_button), {
+      visible: true,
+      label: "添加素材",
+      action: "add_material"
+    });
+    assert.equal(
+      Array.isArray(firstSlot.available_user_actions) &&
+        firstSlot.available_user_actions.includes("add_material"),
+      true
+    );
+    assert.deepEqual(secondSlot.source_reference_indices, [3]);
+    assert.equal(asRecord(secondSlot.frontend_display).source_reference_superscript, "³");
+  }
+);
+
+test(
+  "v2 material coverage reads synthesized payload slot sequence",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(4);
+    const normalized = {
+      reference_videos: [],
+      reference_file_ids: [],
+      user_materials: [
+        {
+          file_id: fileId,
+          uri: `/api/upload/files/${fileId}`,
+          role: "user_material" as const,
+          label: "ice_tea_payload_clip.mp4"
+        }
+      ],
+      user_material_file_ids: [],
+      text_assets: [],
+      user_request: {
+        goal: "生成冰红茶广告"
+      },
+      options: {
+        image_candidate_count: 4,
+        generate_image_candidates: false,
+        target_duration_seconds: 4,
+        allow_fallback: true
+      }
+    } satisfies Required<V2PipelineRequest>;
+
+    const coverage = await buildV2DeterministicMaterialCoverage(
+      normalized,
+      {
+        payload: {
+          synthesized_structure: {
+            slot_sequence: [
+              {
+                slot_index: 1,
+                slot_type: "strong_hook",
+                duration_seconds: 2,
+                source_reference_indices: [2],
+                description: "冰镇瓶身和水珠微距强开场",
+                visual_direction: "微距特写冰红茶瓶身，冰块飞溅，冷凝水珠清晰。",
+                copy_direction: "这一口，立刻降温。"
+              }
+            ]
+          }
+        }
+      },
+      {
+        material_analysis: {
+          material_segments: [
+            {
+              material_id: "user_material_01",
+              segment_id: "seg_hook",
+              start_time: 0,
+              end_time: 2,
+              duration_seconds: 2,
+              visual_description: "冰红茶瓶身、水珠和冰块特写",
+              candidate_slot_types: ["strong_hook"],
+              recommended_usage: "裁切 + 强化冰感"
+            }
+          ]
+        }
+      }
+    );
+
+    const firstSlot = asRecord(coverage.slot_coverage[0]);
+
+    assert.equal(coverage.slot_coverage.length, 1);
+    assert.equal(firstSlot.slot_id, "slot_01");
+    assert.equal(firstSlot.slot_type, "strong_hook");
+    assert.equal(firstSlot.coverage_status, "covered");
+    assert.equal(
+      asRecord(firstSlot.frontend_display).shot_description,
+      "微距特写冰红茶瓶身，冰块飞溅，冷凝水珠清晰。"
+    );
+    assert.equal(asRecord(firstSlot.frontend_display).copy, "这一口，立刻降温。");
+    assert.deepEqual(firstSlot.source_reference_indices, [2]);
+    assert.equal(asRecord(firstSlot.frontend_display).source_reference_superscript, "²");
+    assert.equal(asRecordArray(firstSlot.assigned_materials)[0]?.segment_id, "seg_hook");
   }
 );
 
@@ -317,7 +582,12 @@ test(
       shot_description: "待补充分镜描述",
       material_summary: "ice_tea_material_01 3s",
       copy: "待生成文案",
-      material_status: "完全匹配"
+      material_status: "完全匹配",
+      add_material_button: {
+        visible: true,
+        label: "添加素材",
+        action: "add_material"
+      }
     });
     assert.equal(coverage.slot_coverage[0]?.matched_material_duration, 3);
     assert.equal(
@@ -354,6 +624,7 @@ test(
     );
     assert.equal(coverage.slot_coverage[1]?.gap_reason, "已匹配 2s，但该槽位需要 3s。");
     assert.deepEqual(coverage.slot_coverage[1]?.available_user_actions, [
+      "add_material",
       "accept_current_material_as_sufficient",
       "generate_direct_video_from_material_frame",
       "generate_image_then_video"
@@ -373,6 +644,7 @@ test(
       "空"
     );
     assert.deepEqual(coverage.slot_coverage[2]?.available_user_actions, [
+      "add_material",
       "generate_direct_video_from_material_frame",
       "generate_image_then_video"
     ]);
@@ -807,6 +1079,7 @@ test(
     assert.equal(coverage.slot_coverage[0]?.needs_ai_completion, false);
     assert.equal(coverage.slot_coverage[0]?.ai_completion_required_duration, 0);
     assert.deepEqual(coverage.slot_coverage[0]?.available_user_actions, [
+      "add_material",
       "reopen_ai_completion"
     ]);
   }
@@ -1554,6 +1827,157 @@ test("v2 reference analysis tables bind timeline rows to extracted frame URIs", 
   assert.equal(rows[1]?.migration_possibility, "高度可迁移。可迁移为新商品的主体亮相。");
 });
 
+test(
+  "v2 reference analysis retries provider error output with attached frames",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    assert.equal(
+      isErroredV2ReferenceAnalysisOutput({
+        error: "The request was rejected because it was considered high risk"
+      }),
+      true
+    );
+
+    const providerCalls: Array<Record<string, unknown>> = [];
+    const mockProvider = createServer((request, response) => {
+      let body = "";
+      request.setEncoding("utf8");
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        providerCalls.push(JSON.parse(body) as Record<string, unknown>);
+        const content =
+          providerCalls.length === 1
+            ? {
+                error: "The request was rejected because it was considered high risk"
+              }
+            : {
+                reference_video_analysis: {
+                  slot_timeline: [
+                    {
+                      slot_type: "strong_hook",
+                      start_time: 0,
+                      end_time: 2,
+                      duration_seconds: 2,
+                      visual_description: "瓶盖打开，饮料气泡和冰爽质感形成开场冲击。",
+                      copywriting: "冰爽开场",
+                      analysis: "用强特写快速建立清爽记忆点。",
+                      migration_possibility: "高，可迁移为冰红茶开瓶特写和清爽气泡。"
+                    }
+                  ],
+                  content_logic: "开瓶强特写 -> 气泡质感"
+                }
+              };
+
+        response.writeHead(200, {
+          "Content-Type": "application/json"
+        });
+        response.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify(content)
+                }
+              }
+            ]
+          })
+        );
+      });
+    });
+    await new Promise<void>((resolve) => {
+      mockProvider.listen(0, "127.0.0.1", resolve);
+    });
+
+    const mutableConfig = config as unknown as {
+      providers: {
+        v2: {
+          multimodal: {
+            provider: string;
+            apiBaseUrl?: string;
+            apiPath: string;
+            model?: string;
+            apiKey?: string;
+            enabled: boolean;
+          };
+        };
+      };
+    };
+    const previousProvider = {
+      ...mutableConfig.providers.v2.multimodal
+    };
+
+    try {
+      const providerPort = getServerPort(mockProvider);
+      Object.assign(mutableConfig.providers.v2.multimodal, {
+        provider: "mock",
+        apiBaseUrl: `http://127.0.0.1:${providerPort}`,
+        apiPath: "/chat/completions",
+        model: "mock-model",
+        apiKey: "test-key",
+        enabled: true
+      });
+
+      const fileId = createUploadedTestVideo(4);
+      const videoPath = path.join(storageConfig.uploadDir, `${fileId}-sample.mp4`);
+      const result = await analyzeV2ReferenceVideos({
+        user_request: {
+          goal: "生成一个冰红茶的宣传视频"
+        },
+        reference_videos: [
+          {
+            file_id: fileId,
+            uri: videoPath,
+            role: "reference_sample",
+            label: "新增样例"
+          }
+        ],
+        user_materials: [],
+        options: {
+          target_duration_seconds: 20,
+          allow_fallback: false,
+          generate_image_candidates: false
+        }
+      });
+
+      assert.equal(providerCalls.length, 2);
+
+      const retryMessage = asRecordArray(providerCalls[1]?.messages)[1];
+      const retryContent = asRecordArray(retryMessage?.content);
+      assert.equal(
+        retryContent.filter((part) => part.type === "image_url").length,
+        6
+      );
+      assert.equal(
+        retryContent.filter((part) => part.type === "video_url").length,
+        0
+      );
+
+      const tables = asRecordArray(asRecord(result.stages).reference_analysis_tables);
+      const rows = asRecordArray(tables[0]?.rows);
+      assert.equal(rows.length, 1);
+      assert.equal(asRecord(rows[0]?.shot_description).title, "强 Hook");
+      assert.equal(
+        rows[0]?.migration_possibility,
+        "高度可迁移。可迁移为冰红茶开瓶特写和清爽气泡。"
+      );
+    } finally {
+      Object.assign(mutableConfig.providers.v2.multimodal, previousProvider);
+      await new Promise<void>((resolve, reject) => {
+        mockProvider.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+
+          resolve();
+        });
+      });
+    }
+  }
+);
+
 test("GET /api/v2/status exposes 4 as the default image candidate count", async () => {
   const response = await fetch(`${baseUrl}/api/v2/status`);
   const body = (await response.json()) as {
@@ -1750,9 +2174,35 @@ test(
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(shortRevalidate.cover_plan.cover_title, "冰红茶，一眼心动");
     assert.ok(Array.isArray(shortRevalidate.cover_plan.cover_copy_options));
+    assert.deepEqual(shortRevalidate.cover_plan.video_title_recommendations, [
+      "冰红茶，一眼心动",
+      "冰红茶，一口入夏",
+      "热到融化？来口冰红茶",
+      "这个夏天，就要冰红茶",
+      "冰红茶清爽时刻"
+    ]);
+    assert.deepEqual(shortRevalidate.cover_plan.video_description_recommendations, [
+      "夏天热到没电？来一口冰红茶，把清爽感拉满。",
+      "冰红茶冰爽登场，水珠、冰块和畅快口感一起唤醒夏日好心情。",
+      "从炎热到清爽，只差一口冰红茶。适合夏日聚会、通勤和休闲时刻。",
+      "这一支冰红茶短片，用冰感特写和畅饮瞬间记录夏天最想要的清爽。"
+    ]);
+    assert.match(
+      String(asRecord(shortRevalidate.cover_plan.bgm_plan).prompt),
+      /冰红茶/
+    );
+    assert.equal(asRecord(shortRevalidate.cover_plan.bgm_plan).duration_seconds, 0.5);
     assert.match(
       String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
       /冰红茶/
+    );
+    assert.doesNotMatch(
+      String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
+      /\/Users\/|\/Volumes\/|等待多模态|候选素材|进一步确认/u
+    );
+    assert.doesNotMatch(
+      String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
+      /。。/u
     );
     assert.match(
       String(asRecord(shortRevalidate.cover_plan.recommended_source).frame_uri),
@@ -1824,7 +2274,7 @@ test(
     assert.equal(shortRevalidate.material_segments.length, 1);
     assert.equal(
       shortRevalidate.material_segments[0]?.segmentation_source,
-      "uniform_high_frequency_candidate_split"
+      "coherent_whole_material_segment"
     );
     assert.equal(
       shortRevalidate.material_segments[0]?.pacing_inference_source,
@@ -1903,6 +2353,9 @@ test(
     const longRevalidate = (await longRevalidateResponse.json()) as {
       canvas_nodes: Array<Record<string, unknown>>;
       canvas_session_id: string;
+      canvas_session: {
+        nodes: Array<Record<string, unknown>>;
+      };
     };
     assert.equal(longRevalidateResponse.status, 200);
     assert.equal(
@@ -1910,7 +2363,27 @@ test(
       "structure_complete_duration_short"
     );
     assert.equal(longRevalidate.canvas_nodes[0]?.missing_duration, 1);
+    assert.match(
+      String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_video_prompt).prompt),
+      /冰红茶/
+    );
+    assert.match(
+      String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_video_prompt).prompt),
+      /最终剪入缺口时长约 1s/
+    );
+    assert.match(
+      String(asRecord(longRevalidate.canvas_nodes[0]?.recommended_aigc_prompt).prompt),
+      /冰红茶/
+    );
     assert.equal(asRecordArray(longRevalidate.canvas_nodes[0]?.assigned_segments).length, 1);
+    const longMissingNode = longRevalidate.canvas_session.nodes.find(
+      (node) => node.node_type === "missing_material"
+    );
+    assert.equal(asRecord(longMissingNode?.data).prompt_ready, true);
+    assert.equal(
+      asRecord(asRecord(longMissingNode?.data).gap_display).title,
+      "缺少必要素材，试试AI补齐吧！"
+    );
 
     const promptNodeResponse = await fetch(
       `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/prompt-nodes`,
@@ -1991,6 +2464,8 @@ test(
     assert.equal(gapVideoResponse.status, 200);
     assert.equal(gapVideoBody.generated_video_node.node_type, "generated_video");
     assert.equal(gapVideoBody.generation_result.status, "mock_ready");
+    assert.equal(asRecord(gapVideoBody.generated_video_node.data).target_duration_seconds, 1);
+    assert.equal(asRecord(gapVideoBody.generated_video_node.data).missing_duration, 1);
 
     const reviewTrimResponse = await fetch(
       `${baseUrl}/api/v2/canvas-sessions/${longRevalidate.canvas_session_id}/generated-videos/review-trim`,
@@ -2049,6 +2524,61 @@ test(
     assert.equal(completedRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(completedRevalidate.material_segments.length, 2);
     assert.equal(asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).length, 2);
+    assert.deepEqual(
+      new Set(
+        asRecordArray(completedRevalidate.canvas_nodes[0]?.assigned_segments).map(
+          (segment) => segment.file_id
+        )
+      ),
+      new Set([firstFileId, secondFileId])
+    );
+
+    await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        required_duration: 2.4
+      })
+    });
+
+    const tinyGapRevalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const tinyGapRevalidate = (await tinyGapRevalidateResponse.json()) as {
+      canvas_nodes: Array<Record<string, unknown>>;
+      canvas_session: {
+        nodes: Array<Record<string, unknown>>;
+      };
+    };
+    assert.equal(tinyGapRevalidateResponse.status, 200);
+    assert.equal(tinyGapRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
+    assert.equal(tinyGapRevalidate.canvas_nodes[0]?.missing_duration, 0);
+    assert.equal(tinyGapRevalidate.canvas_nodes[0]?.ignored_missing_duration, 0.4);
+    assert.equal(
+      tinyGapRevalidate.canvas_session.nodes.some(
+        (node) => node.node_type === "missing_material"
+      ),
+      false
+    );
+
+    await fetch(`${baseUrl}/api/v2/script-sessions/${created.session_id}/slots/slot_01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        required_duration: 2
+      })
+    });
 
     const canvasAssemblyResponse = await fetch(
       `${baseUrl}/api/v2/canvas-sessions/${completedRevalidate.canvas_session_id}/final-video`,
@@ -2073,6 +2603,134 @@ test(
     assert.match(String(canvasAssembly.final_assembly.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
   }
 );
+
+test(
+  "v2 canvas material allocation does not reuse one source video across slots",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const fileId = createUploadedTestVideo(8);
+
+    const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_request: {
+          goal: "冰红茶宣传片",
+          product_name: "冰红茶"
+        },
+        target_duration_seconds: 8,
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "product_hero",
+            duration_seconds: 4,
+            shot_description: "倒入冰红茶的完整动作前半段。",
+            materials: [
+              {
+                material_id: "same_clip_slot_01",
+                file_id: fileId,
+                uri: `/api/upload/files/${fileId}`,
+                label: "same_clip.mp4"
+              }
+            ]
+          },
+          {
+            slot_id: "slot_02",
+            slot_type: "usage_process",
+            duration_seconds: 4,
+            shot_description: "继续使用冰红茶素材。",
+            materials: [
+              {
+                material_id: "same_clip_slot_02",
+                file_id: fileId,
+                uri: `/api/upload/files/${fileId}`,
+                label: "same_clip.mp4"
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const created = (await createResponse.json()) as { session_id: string };
+    assert.equal(createResponse.status, 201);
+
+    const revalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const revalidated = (await revalidateResponse.json()) as {
+      material_segments: Array<Record<string, unknown>>;
+      material_coverage: {
+        slot_coverage: Array<Record<string, unknown>>;
+      };
+    };
+    assert.equal(revalidateResponse.status, 200);
+    assert.equal(revalidated.material_segments.length, 2);
+    assert.ok(
+      revalidated.material_segments.every(
+        (segment) => segment.segmentation_source === "coherent_whole_material_segment"
+      )
+    );
+
+    const firstCoverage = asRecord(revalidated.material_coverage.slot_coverage[0]);
+    const secondCoverage = asRecord(revalidated.material_coverage.slot_coverage[1]);
+    assert.equal(firstCoverage.coverage_status, "covered");
+    assert.equal(firstCoverage.matched_material_duration, 4);
+    assert.equal(asRecordArray(firstCoverage.assigned_segments).length, 1);
+    assert.equal(secondCoverage.coverage_status, "missing");
+    assert.equal(secondCoverage.matched_material_duration, 0);
+    assert.equal(asRecordArray(secondCoverage.assigned_segments).length, 0);
+    assert.equal(secondCoverage.missing_duration, 4);
+  }
+);
+
+test("v2 script session localizes English slot headings and keeps superscripts", async () => {
+  const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      user_request: {
+        goal: "冰红茶宣传片",
+        product_name: "冰红茶"
+      },
+      target_duration_seconds: 2,
+      slots: [
+        {
+          slot_id: "slot_01",
+          slot_type: "strong_hook",
+          slot_name: "strong_hook",
+          duration_seconds: 1,
+          shot_description: "strong_hook³\n冰镇瓶身特写。"
+        },
+        {
+          slot_id: "slot_02",
+          slot_type: "product_hero",
+          duration_seconds: 1,
+          shot_description: "product_hero¹²\n倒茶水花特写。"
+        }
+      ]
+    })
+  });
+  const created = (await createResponse.json()) as {
+    slots: Array<{
+      shot_description: string;
+    }>;
+  };
+
+  assert.equal(createResponse.status, 201);
+  assert.equal(created.slots[0]?.shot_description, "强 Hook³\n冰镇瓶身特写。");
+  assert.equal(created.slots[1]?.shot_description, "产品亮相¹²\n倒茶水花特写。");
+});
 
 test(
   "v2 script slot order is persisted before canvas revalidation",
@@ -2208,6 +2866,7 @@ test(
         video_prompt: "基于已有冰红茶素材截图生成补齐视频",
         generation_mode: "direct_from_material_frame",
         duration_seconds: 2,
+        use_video_provider: false,
         allow_fallback: true
       })
     });
@@ -2232,11 +2891,15 @@ test(
   async () => {
     const firstFileId = createUploadedTestVideo(0.5);
     const secondFileId = createUploadedTestVideo(0.5);
+    const bgmAudioPath = createTestAudio(1);
 
     const result = await assembleV2FinalVideo({
       target_duration_seconds: 1,
       resolution: "360x640",
       fps: 24,
+      generate_bgm: true,
+      bgm_prompt: "清爽夏日冰红茶广告背景音乐，无人声主唱。",
+      bgm_audio_uri: bgmAudioPath,
       slots: [
         {
           slot_id: "slot_01",
@@ -2255,14 +2918,16 @@ test(
 
     assert.match(String(result.final_video_url), /^\/api\/v2\/assembly\/final-videos\//);
     assert.equal(result.planned_duration_seconds, 1);
-    assert.deepEqual(result.audio_policy, {
-      source_clip_audio: "muted",
-      per_clip_bgm: "disabled",
-      final_bgm: {
-        selection_mode: "ai_selected_at_final_assembly",
-        status: "pending_provider_integration"
-      }
-    });
+    assert.equal(asRecord(result.audio_policy).source_clip_audio, "muted");
+    assert.equal(asRecord(result.audio_policy).per_clip_bgm, "disabled");
+    const finalBgm = asRecord(asRecord(result.audio_policy).final_bgm);
+    const bgmProviderResult = asRecord(finalBgm.provider_result);
+    assert.equal(finalBgm.status, "mixed");
+    assert.equal(finalBgm.prompt, "清爽夏日冰红茶广告背景音乐，无人声主唱。");
+    assert.equal(finalBgm.audio_stream_present, true);
+    assert.equal(bgmProviderResult.status, "provided");
+    assert.equal(asRecord(bgmProviderResult.source).type, "provided_audio");
+    assert.equal(bgmProviderResult.audio_path, bgmAudioPath);
     assert.ok(
       Math.abs(Number(result.final_duration_seconds) - 1) < 0.15,
       `expected final duration close to 1s, got ${result.final_duration_seconds}`

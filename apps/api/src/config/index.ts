@@ -56,6 +56,15 @@ export const config = {
         enabled: Boolean(
           env.v2VideoApiBaseUrl && env.v2VideoModel && env.v2VideoApiKey
         )
+      },
+      bgm: {
+        provider: env.v2BgmProvider,
+        apiBaseUrl: env.v2BgmApiBaseUrl,
+        apiPath: env.v2BgmApiPath,
+        model: env.v2BgmModel,
+        apiKey: env.v2BgmApiKey,
+        timeoutMs: env.v2ProviderTimeoutMs,
+        enabled: Boolean(env.v2BgmApiBaseUrl && env.v2BgmApiKey)
       }
     }
   }

@@ -261,11 +261,11 @@ const getSlotMaterials = (slot: JsonObject): V2ScriptSlotMaterial[] => {
 };
 
 const slotTypeLabelMap: Record<string, string> = {
-  strong_hook: "Hook",
-  hook: "Hook",
+  strong_hook: "强 Hook",
+  hook: "强 Hook",
   pain_point_scene: "痛点场景",
-  product_hero: "产品介入",
-  product_intro: "产品介入",
+  product_hero: "产品亮相",
+  product_intro: "产品亮相",
   usage_process: "使用动作",
   usage_action: "使用动作",
   selling_point_proof: "卖点证明",
@@ -301,7 +301,12 @@ const getSlotTypeLabel = (
   slotId: string
 ): string => {
   const normalizedSlotType = slotType.toLowerCase().replace(/[^a-z0-9]+/gu, "_");
-  return slotName || slotTypeLabelMap[normalizedSlotType] || slotType || slotId;
+  const normalizedSlotName = slotName?.toLowerCase().replace(/[^a-z0-9]+/gu, "_");
+  if (slotName && normalizedSlotName !== normalizedSlotType) {
+    return slotName;
+  }
+
+  return slotTypeLabelMap[normalizedSlotType] || slotName || slotType || slotId;
 };
 
 const getSourceSampleIndices = (slot: JsonObject): number[] => {
@@ -341,14 +346,21 @@ const formatScriptShotDescription = (
   slotId: string,
   shotDescription: string
 ): string => {
+  const cleanedShotDescription = shotDescription.replace(
+    /^(?:strong_hook|hook|pain_point_scene|product_hero|product_intro|usage_process|usage_action|selling_point_proof|proof|effect_comparison|comparison|cta)([¹²³⁴⁵⁶⁷⁸⁹⁰]*)\n/iu,
+    ""
+  );
   const label = getSlotTypeLabel(slotType, slotName, slotId);
-  const sampleMark = getSourceSampleIndices(slot).map(toSuperscript).join("");
+  const existingSampleMark = shotDescription.match(
+    /^(?:strong_hook|hook|pain_point_scene|product_hero|product_intro|usage_process|usage_action|selling_point_proof|proof|effect_comparison|comparison|cta)([¹²³⁴⁵⁶⁷⁸⁹⁰]*)\n/iu
+  )?.[1];
+  const sampleMark = existingSampleMark || getSourceSampleIndices(slot).map(toSuperscript).join("");
   const firstLine = `${label}${sampleMark}`;
-  if (shotDescription.startsWith(`${firstLine}\n`)) {
-    return shotDescription;
+  if (cleanedShotDescription.startsWith(`${firstLine}\n`)) {
+    return cleanedShotDescription;
   }
 
-  return `${firstLine}\n${shotDescription}`;
+  return `${firstLine}\n${cleanedShotDescription}`;
 };
 
 const normalizeScriptSlot = (
@@ -734,6 +746,8 @@ const getSlotCoverageKey = (slotId: string, slotType: string): string[] => [
   slotType
 ];
 
+const minimumAiCompletionGapSeconds = 0.5;
+
 const isAcceptedDurationShortSlot = (
   acceptedSlots: Set<string>,
   slotId: string,
@@ -771,6 +785,9 @@ const makeSegmentAssignment = (
   source_material_id: segment.source_material_id,
   file_id: segment.file_id,
   uri: segment.uri,
+  label: segment.label,
+  material_assigned_at: segment.material_assigned_at,
+  slot_material_order_index: segment.slot_material_order_index,
   source_in_seconds: segment.final_source_in_seconds ?? segment.source_in_seconds,
   source_out_seconds: segment.final_source_out_seconds ?? segment.source_out_seconds,
   matched_material_duration: matchedDuration,
@@ -803,6 +820,326 @@ const makeDirectVideoReferenceMaterialsFromSegments = (
   }));
 };
 
+const formatSegmentTimeRange = (segment: JsonObject): string => {
+  const sourceIn = getNumber(segment.source_in_seconds);
+  const sourceOut = getNumber(segment.source_out_seconds);
+  if (sourceOut > sourceIn) {
+    return `${sourceIn.toFixed(3).replace(/\.?0+$/u, "")}-${sourceOut
+      .toFixed(3)
+      .replace(/\.?0+$/u, "")}s`;
+  }
+
+  return "";
+};
+
+const buildAssignedMaterialSummary = (assignedSegments: JsonObject[]): string => {
+  return assignedSegments
+    .map((segment) => {
+      const label =
+        normalizeOptionalString(segment.label) ||
+        normalizeOptionalString(segment.file_id) ||
+        normalizeOptionalString(segment.source_material_id) ||
+        "素材";
+      const matchedDuration = getNumber(segment.matched_material_duration);
+      const timeRange = formatSegmentTimeRange(segment);
+      const durationText = matchedDuration > 0 ? `${matchedDuration}s` : "";
+
+      return [label, timeRange, durationText].filter(Boolean).join(" ");
+    })
+    .join("\n");
+};
+
+const getSegmentMaterialKey = (segment: JsonObject): string =>
+  normalizeOptionalString(segment.source_material_id) ||
+  normalizeOptionalString(segment.file_id) ||
+  normalizeOptionalString(segment.uri) ||
+  normalizeOptionalString(segment.segment_id) ||
+  "unknown_material";
+
+const getSegmentPhysicalMaterialKey = (segment: JsonObject): string =>
+  normalizeOptionalString(segment.file_id) ||
+  normalizeOptionalString(segment.uri) ||
+  normalizeOptionalString(segment.source_material_id) ||
+  normalizeOptionalString(segment.segment_id) ||
+  "unknown_material";
+
+type UsedMaterialRange = {
+  source_in_seconds: number;
+  source_out_seconds: number;
+  slot_id: string;
+  segment_id?: string;
+};
+
+type MaterialAllocationState = {
+  usedRangesByKey: Map<string, UsedMaterialRange[]>;
+  usedSlotByKey: Map<string, string>;
+};
+
+const getSegmentFinalRange = (
+  segment: JsonObject
+): { source_in_seconds: number; source_out_seconds: number; duration_seconds: number } => {
+  const sourceIn = getNumber(
+    segment.final_source_in_seconds,
+    getNumber(segment.source_in_seconds)
+  );
+  const sourceOut = getNumber(
+    segment.final_source_out_seconds,
+    getNumber(segment.source_out_seconds)
+  );
+  const duration = Number(Math.max(0, sourceOut - sourceIn).toFixed(3));
+
+  return {
+    source_in_seconds: sourceIn,
+    source_out_seconds: sourceOut,
+    duration_seconds: duration
+  };
+};
+
+const materialRangesOverlap = (
+  left: { source_in_seconds: number; source_out_seconds: number },
+  right: { source_in_seconds: number; source_out_seconds: number }
+): boolean => {
+  const overlapSeconds = Math.min(left.source_out_seconds, right.source_out_seconds) -
+    Math.max(left.source_in_seconds, right.source_in_seconds);
+
+  return overlapSeconds > 0.05;
+};
+
+const isSegmentRangeAvailable = (
+  segment: JsonObject,
+  slot: V2ScriptSlot,
+  allocationState: MaterialAllocationState
+): boolean => {
+  const materialKey = getSegmentPhysicalMaterialKey(segment);
+  const usedSlotId = allocationState.usedSlotByKey.get(materialKey);
+  if (usedSlotId && usedSlotId !== slot.slot_id) {
+    return false;
+  }
+
+  const usedRanges = allocationState.usedRangesByKey.get(materialKey) || [];
+  const segmentRange = getSegmentFinalRange(segment);
+
+  return !usedRanges.some((usedRange) => materialRangesOverlap(segmentRange, usedRange));
+};
+
+const markSegmentRangeUsed = (
+  slot: V2ScriptSlot,
+  segment: JsonObject,
+  allocationState: MaterialAllocationState
+): void => {
+  const materialKey = getSegmentPhysicalMaterialKey(segment);
+  const usedRanges = allocationState.usedRangesByKey.get(materialKey) || [];
+  const segmentRange = getSegmentFinalRange(segment);
+
+  usedRanges.push({
+    source_in_seconds: segmentRange.source_in_seconds,
+    source_out_seconds: segmentRange.source_out_seconds,
+    slot_id: slot.slot_id,
+    segment_id: normalizeOptionalString(segment.segment_id)
+  });
+  allocationState.usedRangesByKey.set(materialKey, usedRanges);
+  allocationState.usedSlotByKey.set(materialKey, slot.slot_id);
+};
+
+const getSegmentAssignedAtMs = (segment: JsonObject): number => {
+  const assignedAt = normalizeOptionalString(segment.material_assigned_at);
+  if (!assignedAt) {
+    return 0;
+  }
+
+  const timestamp = Date.parse(assignedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const compareCandidateSegments = (left: JsonObject, right: JsonObject): number => {
+  const leftAssignedAt = getSegmentAssignedAtMs(left);
+  const rightAssignedAt = getSegmentAssignedAtMs(right);
+  if (leftAssignedAt !== rightAssignedAt) {
+    return rightAssignedAt - leftAssignedAt;
+  }
+
+  const leftOrder = getNumber(left.slot_material_order_index, 0);
+  const rightOrder = getNumber(right.slot_material_order_index, 0);
+  if (leftOrder !== rightOrder) {
+    return rightOrder - leftOrder;
+  }
+
+  const qualityDelta = getNumber(right.quality_score, 0.5) - getNumber(left.quality_score, 0.5);
+  if (qualityDelta !== 0) {
+    return qualityDelta;
+  }
+
+  return getNumber(left.source_in_seconds, 0) - getNumber(right.source_in_seconds, 0);
+};
+
+const allocateSegmentsForSlot = (
+  slot: V2ScriptSlot,
+  candidateSegments: JsonObject[],
+  allocationState: MaterialAllocationState
+): JsonObject[] => {
+  const remainingBySegmentId = new Map<string, number>();
+  for (const segment of candidateSegments) {
+    const segmentId = normalizeOptionalString(segment.segment_id);
+    if (!segmentId) {
+      continue;
+    }
+
+    remainingBySegmentId.set(segmentId, getSegmentFinalDuration(segment));
+  }
+
+  let requiredRemaining = slot.required_duration;
+  const assignedSegments: JsonObject[] = [];
+  const exactAssignedSegments = candidateSegments.filter(
+    (segment) => normalizeOptionalString(segment.assigned_slot_id) === slot.slot_id
+  );
+  const materialKeys = Array.from(
+    new Set(exactAssignedSegments.map((segment) => getSegmentMaterialKey(segment)))
+  ).sort((left, right) => {
+    const newestLeft = Math.max(
+      ...exactAssignedSegments
+        .filter((segment) => getSegmentMaterialKey(segment) === left)
+        .map((segment) => getSegmentAssignedAtMs(segment))
+    );
+    const newestRight = Math.max(
+      ...exactAssignedSegments
+        .filter((segment) => getSegmentMaterialKey(segment) === right)
+        .map((segment) => getSegmentAssignedAtMs(segment))
+    );
+
+    return newestRight - newestLeft;
+  });
+
+  const allocateFromSegment = (segment: JsonObject, maxDuration?: number): void => {
+    if (requiredRemaining <= 0) {
+      return;
+    }
+
+    const segmentId = normalizeOptionalString(segment.segment_id);
+    if (!segmentId) {
+      return;
+    }
+
+    if (!isSegmentRangeAvailable(segment, slot, allocationState)) {
+      return;
+    }
+
+    const remainingSegmentDuration = remainingBySegmentId.get(segmentId) || 0;
+    if (remainingSegmentDuration <= 0) {
+      return;
+    }
+
+    const matchedDuration = Number(
+      Math.min(requiredRemaining, remainingSegmentDuration, maxDuration ?? Number.POSITIVE_INFINITY)
+        .toFixed(3)
+    );
+    if (matchedDuration <= 0) {
+      return;
+    }
+
+    const existingAssignment = assignedSegments.find(
+      (assignment) => normalizeOptionalString(assignment.segment_id) === segmentId
+    );
+    if (existingAssignment) {
+      existingAssignment.matched_material_duration = Number(
+        (getNumber(existingAssignment.matched_material_duration) + matchedDuration).toFixed(3)
+      );
+    } else {
+      assignedSegments.push({
+        ...makeSegmentAssignment(segment, matchedDuration),
+        allocation_policy: "coherent_non_overlapping_material_range",
+        physical_material_key: getSegmentPhysicalMaterialKey(segment)
+      });
+      markSegmentRangeUsed(slot, segment, allocationState);
+    }
+    remainingBySegmentId.set(
+      segmentId,
+      Number((remainingSegmentDuration - matchedDuration).toFixed(3))
+    );
+    requiredRemaining = Number((requiredRemaining - matchedDuration).toFixed(3));
+  };
+
+  if (materialKeys.length > 1) {
+    const fairShareDuration = Number((slot.required_duration / materialKeys.length).toFixed(3));
+    for (const materialKey of materialKeys) {
+      let materialRemaining = Math.min(fairShareDuration, requiredRemaining);
+      const segmentsForMaterial = exactAssignedSegments
+        .filter((segment) => getSegmentMaterialKey(segment) === materialKey)
+        .sort(compareCandidateSegments);
+
+      for (const segment of segmentsForMaterial) {
+        if (materialRemaining <= 0 || requiredRemaining <= 0) {
+          break;
+        }
+
+        const before = requiredRemaining;
+        allocateFromSegment(segment, materialRemaining);
+        const allocated = Number((before - requiredRemaining).toFixed(3));
+        materialRemaining = Number((materialRemaining - allocated).toFixed(3));
+      }
+    }
+  }
+
+  for (const segment of candidateSegments.sort(compareCandidateSegments)) {
+    if (requiredRemaining <= 0) {
+      break;
+    }
+
+    allocateFromSegment(segment);
+  }
+
+  return assignedSegments;
+};
+
+const getCanvasFallbackImagePrompt = (
+  session: V2ScriptSession,
+  slot: V2ScriptSlot
+): JsonObject => {
+  const productName =
+    normalizeOptionalString(session.user_request.product_name) ||
+    normalizeOptionalString(session.user_request.target_product) ||
+    "目标产品";
+
+  return {
+    prompt_ref: `${slot.slot_type}_canvas_gap_image`,
+    prompt_source: "deterministic_canvas_gap_fallback",
+    prompt: [
+      `竖屏 9:16 商业广告补帧关键图，产品是${productName}。`,
+      `对应分镜：${slot.shot_description}`,
+      slot.voiceover_text ? `字幕/旁白方向：${slot.voiceover_text}` : undefined,
+      "画面需要真实商业摄影质感，主体清晰，保留字幕安全区。",
+      "不要生成无关品牌、错误包装、乱码文字或与现有素材冲突的人物场景。"
+    ]
+      .filter(Boolean)
+      .join("\n")
+  };
+};
+
+const getCanvasFallbackVideoPrompt = (
+  session: V2ScriptSession,
+  slot: V2ScriptSlot,
+  missingDuration: number
+): JsonObject => {
+  const productName =
+    normalizeOptionalString(session.user_request.product_name) ||
+    normalizeOptionalString(session.user_request.target_product) ||
+    "目标产品";
+
+  return {
+    prompt_ref: `${slot.slot_type}_canvas_gap_video`,
+    prompt_source: "deterministic_canvas_gap_fallback",
+    prompt: [
+      `使用现有素材帧或已确认图片，生成 ${slot.slot_type} 分镜缺口视频；产品是${productName}。`,
+      `最终剪入缺口时长约 ${missingDuration}s；若视频模型需要生成更长素材，请确保前 ${missingDuration}s 就能完整覆盖该缺口，后续可被裁剪。`,
+      `分镜画面方向：${slot.shot_description}`,
+      slot.voiceover_text ? `字幕/旁白方向：${slot.voiceover_text}` : undefined,
+      "保持竖屏 9:16、真实商业广告质感、主体稳定清晰，动作自然延展。",
+      "不要纯文字生成；不要生成无关品牌、错误包装、乱码文字或畸形手部。"
+    ]
+      .filter(Boolean)
+      .join("\n")
+  };
+};
+
 const buildSegmentAwareMaterialCoverage = (
   session: V2ScriptSession,
   materialSegments: JsonObject[],
@@ -824,6 +1161,10 @@ const buildSegmentAwareMaterialCoverage = (
     }
   }
 
+  const allocationState: MaterialAllocationState = {
+    usedRangesByKey: new Map<string, UsedMaterialRange[]>(),
+    usedSlotByKey: new Map<string, string>()
+  };
   const slotCoverage = session.slots.map((slot) => {
     const base =
       baseCoverageByKey.get(slot.slot_id) ||
@@ -832,35 +1173,25 @@ const buildSegmentAwareMaterialCoverage = (
     const candidateSegments = materialSegments
       .filter((segment) => isSegmentUsableForSlot(asJsonObject(segment), slot))
       .map(asJsonObject)
-      .sort(
-        (left, right) =>
-          getNumber(right.quality_score, 0.5) - getNumber(left.quality_score, 0.5)
-      );
-    let requiredRemaining = slot.required_duration;
-    const assignedSegments: JsonObject[] = [];
-
-    for (const segment of candidateSegments) {
-      if (requiredRemaining <= 0) {
-        break;
-      }
-
-      const segmentDuration = getSegmentFinalDuration(segment);
-      if (segmentDuration <= 0) {
-        continue;
-      }
-
-      const matchedDuration = Number(Math.min(requiredRemaining, segmentDuration).toFixed(3));
-      assignedSegments.push(makeSegmentAssignment(segment, matchedDuration));
-      requiredRemaining = Number((requiredRemaining - matchedDuration).toFixed(3));
-    }
+      .sort(compareCandidateSegments);
+    const assignedSegments = allocateSegmentsForSlot(
+      slot,
+      candidateSegments,
+      allocationState
+    );
 
     const matchedMaterialDuration = Number(
       assignedSegments
         .reduce((total, segment) => total + getNumber(segment.matched_material_duration), 0)
         .toFixed(3)
     );
+    const rawMissingDuration = Number(
+      Math.max(0, slot.required_duration - matchedMaterialDuration).toFixed(3)
+    );
+    const ignoredSmallGap =
+      rawMissingDuration > 0 && rawMissingDuration < minimumAiCompletionGapSeconds;
     const coverageStatus =
-      matchedMaterialDuration >= slot.required_duration
+      matchedMaterialDuration >= slot.required_duration || ignoredSmallGap
         ? "covered"
         : matchedMaterialDuration > 0
           ? "partial"
@@ -873,14 +1204,24 @@ const buildSegmentAwareMaterialCoverage = (
         ? "fully_matched"
         : coverageStatus === "partial"
           ? "structure_complete_duration_short"
-          : "material_insufficient";
-    const missingDuration = Number(
-      Math.max(0, slot.required_duration - matchedMaterialDuration).toFixed(3)
-    );
+            : "material_insufficient";
+    const missingDuration = ignoredSmallGap ? 0 : rawMissingDuration;
     const directVideoReferenceMaterials = makeDirectVideoReferenceMaterialsFromSegments(
       assignedSegments,
       candidateSegments
     );
+    const baseVideoPrompt = asJsonObject(base.recommended_video_prompt);
+    const baseImagePrompt = asJsonObject(base.recommended_aigc_prompt);
+    const recommendedVideoPrompt =
+      frontendCoverageStatus !== "fully_matched"
+        ? getCanvasFallbackVideoPrompt(session, slot, missingDuration || rawMissingDuration)
+        : normalizeOptionalString(baseVideoPrompt.prompt)
+          ? baseVideoPrompt
+          : getCanvasFallbackVideoPrompt(session, slot, missingDuration || rawMissingDuration);
+    const recommendedAigcPrompt =
+      normalizeOptionalString(baseImagePrompt.prompt)
+        ? baseImagePrompt
+        : getCanvasFallbackImagePrompt(session, slot);
     const availableGenerationPaths =
       frontendCoverageStatus === "fully_matched"
         ? []
@@ -912,9 +1253,31 @@ const buildSegmentAwareMaterialCoverage = (
     const gapReason =
       frontendCoverageStatus === "fully_matched"
         ? undefined
+        : ignoredSmallGap
+          ? `剩余缺口 ${rawMissingDuration}s 小于 ${minimumAiCompletionGapSeconds}s，已忽略。`
         : matchedMaterialDuration > 0
           ? `已匹配 ${matchedMaterialDuration}s，但该段需要 ${slot.required_duration}s。`
           : "该段文件夹内没有可用素材片段。";
+    const frontendDisplay = {
+      ...asJsonObject(base.frontend_display),
+      migration_result_title: slot.slot_name || slot.slot_type,
+      migration_result_description: slot.shot_description,
+      duration_text: `${slot.required_duration}s`,
+      shot_description: slot.shot_description,
+      material_summary: buildAssignedMaterialSummary(assignedSegments),
+      copy: slot.voiceover_text || slot.copy || "",
+      material_status:
+        frontendCoverageStatus === "fully_matched"
+          ? "完全匹配"
+          : frontendCoverageStatus === "structure_complete_duration_short"
+            ? "结构完整，但时长不足"
+            : "素材不够",
+      add_material_button: {
+        visible: true,
+        label: "添加素材",
+        action: "add_material"
+      }
+    };
 
     return {
       ...base,
@@ -931,11 +1294,21 @@ const buildSegmentAwareMaterialCoverage = (
           : frontendCoverageStatus === "structure_complete_duration_short"
             ? "结构完整，但时长不足"
             : "素材不够",
+      frontend_display: frontendDisplay,
       missing_duration: missingDuration,
+      raw_missing_duration: rawMissingDuration,
+      ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
+      minimum_ai_completion_gap_seconds: minimumAiCompletionGapSeconds,
+      material_reuse_policy: {
+        mode: "single_slot_per_source_video",
+        physical_material_keys_seen_so_far: Array.from(allocationState.usedRangesByKey.keys())
+      },
       ai_completion_required_duration:
         frontendCoverageStatus === "fully_matched"
           ? 0
           : missingDuration || slot.required_duration,
+      recommended_video_prompt: recommendedVideoPrompt,
+      recommended_aigc_prompt: recommendedAigcPrompt,
       assigned_segments: assignedSegments,
       matched_material_segments: assignedSegments,
       candidate_material_segments: candidateSegments,
@@ -946,8 +1319,23 @@ const buildSegmentAwareMaterialCoverage = (
       available_generation_paths: availableGenerationPaths,
       available_user_actions: availableUserActions,
       direct_video_reference_materials: directVideoReferenceMaterials,
+      gap_display:
+        frontendCoverageStatus === "fully_matched"
+          ? undefined
+          : {
+              visible: true,
+              title: "缺少必要素材，试试AI补齐吧！",
+              missing_duration_seconds: missingDuration,
+              prompt_ready: Boolean(
+                normalizeOptionalString(recommendedVideoPrompt.prompt) &&
+                  normalizeOptionalString(recommendedAigcPrompt.prompt)
+              ),
+              available_generation_paths: availableGenerationPaths
+            },
       user_duration_short_decision: durationShortAccepted
         ? "accepted_as_sufficient"
+        : ignoredSmallGap
+          ? "ignored_tiny_gap"
         : coverageStatus === "partial"
           ? "pending"
           : "not_applicable",
@@ -1041,6 +1429,27 @@ const getCoverFrame = (segment: JsonObject | undefined): JsonObject | undefined 
   return frames[Math.floor(frames.length / 2)];
 };
 
+const sanitizeCoverHeroDescription = (
+  value: unknown,
+  fallback: string,
+  productName: string
+): string => {
+  const rawValue = normalizeOptionalString(value);
+  const fallbackValue = normalizeOptionalString(fallback) || `${productName}核心视觉特写`;
+  const hasInternalState =
+    rawValue &&
+    /(?:\/Users\/|\/Volumes\/|等待多模态|候选素材|进一步确认|\.(?:mov|mp4)\b)/iu.test(
+      rawValue
+    );
+  const sourceText = hasInternalState ? fallbackValue : rawValue || fallbackValue;
+
+  return sourceText
+    .replace(/^[a-z][a-z0-9_]*[¹²³⁴⁵⁶⁷⁸⁹⁰,，]*\s*\n/iu, "")
+    .replace(/\s+/gu, " ")
+    .replace(/\s*。{2,}/gu, "。")
+    .trim();
+};
+
 const buildV2CoverPlan = (
   session: V2ScriptSession,
   materialSegments: JsonObject[],
@@ -1056,10 +1465,11 @@ const buildV2CoverPlan = (
   const coverSegment = getCoverRecommendedSegment(materialSegments, slotCoverage);
   const coverFrame = getCoverFrame(coverSegment);
   const firstSlot = session.slots[0];
-  const heroDescription =
-    normalizeOptionalString(coverSegment?.content_summary) ||
-    firstSlot?.shot_description ||
-    `${productName}核心视觉特写`;
+  const heroDescription = sanitizeCoverHeroDescription(
+    coverSegment?.content_summary,
+    firstSlot?.shot_description || `${productName}核心视觉特写`,
+    productName
+  );
   const coverTitle =
     normalizeOptionalString(session.user_request.cover_title) ||
     `${productName}，一眼心动`;
@@ -1073,12 +1483,45 @@ const buildV2CoverPlan = (
     `${productName}高光时刻`,
     `这一刻，记住${productName}`
   ];
+  const videoTitleRecommendations = Array.from(
+    new Set([
+      coverTitle,
+      `${productName}，一口入夏`,
+      `热到融化？来口${productName}`,
+      `这个夏天，就要${productName}`,
+      `${productName}清爽时刻`
+    ])
+  ).slice(0, 5);
+  const videoDescriptionRecommendations = Array.from(
+    new Set([
+      `夏天热到没电？来一口${productName}，把清爽感拉满。`,
+      `${productName}冰爽登场，水珠、冰块和畅快口感一起唤醒夏日好心情。`,
+      `从炎热到清爽，只差一口${productName}。适合夏日聚会、通勤和休闲时刻。`,
+      `这一支${productName}短片，用冰感特写和畅饮瞬间记录夏天最想要的清爽。`
+    ])
+  ).slice(0, 4);
+  const coverHeroSentence = heroDescription.replace(/[。.!！?？]+$/u, "");
+  const bgmPlan = {
+    prompt_ref: "final_bgm_prompt",
+    prompt_source: "deterministic_canvas_bgm_plan",
+    duration_seconds: session.target_duration_seconds,
+    prompt: [
+      `为一支 ${session.target_duration_seconds}s 左右的竖屏商业广告生成无版权感背景音乐，产品是${productName}。`,
+      "音乐方向：清爽夏日、年轻、有活力、明亮但不吵，适合冰饮广告。",
+      "节奏建议：中快板 105-120 BPM，前段快速吸引注意，中段保持轻快律动，结尾有干净上扬的收束，方便 CTA 出现。",
+      "编曲建议：轻快鼓组、清亮合成器、弹性贝斯、少量水滴/冰块感音色点缀。",
+      "不要人声主唱；不要生成可识别歌词；不要压过旁白和字幕节奏；整体适合短视频平台商业广告。"
+    ].join("\n")
+  };
 
   return {
     cover_title: coverTitle,
     cover_subtitle: coverSubtitle,
     cover_copy_options: Array.from(new Set(copyOptions)).slice(0, 4),
-    visual_direction: `${heroDescription}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。`,
+    video_title_recommendations: videoTitleRecommendations,
+    video_description_recommendations: videoDescriptionRecommendations,
+    bgm_plan: bgmPlan,
+    visual_direction: `${coverHeroSentence}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。`,
     recommended_source: coverSegment
       ? {
           type: "material_segment",
@@ -1096,7 +1539,7 @@ const buildV2CoverPlan = (
       prompt_source: "deterministic_canvas_cover_plan",
       prompt: [
         `竖屏商业广告封面，主题是${productName}。`,
-        `核心画面：${heroDescription}。`,
+        `核心画面：${coverHeroSentence}。`,
         "要求主体清晰、强视觉冲击、干净高对比、适合手机首屏浏览。",
         `封面主标题文案：${coverTitle}。`,
         "画面需要给标题文字预留空间，不要出现无关品牌、无关人物或杂乱背景。"
@@ -1192,7 +1635,10 @@ export const revalidateV2CanvasFromScript = async (
       required_duration: coverage.required_duration,
       matched_material_duration: coverage.matched_material_duration,
       missing_duration: coverage.missing_duration,
+      raw_missing_duration: coverage.raw_missing_duration,
+      ignored_missing_duration: coverage.ignored_missing_duration,
       needs_ai_completion: coverage.needs_ai_completion,
+      gap_display: coverage.gap_display,
       recommended_video_prompt: coverage.recommended_video_prompt,
       recommended_aigc_prompt: coverage.recommended_aigc_prompt,
       available_generation_paths: coverage.available_generation_paths,

@@ -166,9 +166,20 @@ const buildInitialCanvasNodes = (
           required_duration: coverage.required_duration,
           matched_material_duration: coverage.matched_material_duration,
           missing_duration: coverage.missing_duration,
+          raw_missing_duration: coverage.raw_missing_duration,
+          ignored_missing_duration: coverage.ignored_missing_duration,
           coverage_status: coverage.frontend_coverage_status,
+          gap_display: coverage.gap_display || {
+            visible: true,
+            title: "缺少必要素材，试试AI补齐吧！",
+            missing_duration_seconds: coverage.missing_duration
+          },
           recommended_video_prompt: coverage.recommended_video_prompt,
           recommended_aigc_prompt: coverage.recommended_aigc_prompt,
+          prompt_ready: Boolean(
+            normalizeOptionalString(asJsonObject(coverage.recommended_video_prompt).prompt) &&
+              normalizeOptionalString(asJsonObject(coverage.recommended_aigc_prompt).prompt)
+          ),
           available_generation_paths: coverage.available_generation_paths,
           direct_video_reference_materials: coverage.direct_video_reference_materials
         }
@@ -253,7 +264,8 @@ export const createV2CanvasSessionFromRevalidateResult = (
       material_candidate_pool_id: normalizeOptionalString(
         asJsonObject(revalidateResult.material_candidate_pool).candidate_pool_id
       ),
-      matching_source: normalizeOptionalString(materialCoverage.matching_source)
+      matching_source: normalizeOptionalString(materialCoverage.matching_source),
+      cover_plan: asJsonObject(revalidateResult.cover_plan)
     }
   };
 
@@ -513,12 +525,24 @@ export const generateV2CanvasGapVideo = async (
     );
   }
 
+  const gapDurationSeconds =
+    getNumber(payload.duration_seconds, getNumber(missingNode.data.missing_duration, 5)) || 5;
+  const slotType = normalizeOptionalString(missingNode.data.slot_type);
+  const slotDescription =
+    normalizeOptionalString(missingNode.data.shot_description) ||
+    normalizeOptionalString(missingNode.data.slot_description) ||
+    normalizeOptionalString(missingNode.data.visual_description) ||
+    normalizeOptionalString(missingNode.data.description);
   const generationResult = await generateV2ImageToVideo({
     video_prompt: videoPrompt,
     approved_image_uri: imageUri,
     source_video_uri: sourceVideoUri,
-    duration_seconds:
-      getNumber(payload.duration_seconds, getNumber(missingNode.data.missing_duration, 5)) || 5,
+    duration_seconds: gapDurationSeconds,
+    target_duration_seconds: gapDurationSeconds,
+    slot_id: missingNode.slot_id,
+    slot_type: slotType,
+    slot_description: slotDescription,
+    auto_trim_review: payload.auto_trim_review !== false,
     generation_mode: imageUri ? "generated_image" : "direct_from_material_frame",
     allow_fallback: payload.allow_fallback !== false,
     use_video_provider: payload.use_video_provider !== false
@@ -538,6 +562,10 @@ export const generateV2CanvasGapVideo = async (
       source_image_node_id: imageCandidateNode?.node_id,
       video_prompt_node_id: videoPromptNode?.node_id,
       missing_node_id: missingNode.node_id,
+      missing_duration: gapDurationSeconds,
+      target_duration_seconds: gapDurationSeconds,
+      slot_type: slotType,
+      slot_description: slotDescription,
       generation_result: generationResult,
       created_at: new Date().toISOString()
     }
@@ -813,7 +841,13 @@ export const assembleV2CanvasFinalVideo = async (
     resolution: normalizeOptionalString(payload.resolution),
     fps: payload.fps === undefined ? undefined : getNumber(payload.fps),
     background_color: normalizeOptionalString(payload.background_color),
-    allow_loop_short_clips: payload.allow_loop_short_clips !== false
+    allow_loop_short_clips: payload.allow_loop_short_clips !== false,
+    generate_bgm: payload.generate_bgm !== false,
+    bgm_prompt:
+      normalizeOptionalString(payload.bgm_prompt) ||
+      normalizeOptionalString(asJsonObject(asJsonObject(session.source.cover_plan).bgm_plan).prompt),
+    bgm_audio_uri: normalizeOptionalString(payload.bgm_audio_uri),
+    bgm_volume: payload.bgm_volume === undefined ? undefined : getNumber(payload.bgm_volume)
   });
 
   session.source = {
@@ -828,6 +862,7 @@ export const assembleV2CanvasFinalVideo = async (
   return {
     canvas_session: session,
     assembly_slots: assemblySlots,
+    cover_plan: asJsonObject(session.source.cover_plan),
     final_assembly: result
   };
 };
