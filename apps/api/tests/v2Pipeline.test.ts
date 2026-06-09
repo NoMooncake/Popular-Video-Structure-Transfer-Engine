@@ -2605,7 +2605,7 @@ test(
 );
 
 test(
-  "v2 canvas material allocation does not reuse overlapping source ranges across slots",
+  "v2 canvas material allocation does not reuse one source video across slots",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {
     const fileId = createUploadedTestVideo(8);
@@ -2691,6 +2691,46 @@ test(
     assert.equal(secondCoverage.missing_duration, 4);
   }
 );
+
+test("v2 script session localizes English slot headings and keeps superscripts", async () => {
+  const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      user_request: {
+        goal: "冰红茶宣传片",
+        product_name: "冰红茶"
+      },
+      target_duration_seconds: 2,
+      slots: [
+        {
+          slot_id: "slot_01",
+          slot_type: "strong_hook",
+          slot_name: "strong_hook",
+          duration_seconds: 1,
+          shot_description: "strong_hook³\n冰镇瓶身特写。"
+        },
+        {
+          slot_id: "slot_02",
+          slot_type: "product_hero",
+          duration_seconds: 1,
+          shot_description: "product_hero¹²\n倒茶水花特写。"
+        }
+      ]
+    })
+  });
+  const created = (await createResponse.json()) as {
+    slots: Array<{
+      shot_description: string;
+    }>;
+  };
+
+  assert.equal(createResponse.status, 201);
+  assert.equal(created.slots[0]?.shot_description, "强 Hook³\n冰镇瓶身特写。");
+  assert.equal(created.slots[1]?.shot_description, "产品亮相¹²\n倒茶水花特写。");
+});
 
 test(
   "v2 script slot order is persisted before canvas revalidation",

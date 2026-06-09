@@ -261,11 +261,11 @@ const getSlotMaterials = (slot: JsonObject): V2ScriptSlotMaterial[] => {
 };
 
 const slotTypeLabelMap: Record<string, string> = {
-  strong_hook: "Hook",
-  hook: "Hook",
+  strong_hook: "强 Hook",
+  hook: "强 Hook",
   pain_point_scene: "痛点场景",
-  product_hero: "产品介入",
-  product_intro: "产品介入",
+  product_hero: "产品亮相",
+  product_intro: "产品亮相",
   usage_process: "使用动作",
   usage_action: "使用动作",
   selling_point_proof: "卖点证明",
@@ -301,7 +301,12 @@ const getSlotTypeLabel = (
   slotId: string
 ): string => {
   const normalizedSlotType = slotType.toLowerCase().replace(/[^a-z0-9]+/gu, "_");
-  return slotName || slotTypeLabelMap[normalizedSlotType] || slotType || slotId;
+  const normalizedSlotName = slotName?.toLowerCase().replace(/[^a-z0-9]+/gu, "_");
+  if (slotName && normalizedSlotName !== normalizedSlotType) {
+    return slotName;
+  }
+
+  return slotTypeLabelMap[normalizedSlotType] || slotName || slotType || slotId;
 };
 
 const getSourceSampleIndices = (slot: JsonObject): number[] => {
@@ -341,14 +346,21 @@ const formatScriptShotDescription = (
   slotId: string,
   shotDescription: string
 ): string => {
+  const cleanedShotDescription = shotDescription.replace(
+    /^(?:strong_hook|hook|pain_point_scene|product_hero|product_intro|usage_process|usage_action|selling_point_proof|proof|effect_comparison|comparison|cta)([¹²³⁴⁵⁶⁷⁸⁹⁰]*)\n/iu,
+    ""
+  );
   const label = getSlotTypeLabel(slotType, slotName, slotId);
-  const sampleMark = getSourceSampleIndices(slot).map(toSuperscript).join("");
+  const existingSampleMark = shotDescription.match(
+    /^(?:strong_hook|hook|pain_point_scene|product_hero|product_intro|usage_process|usage_action|selling_point_proof|proof|effect_comparison|comparison|cta)([¹²³⁴⁵⁶⁷⁸⁹⁰]*)\n/iu
+  )?.[1];
+  const sampleMark = existingSampleMark || getSourceSampleIndices(slot).map(toSuperscript).join("");
   const firstLine = `${label}${sampleMark}`;
-  if (shotDescription.startsWith(`${firstLine}\n`)) {
-    return shotDescription;
+  if (cleanedShotDescription.startsWith(`${firstLine}\n`)) {
+    return cleanedShotDescription;
   }
 
-  return `${firstLine}\n${shotDescription}`;
+  return `${firstLine}\n${cleanedShotDescription}`;
 };
 
 const normalizeScriptSlot = (
@@ -858,6 +870,11 @@ type UsedMaterialRange = {
   segment_id?: string;
 };
 
+type MaterialAllocationState = {
+  usedRangesByKey: Map<string, UsedMaterialRange[]>;
+  usedSlotByKey: Map<string, string>;
+};
+
 const getSegmentFinalRange = (
   segment: JsonObject
 ): { source_in_seconds: number; source_out_seconds: number; duration_seconds: number } => {
@@ -890,10 +907,16 @@ const materialRangesOverlap = (
 
 const isSegmentRangeAvailable = (
   segment: JsonObject,
-  usedMaterialRangesByKey: Map<string, UsedMaterialRange[]>
+  slot: V2ScriptSlot,
+  allocationState: MaterialAllocationState
 ): boolean => {
   const materialKey = getSegmentPhysicalMaterialKey(segment);
-  const usedRanges = usedMaterialRangesByKey.get(materialKey) || [];
+  const usedSlotId = allocationState.usedSlotByKey.get(materialKey);
+  if (usedSlotId && usedSlotId !== slot.slot_id) {
+    return false;
+  }
+
+  const usedRanges = allocationState.usedRangesByKey.get(materialKey) || [];
   const segmentRange = getSegmentFinalRange(segment);
 
   return !usedRanges.some((usedRange) => materialRangesOverlap(segmentRange, usedRange));
@@ -902,10 +925,10 @@ const isSegmentRangeAvailable = (
 const markSegmentRangeUsed = (
   slot: V2ScriptSlot,
   segment: JsonObject,
-  usedMaterialRangesByKey: Map<string, UsedMaterialRange[]>
+  allocationState: MaterialAllocationState
 ): void => {
   const materialKey = getSegmentPhysicalMaterialKey(segment);
-  const usedRanges = usedMaterialRangesByKey.get(materialKey) || [];
+  const usedRanges = allocationState.usedRangesByKey.get(materialKey) || [];
   const segmentRange = getSegmentFinalRange(segment);
 
   usedRanges.push({
@@ -914,7 +937,8 @@ const markSegmentRangeUsed = (
     slot_id: slot.slot_id,
     segment_id: normalizeOptionalString(segment.segment_id)
   });
-  usedMaterialRangesByKey.set(materialKey, usedRanges);
+  allocationState.usedRangesByKey.set(materialKey, usedRanges);
+  allocationState.usedSlotByKey.set(materialKey, slot.slot_id);
 };
 
 const getSegmentAssignedAtMs = (segment: JsonObject): number => {
@@ -951,7 +975,7 @@ const compareCandidateSegments = (left: JsonObject, right: JsonObject): number =
 const allocateSegmentsForSlot = (
   slot: V2ScriptSlot,
   candidateSegments: JsonObject[],
-  usedMaterialRangesByKey: Map<string, UsedMaterialRange[]>
+  allocationState: MaterialAllocationState
 ): JsonObject[] => {
   const remainingBySegmentId = new Map<string, number>();
   for (const segment of candidateSegments) {
@@ -995,7 +1019,7 @@ const allocateSegmentsForSlot = (
       return;
     }
 
-    if (!isSegmentRangeAvailable(segment, usedMaterialRangesByKey)) {
+    if (!isSegmentRangeAvailable(segment, slot, allocationState)) {
       return;
     }
 
@@ -1025,7 +1049,7 @@ const allocateSegmentsForSlot = (
         allocation_policy: "coherent_non_overlapping_material_range",
         physical_material_key: getSegmentPhysicalMaterialKey(segment)
       });
-      markSegmentRangeUsed(slot, segment, usedMaterialRangesByKey);
+      markSegmentRangeUsed(slot, segment, allocationState);
     }
     remainingBySegmentId.set(
       segmentId,
@@ -1137,7 +1161,10 @@ const buildSegmentAwareMaterialCoverage = (
     }
   }
 
-  const usedMaterialRangesByKey = new Map<string, UsedMaterialRange[]>();
+  const allocationState: MaterialAllocationState = {
+    usedRangesByKey: new Map<string, UsedMaterialRange[]>(),
+    usedSlotByKey: new Map<string, string>()
+  };
   const slotCoverage = session.slots.map((slot) => {
     const base =
       baseCoverageByKey.get(slot.slot_id) ||
@@ -1150,7 +1177,7 @@ const buildSegmentAwareMaterialCoverage = (
     const assignedSegments = allocateSegmentsForSlot(
       slot,
       candidateSegments,
-      usedMaterialRangesByKey
+      allocationState
     );
 
     const matchedMaterialDuration = Number(
@@ -1273,8 +1300,8 @@ const buildSegmentAwareMaterialCoverage = (
       ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
       minimum_ai_completion_gap_seconds: minimumAiCompletionGapSeconds,
       material_reuse_policy: {
-        mode: "coherent_non_overlapping_ranges",
-        physical_material_keys_seen_so_far: Array.from(usedMaterialRangesByKey.keys())
+        mode: "single_slot_per_source_video",
+        physical_material_keys_seen_so_far: Array.from(allocationState.usedRangesByKey.keys())
       },
       ai_completion_required_duration:
         frontendCoverageStatus === "fully_matched"
