@@ -62,5 +62,10 @@ export const env = {
   v2VideoApiBaseUrl: readString("V2_VIDEO_API_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
   v2VideoApiPath: readString("V2_VIDEO_API_PATH", "/contents/generations/tasks"),
   v2VideoModel: readOptionalString("V2_VIDEO_MODEL"),
-  v2VideoApiKey: readOptionalString("V2_VIDEO_API_KEY") || readOptionalString("ARK_API_KEY")
+  v2VideoApiKey: readOptionalString("V2_VIDEO_API_KEY") || readOptionalString("ARK_API_KEY"),
+  v2BgmProvider: readString("V2_BGM_PROVIDER", "local_fallback"),
+  v2BgmApiBaseUrl: readString("V2_BGM_API_BASE_URL", "https://modelslab.com"),
+  v2BgmApiPath: readString("V2_BGM_API_PATH", "/api/v6/voice/music_gen"),
+  v2BgmModel: readString("V2_BGM_MODEL", "ai-music-generator"),
+  v2BgmApiKey: readOptionalString("V2_BGM_API_KEY") || readOptionalString("MODELSLAB_API_KEY")
 } as const;

@@ -4619,6 +4619,239 @@ const normalizeBgmVolume = (value: unknown): number => {
   return Number(volume.toFixed(3));
 };
 
+const sleep = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+const getUrlExtension = (url: string): string => {
+  const pathname = new URL(url).pathname;
+  const extension = path.extname(pathname).toLowerCase();
+  return [".mp3", ".wav", ".m4a", ".aac", ".ogg"].includes(extension)
+    ? extension
+    : ".mp3";
+};
+
+const collectModelslabAudioUrls = (value: unknown, parentKey = ""): string[] => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (
+      isHttpUrl(trimmed) &&
+      !/fetch_result|future_links|webhook|status|docs/iu.test(parentKey) &&
+      !/\/fetch\//iu.test(trimmed)
+    ) {
+      return [trimmed];
+    }
+
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectModelslabAudioUrls(item, parentKey));
+  }
+
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+
+  return Object.entries(value as JsonObject).flatMap(([key, nestedValue]) =>
+    collectModelslabAudioUrls(nestedValue, key)
+  );
+};
+
+const firstModelslabUrlFromField = (value: unknown): string | undefined => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeOptionalString(item))
+      .find((item): item is string => Boolean(item && isHttpUrl(item)));
+  }
+
+  const directValue = normalizeOptionalString(value);
+  return directValue && isHttpUrl(directValue) ? directValue : undefined;
+};
+
+const getModelslabAudioUrl = (responseBody: JsonObject): string | undefined =>
+  firstModelslabUrlFromField(responseBody.output) ||
+  firstModelslabUrlFromField(responseBody.proxy_links) ||
+  firstModelslabUrlFromField(responseBody.links) ||
+  firstModelslabUrlFromField(responseBody.audio_url) ||
+  firstModelslabUrlFromField(responseBody.url);
+
+const getModelslabFetchResultUrl = (responseBody: JsonObject): string | undefined =>
+  normalizeOptionalString(responseBody.fetch_result) ||
+  normalizeOptionalString(asJsonObject(responseBody.meta).fetch_result) ||
+  normalizeOptionalString(asJsonObject(responseBody.future_links).fetch_result);
+
+const requestModelslabJson = async (
+  url: string,
+  body: JsonObject,
+  method: "GET" | "POST" = "POST"
+): Promise<JsonObject> => {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: method === "POST" ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(config.providers.v2.bgm.timeoutMs || 300_000)
+  });
+  const responseBody = (await response.json().catch(() => ({}))) as JsonObject;
+
+  if (!response.ok) {
+    throw new V2ProviderExecutionError(
+      `modelslab returned ${response.status}: ${JSON.stringify(responseBody)}`
+    );
+  }
+
+  return responseBody;
+};
+
+const pollModelslabBgmResult = async (
+  fetchResultUrl: string,
+  apiKey: string
+): Promise<JsonObject> => {
+  let lastResponse: JsonObject = {};
+
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    await sleep(attempt === 1 ? 2000 : 5000);
+    lastResponse = await requestModelslabJson(fetchResultUrl, { key: apiKey });
+    const audioUrl = getModelslabAudioUrl(lastResponse);
+    const status = normalizeOptionalString(lastResponse.status)?.toLowerCase();
+
+    if (audioUrl) {
+      return lastResponse;
+    }
+
+    if (["failed", "error", "cancelled", "canceled"].includes(status || "")) {
+      throw new V2ProviderExecutionError(
+        `modelslab bgm generation failed: ${JSON.stringify(lastResponse)}`
+      );
+    }
+  }
+
+  throw new V2ProviderExecutionError(
+    `modelslab bgm generation timed out: ${JSON.stringify(lastResponse)}`
+  );
+};
+
+const downloadModelslabBgmAudio = async (
+  audioUrl: string,
+  workDir: string
+): Promise<string> => {
+  const audioPath = path.join(
+    workDir,
+    `modelslab_bgm_${crypto.randomUUID()}${getUrlExtension(audioUrl)}`
+  );
+  const response = await fetch(audioUrl, {
+    signal: AbortSignal.timeout(config.providers.v2.bgm.timeoutMs || 300_000)
+  });
+
+  if (!response.ok) {
+    throw new V2ProviderExecutionError(
+      `failed to download modelslab bgm audio: ${response.status}`
+    );
+  }
+
+  fs.writeFileSync(audioPath, Buffer.from(await response.arrayBuffer()));
+  return audioPath;
+};
+
+const requestModelslabBgmAudio = async (
+  prompt: string,
+  durationSeconds: number,
+  workDir: string
+): Promise<JsonObject> => {
+  const providerConfig = config.providers.v2.bgm;
+  const apiKey = normalizeOptionalString(providerConfig.apiKey);
+
+  if (!providerConfig.enabled || !apiKey) {
+    throw new V2ProviderExecutionError("modelslab bgm provider is not configured");
+  }
+
+  const apiUrl = `${providerConfig.apiBaseUrl.replace(/\/$/u, "")}/${
+    providerConfig.apiPath.replace(/^\//u, "")
+  }`;
+  const requestedDurationSeconds = Math.max(30, Math.ceil(durationSeconds));
+  const isVoiceMusicGenEndpoint = /voice\/music_gen/iu.test(providerConfig.apiPath);
+  const requestBody: JsonObject = {
+    key: apiKey,
+    prompt,
+    duration: requestedDurationSeconds,
+    ...(isVoiceMusicGenEndpoint
+      ? {
+          model_id: providerConfig.model || "ai-music-generator",
+          output_format: "mp3"
+        }
+      : {
+          format: "mp3"
+        })
+  };
+  const initialResponse = await requestModelslabJson(apiUrl, requestBody);
+  const fetchResultUrl = getModelslabFetchResultUrl(initialResponse);
+  const initialStatus = normalizeOptionalString(initialResponse.status)?.toLowerCase();
+  const initialAudioUrl =
+    initialStatus === "processing" ? undefined : getModelslabAudioUrl(initialResponse);
+  const finalResponse =
+    initialAudioUrl || !fetchResultUrl
+      ? initialResponse
+      : await pollModelslabBgmResult(fetchResultUrl, apiKey);
+  const audioUrl = getModelslabAudioUrl(finalResponse);
+
+  if (!audioUrl) {
+    throw new V2ProviderExecutionError(
+      `modelslab bgm response did not include an audio url: ${JSON.stringify(
+        finalResponse
+      )}`
+    );
+  }
+
+  const audioPath = await downloadModelslabBgmAudio(audioUrl, workDir);
+
+  return {
+    status: "generated",
+    source: {
+      type: "modelslab",
+      endpoint: providerConfig.apiPath,
+      model: providerConfig.model
+    },
+    prompt,
+    requested_duration_seconds: requestedDurationSeconds,
+    audio_url: audioUrl,
+    audio_path: audioPath,
+    provider_response: finalResponse
+  };
+};
+
+const generateConfiguredBgmAudio = async (
+  prompt: string,
+  durationSeconds: number,
+  workDir: string
+): Promise<JsonObject> => {
+  const provider = config.providers.v2.bgm.provider.toLowerCase();
+
+  if (provider === "modelslab") {
+    try {
+      return await requestModelslabBgmAudio(prompt, durationSeconds, workDir);
+    } catch (error) {
+      const fallbackResult = await generateFallbackBgmAudio(
+        prompt,
+        durationSeconds,
+        workDir
+      );
+      return {
+        ...fallbackResult,
+        source: {
+          ...asJsonObject(fallbackResult.source),
+          requested_provider: "modelslab",
+          provider_error: sanitizeFallbackReason(error)
+        }
+      };
+    }
+  }
+
+  return generateFallbackBgmAudio(prompt, durationSeconds, workDir);
+};
+
 const generateFallbackBgmAudio = async (
   prompt: string,
   durationSeconds: number,
@@ -4882,7 +5115,7 @@ export const assembleV2FinalVideo = async (
           duration_seconds: finalDurationSeconds,
           audio_path: await materializeAssemblyAudio(payload.bgm_audio_uri, workDir)
         }
-      : await generateFallbackBgmAudio(bgmPrompt, finalDurationSeconds, workDir);
+      : await generateConfiguredBgmAudio(bgmPrompt, finalDurationSeconds, workDir);
     const bgmAudioPath = normalizeOptionalString(bgmGenerationResult.audio_path);
     if (!bgmAudioPath) {
       throw new V2PipelineInputError("bgm generation did not return an audio path");
