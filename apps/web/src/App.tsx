@@ -8,10 +8,16 @@ import type {
   SampleAnalysis,
   StepKey,
   StructureBlueprint,
+  V2CanvasFinalVideoResult,
+  V2FinalAssemblyResult,
   UploadedVideoFile
 } from "./types";
 
 export type WorkflowRunResult = {
+  canvasSession?: Record<string, unknown>;
+  canvasSessionId?: string;
+  finalAssembly?: V2FinalAssemblyResult;
+  finalVideo?: V2CanvasFinalVideoResult;
   materialFiles: UploadedVideoFile[];
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
@@ -77,6 +83,7 @@ export const App = () => {
           selectedBlock={selectedBlock}
           selectedBlockId={selectedBlockId}
           structureBlueprint={workflowResult?.structureBlueprint}
+          workflowResult={workflowResult}
           projectName={projectName}
           onProjectNameChange={setProjectName}
         />

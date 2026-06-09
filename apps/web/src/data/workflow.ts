@@ -82,11 +82,6 @@ export const steps = [
     description: "红黄绿匹配状态和补全策略"
   },
   {
-    key: "gap-detail",
-    label: "缺口详情",
-    description: "逐项解释缺什么、为什么缺、怎么补"
-  },
-  {
     key: "demo",
     label: "演示",
     description: "时间线预览、人工编辑和导出占位"

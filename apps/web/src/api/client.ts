@@ -1,4 +1,12 @@
-import type { SampleAnalysis, StructureBlueprint, UploadResponse, V2PipelineResult } from "../types";
+import type {
+  SampleAnalysis,
+  StructureBlueprint,
+  UploadResponse,
+  V2CanvasFinalVideoResult,
+  V2FinalAssemblyRequest,
+  V2FinalAssemblyResult,
+  V2PipelineResult
+} from "../types";
 
 type ApiErrorBody = {
   error?: {
@@ -259,6 +267,35 @@ export const generateV2ImageToVideo = async <T = unknown>(
 ): Promise<T> => {
   return toJson<T>(
     await fetch("/api/v2/generation/image-to-video", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const assembleV2FinalVideo = async (
+  payload: V2FinalAssemblyRequest
+): Promise<V2FinalAssemblyResult> => {
+  return toJson<V2FinalAssemblyResult>(
+    await fetch("/api/v2/assembly/final-video", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    })
+  );
+};
+
+export const assembleV2CanvasFinalVideo = async (
+  canvasSessionId: string,
+  payload: Omit<V2FinalAssemblyRequest, "slots">
+): Promise<V2CanvasFinalVideoResult> => {
+  return toJson<V2CanvasFinalVideoResult>(
+    await fetch(`/api/v2/canvas-sessions/${encodeURIComponent(canvasSessionId)}/final-video`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

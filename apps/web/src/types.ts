@@ -10,7 +10,6 @@ export type StepKey =
   | "analysis"
   | "migration"
   | "gap-fill"
-  | "gap-detail"
   | "demo";
 
 export type UploadedVideoFile = {
@@ -283,4 +282,44 @@ export type V2PipelineResult = {
     target_duration_seconds: number;
     notes: string;
   };
+};
+
+export type V2FinalAssemblySlot = {
+  slot_id?: string;
+  slot_type?: string;
+  video_uri: string;
+  duration_seconds: number;
+  start_seconds?: number;
+};
+
+export type V2FinalAssemblyRequest = {
+  slots: V2FinalAssemblySlot[];
+  target_duration_seconds?: number;
+  resolution?: string;
+  fps?: number;
+  background_color?: string;
+  allow_loop_short_clips?: boolean;
+  generate_bgm?: boolean;
+  bgm_prompt?: string;
+  bgm_audio_uri?: string;
+  bgm_volume?: number;
+};
+
+export type V2FinalAssemblyResult = {
+  assembly_id: string;
+  final_video_url?: string;
+  target_duration_seconds?: number;
+  planned_duration_seconds?: number;
+  final_duration_seconds?: number;
+  resolution?: string;
+  fps?: number;
+  audio_policy?: Record<string, unknown>;
+  slots?: Record<string, unknown>[];
+};
+
+export type V2CanvasFinalVideoResult = {
+  canvas_session?: Record<string, unknown>;
+  assembly_slots?: Record<string, unknown>[];
+  cover_plan?: Record<string, unknown>;
+  final_assembly?: V2FinalAssemblyResult;
 };

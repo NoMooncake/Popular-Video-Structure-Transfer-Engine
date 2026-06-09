@@ -1,9 +1,11 @@
-import { useState, useRef } from "react";
-import type { ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 
 import type { WorkflowRunResult } from "../App";
 import {
   analyzeSampleVideo,
+  assembleV2CanvasFinalVideo,
+  assembleV2FinalVideo,
   extractStructureBlueprint,
   uploadMaterialFiles,
   uploadSampleVideos
@@ -21,6 +23,7 @@ import type {
   SampleShot,
   StepKey,
   StructureBlueprint,
+  V2FinalAssemblySlot,
   UploadedVideoFile
 } from "../types";
 import { StatusBadge } from "./StatusBadge";
@@ -40,6 +43,7 @@ type WorkspaceViewsProps = {
   selectedBlock: CanvasBlock;
   selectedBlockId: string;
   structureBlueprint?: StructureBlueprint;
+  workflowResult: WorkflowRunResult | null;
   projectName: string;
   onProjectNameChange: (name: string) => void;
 };
@@ -68,11 +72,6 @@ const steps: Array<{
     key: "gap-fill",
     label: "缺口补全",
     description: "红黄绿匹配状态和补全策略"
-  },
-  {
-    key: "gap-detail",
-    label: "缺口详情",
-    description: "逐项解释缺什么、为什么缺、怎么补"
   },
   {
     key: "demo",
@@ -187,6 +186,7 @@ export const WorkspaceViews = ({
   selectedBlock,
   selectedBlockId,
   structureBlueprint,
+  workflowResult,
   projectName,
   onProjectNameChange
 }: WorkspaceViewsProps) => {
@@ -231,7 +231,7 @@ export const WorkspaceViews = ({
     return (
       <GapFillView
         blocks={blocks}
-        onNext={() => onStepChange("gap-detail")}
+        onNext={() => onStepChange("demo")}
         onSelectBlock={onSelectBlock}
         onUpdateBlock={onUpdateBlock}
         onStepChange={onStepChange}
@@ -241,18 +241,15 @@ export const WorkspaceViews = ({
     );
   }
 
-  if (activeStep === "gap-detail") {
-    return (
-      <GapDetailView
-        onNext={() => onStepChange("demo")}
-        onStepChange={onStepChange}
-        selectedBlock={selectedBlock}
-        projectName={projectName}
-      />
-    );
-  }
 
-  return <DemoView blocks={blocks} onStepChange={onStepChange} projectName={projectName} />;
+  return (
+    <DemoView
+      blocks={blocks}
+      onStepChange={onStepChange}
+      projectName={projectName}
+      workflowResult={workflowResult}
+    />
+  );
 };
 
 type HeaderProps = {
@@ -1268,81 +1265,478 @@ const GapFillView = ({
   );
 };
 
-const GapDetailView = ({
-  onNext,
+type PreviewSegment = {
+  id: string;
+  label: string;
+  thumbnail: string;
+  videoUrl?: string;
+  start: number;
+  duration: number;
+  end: number;
+  aiGenerated: boolean;
+};
+
+const previewImages = [
+  "https://www.figma.com/api/mcp/asset/7a9bb822-f69c-4344-9da9-27ec440b9d2e",
+  "https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?auto=format&fit=crop&w=1400&q=85",
+  "https://www.figma.com/api/mcp/asset/45d15bc2-c541-433f-9c4c-2a1db76e627d",
+  "https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=1400&q=85",
+  "https://www.figma.com/api/mcp/asset/27f882c5-4b54-4e3e-b9b7-811c7dfe6429"
+];
+
+const coverImageAsset = "/cover-coffee.png";
+
+const parseRangeDuration = (value: string) => {
+  const matches = value.match(/(\d+(?:\.\d+)?)/g)?.map(Number) ?? [];
+  if (matches.length >= 2 && matches[1] > matches[0]) {
+    return Number((matches[1] - matches[0]).toFixed(2));
+  }
+  return 4;
+};
+
+const getRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+
+const getString = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+const getCanvasSessionId = (result?: WorkflowRunResult | null) => {
+  if (!result) {
+    return undefined;
+  }
+  const sessionId = result.canvasSessionId || getString(getRecord(result.canvasSession).canvas_session_id);
+  return sessionId || getString(getRecord(result.canvasSession).id);
+};
+
+const getFinalVideoUrl = (result?: WorkflowRunResult | null) => {
+  return (
+    result?.finalAssembly?.final_video_url ||
+    result?.finalVideo?.final_assembly?.final_video_url ||
+    getString(getRecord(result?.finalVideo).final_video_url)
+  );
+};
+
+const downloadUrl = (url: string, filename: string) => {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+};
+
+const buildPreviewSegments = (blocks: CanvasBlock[], workflowResult?: WorkflowRunResult | null) => {
+  const finalAssembly = workflowResult?.finalAssembly ?? workflowResult?.finalVideo?.final_assembly;
+  const assemblySlots = Array.isArray(finalAssembly?.slots) ? finalAssembly.slots : [];
+  let cursor = 0;
+
+  return blocks.map((block, index): PreviewSegment => {
+    const slotRecord = getRecord(assemblySlots[index]);
+    const duration =
+      Number(slotRecord.duration_seconds) ||
+      Number((block.slot as unknown as Record<string, unknown>).required_duration) ||
+      parseRangeDuration(block.timeRange);
+    const videoUrl = getString(slotRecord.video_uri) || getString(slotRecord.final_video_url);
+    const start = cursor;
+    const aiGenerated =
+      block.timeline?.visual_source?.toLowerCase().includes("ai") ||
+      block.materialSummary.toLowerCase().includes("ai");
+
+    cursor += duration;
+
+    return {
+      id: block.id,
+      label: readableSlot(block),
+      thumbnail: getString(slotRecord.thumbnail_url) || previewImages[index % previewImages.length],
+      videoUrl,
+      start,
+      duration,
+      end: cursor,
+      aiGenerated
+    };
+  });
+};
+
+const PlayIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M8 5v14l11-7z" />
+  </svg>
+);
+
+const PauseIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M8 5v14" />
+    <path d="M16 5v14" />
+  </svg>
+);
+
+const ShareIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M12 4v10" />
+    <path d="m8 8 4-4 4 4" />
+    <path d="M5 13v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+  </svg>
+);
+
+const ChevronLeftIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="m15 18-6-6 6-6" />
+  </svg>
+);
+
+const ChevronRightIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="m9 18 6-6-6-6" />
+  </svg>
+);
+
+const DemoView = ({
+  blocks,
   onStepChange,
-  selectedBlock
+  projectName,
+  workflowResult
 }: {
-  onNext: () => void;
+  blocks: CanvasBlock[];
   onStepChange: (step: StepKey) => void;
-  selectedBlock: CanvasBlock;
   projectName?: string;
+  workflowResult?: WorkflowRunResult | null;
 }) => {
-  const gaps = selectedBlock.gap ? [selectedBlock.gap] : gapReport.gaps;
+  const segments = useMemo(
+    () => buildPreviewSegments(blocks, workflowResult),
+    [blocks, workflowResult]
+  );
+  const totalDuration = segments.at(-1)?.end ?? 0;
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [coverModalOpen, setCoverModalOpen] = useState(false);
+  const [exportMessage, setExportMessage] = useState("");
+  const [exportStatus, setExportStatus] = useState<"idle" | "exporting" | "success" | "error">("idle");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(true);
+  const [playhead, setPlayhead] = useState(0);
+  const [previewHovered, setPreviewHovered] = useState(false);
+  const [coverTitle, setCoverTitle] = useState(projectName || "一杯好咖啡 开启美好一天");
+  const [coverIntro, setCoverIntro] = useState("精选咖啡豆，匠心烘焙，香醇顺滑，回味悠长。");
+  const currentSegment = segments[activeIndex] ?? segments[0];
+  const finalVideoUrl = getFinalVideoUrl(workflowResult);
+  const finalVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setIsPreparing(false), 760);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (finalVideoUrl || !isPlaying || totalDuration <= 0) {
+      return undefined;
+    }
+
+    const timer = window.setInterval(() => {
+      setPlayhead((current) => {
+        const next = Math.min(totalDuration, Number((current + 0.1).toFixed(2)));
+        const nextIndex = segments.findIndex((segment) => next >= segment.start && next < segment.end);
+        if (nextIndex >= 0 && nextIndex !== activeIndex) {
+          setActiveIndex(nextIndex);
+        }
+        if (next >= totalDuration) {
+          setIsPlaying(false);
+        }
+        return next;
+      });
+    }, 100);
+
+    return () => window.clearInterval(timer);
+  }, [activeIndex, finalVideoUrl, isPlaying, segments, totalDuration]);
+
+  useEffect(() => {
+    const video = finalVideoRef.current;
+    if (!video) {
+      return;
+    }
+
+    if (isPlaying) {
+      void video.play().catch(() => setIsPlaying(false));
+    } else {
+      video.pause();
+    }
+  }, [isPlaying]);
+
+  const startFrom = (index: number) => {
+    const segment = segments[index];
+    if (!segment) {
+      return;
+    }
+    setActiveIndex(index);
+    setPlayhead(segment.start);
+    if (finalVideoRef.current) {
+      finalVideoRef.current.currentTime = segment.start;
+    }
+    setIsPlaying(true);
+  };
+
+  const togglePlayback = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      return;
+    }
+    if (playhead >= totalDuration) {
+      setPlayhead(currentSegment?.start ?? 0);
+      if (finalVideoRef.current) {
+        finalVideoRef.current.currentTime = currentSegment?.start ?? 0;
+      }
+    }
+    setIsPlaying(true);
+  };
+
+  const handleVideoTimeUpdate = () => {
+    const video = finalVideoRef.current;
+    if (!video) {
+      return;
+    }
+
+    const current = video.currentTime;
+    setPlayhead(current);
+    const nextIndex = segments.findIndex((segment) => current >= segment.start && current < segment.end);
+    if (nextIndex >= 0) {
+      setActiveIndex(nextIndex);
+    }
+  };
+
+  const handlePreviewKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== " " || !previewHovered) {
+      return;
+    }
+    event.preventDefault();
+    togglePlayback();
+  };
+
+  const handleGenerateCoverCopy = () => {
+    setCoverTitle(projectName ? `${projectName}，一眼心动` : "一杯好咖啡 开启美好一天");
+    setCoverIntro("用高光画面抓住第一眼，把产品卖点压缩成一句能传播的标题。");
+  };
+
+  const handleExport = async () => {
+    if (exportStatus === "exporting") {
+      return;
+    }
+
+    setExportStatus("exporting");
+    setExportMessage("");
+
+    try {
+      const canvasSessionId = getCanvasSessionId(workflowResult);
+      let exportedUrl = finalVideoUrl;
+
+      if (canvasSessionId) {
+        const result = await assembleV2CanvasFinalVideo(canvasSessionId, {
+          resolution: "1280x720",
+          fps: 24,
+          background_color: "black",
+          allow_loop_short_clips: true,
+          generate_bgm: true
+        });
+        exportedUrl = result.final_assembly?.final_video_url;
+      } else {
+        const slots: V2FinalAssemblySlot[] = segments
+          .filter((segment) => segment.videoUrl)
+          .map((segment) => ({
+            slot_id: segment.id,
+            slot_type: segment.label,
+            video_uri: segment.videoUrl ?? "",
+            duration_seconds: segment.duration,
+            start_seconds: 0
+          }));
+
+        if (slots.length === segments.length && slots.length > 0) {
+          const result = await assembleV2FinalVideo({
+            slots,
+            resolution: "1280x720",
+            fps: 24,
+            background_color: "black",
+            allow_loop_short_clips: true,
+            generate_bgm: true
+          });
+          exportedUrl = result.final_video_url;
+        } else {
+          await new Promise((resolve) => window.setTimeout(resolve, 1100));
+        }
+      }
+
+      if (exportedUrl) {
+        downloadUrl(exportedUrl, `${projectName || "shotswift"}-final.mp4`);
+      }
+
+      setExportStatus("success");
+      setExportMessage("导出成功！快去分享你的作品吧~");
+    } catch (error) {
+      setExportStatus("error");
+      setExportMessage(error instanceof Error ? error.message : "导出失败，请稍后再试。");
+    }
+  };
+
+  const progress = totalDuration > 0 ? Math.min(100, (playhead / totalDuration) * 100) : 0;
 
   return (
-    <div className="page-shell gap-detail-page">
-      <CanvasTopBar
-        actionLabel="进入演示"
-        activeStep="gap-detail"
-        onNext={onNext}
-        onStepChange={onStepChange}
-        subtitle="解释缺什么、为什么缺，以及可以通过 AI 生成、包装剪辑或素材复用如何补全。"
-        title="缺口详情"
-      />
+    <div className="preview-page">
+      <header className="preview-topbar">
+        <div className="preview-brand">
+          <span>迁镜</span>
+          <strong>{projectName || "口红广告"}</strong>
+          <i aria-hidden="true">✎</i>
+        </div>
+        <div className="figma-analysis-avatar" aria-label="用户头像" />
+      </header>
 
-      <section className="gap-detail-layout">
-        <aside className="content-card selected-block-card">
-          <div className="section-heading compact">
-            <div>
-              <span className="eyebrow">Selected</span>
-              <h2>当前视频块</h2>
-            </div>
-          </div>
-          <strong>{readableSlot(selectedBlock)}</strong>
-          <p>{readableGoal(selectedBlock)}</p>
-          <div className="detail-grid">
-            <div>
-              <span>时长</span>
-              <strong>{selectedBlock.timeRange}</strong>
-            </div>
-            <div>
-              <span>节奏</span>
-              <strong>{selectedBlock.slot.rhythm}</strong>
-            </div>
-            <div>
-              <span>状态</span>
-              <StatusBadge status={selectedBlock.status} />
-            </div>
-          </div>
+      <div className="preview-action-row">
+        <button className="preview-back-button" type="button" onClick={() => onStepChange("gap-fill")}>
+          <ChevronLeftIcon />
+          返回画布
+        </button>
+        <button className="preview-cover-button" type="button" onClick={() => setCoverModalOpen(true)}>
+          制作封面
+          <ChevronRightIcon />
+        </button>
+      </div>
+
+      <main className="preview-stage" aria-busy={isPreparing}>
+        <aside className="preview-strip" aria-label="视频片段列表">
+          {segments.map((segment, index) => (
+            <button
+              className={`preview-thumb ${index === activeIndex ? "active" : ""}`}
+              key={segment.id}
+              onClick={() => startFrom(index)}
+              type="button"
+            >
+              <img alt={segment.label} src={segment.thumbnail} />
+              {index !== activeIndex ? <span className="preview-thumb-dim" /> : null}
+              {segment.aiGenerated ? <em>AI</em> : null}
+            </button>
+          ))}
         </aside>
 
-        <div className="gap-card-list">
-          {gaps.map((gap) => (
-            <section className="content-card gap-detail-card" key={gap.gap_id}>
-              <div className="panel-heading">
-                <span>{slotLabelByType[gap.slot_type] ?? gap.slot_type}</span>
-                <strong>{gap.severity}</strong>
+        <section className="preview-main">
+          <div
+            className="preview-screen"
+            onClick={togglePlayback}
+            onKeyDown={handlePreviewKeyDown}
+            onMouseEnter={() => setPreviewHovered(true)}
+            onMouseLeave={() => setPreviewHovered(false)}
+            role="button"
+            tabIndex={0}
+          >
+            {finalVideoUrl ? (
+              <video
+                muted
+                onEnded={() => setIsPlaying(false)}
+                onTimeUpdate={handleVideoTimeUpdate}
+                ref={finalVideoRef}
+                src={finalVideoUrl}
+              />
+            ) : (
+              <img alt={currentSegment?.label ?? "视频预览"} src={currentSegment?.thumbnail ?? previewImages[0]} />
+            )}
+            {isPreparing ? (
+              <div className="preview-loading">
+                <span />
+                <strong>正在准备预览串播...</strong>
               </div>
-              <h2>{readableGapMissing(gap.gap_id, gap.missing)}</h2>
-              <p>{readableGapImpact(gap.gap_id, gap.impact)}</p>
-              <div className="fill-options">
-                {gap.fill_options.map((option) => (
-                  <article className="fill-option" key={`${gap.gap_id}-${option.type}`}>
-                    <strong>{option.type}</strong>
-                    <span>{readableFillOption(option.type, option.description)}</span>
-                  </article>
-                ))}
+            ) : (
+              <div className="preview-play-mask">
+                {isPlaying ? <PauseIcon /> : <PlayIcon />}
               </div>
-            </section>
-          ))}
+            )}
+          </div>
+
+          <div className="preview-progress" aria-label="播放进度">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+
+          <div className="preview-controls" aria-label="播放控制">
+            <button
+              aria-pressed={isPlaying}
+              className={isPlaying ? "active" : ""}
+              type="button"
+              title="播放"
+              onClick={() => setIsPlaying(true)}
+            >
+              <PlayIcon />
+            </button>
+            <button
+              aria-pressed={!isPlaying}
+              className={!isPlaying ? "active" : ""}
+              type="button"
+              title="暂停"
+              onClick={() => setIsPlaying(false)}
+            >
+              <PauseIcon />
+            </button>
+          </div>
+
+          <p className="preview-status">
+            {finalVideoUrl
+              ? "已连接最终视频结果。"
+              : "当前使用 mock 串播预览；后端返回最终视频后会自动切换为真实视频导出。"}
+          </p>
+        </section>
+      </main>
+
+      {coverModalOpen ? (
+        <div className="cover-modal" role="dialog" aria-modal="true" aria-label="封面与标题生成">
+          <div className="cover-modal-shell">
+            <button
+              aria-label="关闭封面制作"
+              className="cover-modal-close"
+              type="button"
+              onClick={() => setCoverModalOpen(false)}
+            >
+              ×
+            </button>
+            <main className="cover-modal-body">
+              <aside className="cover-prompts" aria-label="封面提示词">
+                <section className="cover-prompt-card">
+                  <p>
+                    请你扮演一位专业广告文案策划，为一款咖啡产品生成广告标题和简介。产品信息如下：
+                    品牌名：晨野咖啡。咖啡类型：低糖冷萃咖啡。目标人群：上班族、学生。
+                  </p>
+                  <button type="button" onClick={handleGenerateCoverCopy}>生成标题简介</button>
+                </section>
+                <section className="cover-prompt-card cover-prompt-card-tall">
+                  <p>
+                    请生成一张高质感咖啡广告封面图。画面主体是一杯“晨野咖啡”低糖冷萃咖啡，放置在干净的办公桌或木质桌面上，旁边有笔记本电脑、书本、阳光洒落的窗边场景，营造清晨灵感和工作效率均衡的氛围。画面风格：高级感、清爽、自然、治愈。色调：浅棕色、奶油白、暖阳金。少量深咖色。
+                  </p>
+                  <button type="button">生成封面</button>
+                </section>
+              </aside>
+
+              <section className="cover-preview-card">
+                <div className="cover-copy">
+                  <h2>{coverTitle}</h2>
+                  <p>{coverIntro}</p>
+                </div>
+                <div className="cover-art">
+                  <img alt="封面预览" src={coverImageAsset} />
+                </div>
+              </section>
+            </main>
+
+            <button
+              className={`cover-export-button ${exportStatus === "exporting" ? "loading" : ""}`}
+              type="button"
+              title="导出成品"
+              onClick={handleExport}
+            >
+              {exportStatus === "exporting" ? <span /> : <ShareIcon />}
+              导出成品
+            </button>
+            {exportMessage ? (
+              <p className={`cover-export-message ${exportStatus}`}>{exportMessage}</p>
+            ) : null}
+          </div>
         </div>
-      </section>
+      ) : null}
     </div>
   );
 };
 
-const DemoView = ({
+const LegacyDemoView = ({
   blocks,
   onStepChange
 }: {
