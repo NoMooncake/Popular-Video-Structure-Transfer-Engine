@@ -153,6 +153,8 @@ const visualSourceText: Record<string, string> = {
   user_material: "用户素材"
 };
 
+const sourceMarks = ["¹", "²", "³", "⁴", "⁵", "⁶"];
+
 const readableSlot = (block: CanvasBlock) => slotLabelByType[block.slot.slot_type] ?? block.label;
 
 const readableGoal = (block: CanvasBlock) => {
@@ -177,6 +179,17 @@ const readableSource = (source?: string) => {
   }
 
   return visualSourceText[source] ?? source;
+};
+
+const sourceReferenceMarks = (block: CanvasBlock, fallbackIndex: number) => {
+  const references = block.slot.source_evidence?.length
+    ? block.slot.source_evidence
+    : [`sample_${fallbackIndex + 1}`];
+
+  return references
+    .slice(0, 3)
+    .map((_, index) => sourceMarks[index] ?? String(index + 1))
+    .join("");
 };
 
 const toBackendCategory = (value: string) => {
@@ -272,6 +285,7 @@ export const WorkspaceViews = ({
     return (
       <FigmaSampleAnalysisView
         onNext={() => onStepChange("migration")}
+        onHome={() => onStepChange("input")}
         onWorkflowPatch={onWorkflowPatch}
         sampleAnalysis={sampleAnalysis}
         sampleFile={sampleFile}
@@ -293,6 +307,7 @@ export const WorkspaceViews = ({
         onUpdateBlock={onUpdateBlock}
         onReorderBlocks={onReorderBlocks}
         onStepChange={onStepChange}
+        onHome={() => onStepChange("input")}
         onWorkflowPatch={onWorkflowPatch}
         projectName={projectName}
         onProjectNameChange={onProjectNameChange}
@@ -844,6 +859,7 @@ type ExtraSample = {
 
 const FigmaSampleAnalysisView = ({
   onNext,
+  onHome,
   onWorkflowPatch,
   sampleAnalysis,
   sampleFile,
@@ -855,6 +871,7 @@ const FigmaSampleAnalysisView = ({
   onProjectNameChange
 }: {
   onNext: () => void;
+  onHome: () => void;
   onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
@@ -1048,7 +1065,9 @@ const FigmaSampleAnalysisView = ({
     <div className="figma-analysis-page">
       <header className="figma-analysis-topbar">
         <div className="figma-analysis-brand">
-          <span>迁镜</span>
+          <button className="figma-brand-home" onClick={onHome} type="button">
+            迁镜
+          </button>
           {isEditingTitle ? (
             <input
               autoFocus
@@ -1168,6 +1187,7 @@ const StructureMigrationView = ({
   onUpdateBlock,
   onReorderBlocks,
   onStepChange,
+  onHome,
   onWorkflowPatch,
   projectName,
   onProjectNameChange,
@@ -1178,25 +1198,22 @@ const StructureMigrationView = ({
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onReorderBlocks: (orderedIds: string[]) => void;
   onStepChange: (step: StepKey) => void;
+  onHome: () => void;
   onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   projectName?: string;
   onProjectNameChange?: (name: string) => void;
   scriptSession?: V2ScriptSession;
 }) => {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
-  const [ttsStatus, setTtsStatus] = useState<Record<string, "idle" | "loading" | "success">>({});
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [localMaterials, setLocalMaterials] = useState<Record<string, string[]>>({});
+  const [pendingMaterialBlockId, setPendingMaterialBlockId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState(projectName ?? "");
+  const materialInputRef = useRef<HTMLInputElement>(null);
 
   const title = projectName ?? "未命名项目";
-
-  const statusLabel: Record<MatchStatus, string> = {
-    matched: "已匹配",
-    partial: "AI补全",
-    missing: "待补全"
-  };
 
   const saveTitle = () => {
     if (tempTitle.trim() && onProjectNameChange) {
@@ -1205,11 +1222,27 @@ const StructureMigrationView = ({
     setIsEditingTitle(false);
   };
 
-  const handleTtsGenerate = (blockId: string) => {
-    setTtsStatus((prev) => ({ ...prev, [blockId]: "loading" }));
-    setTimeout(() => {
-      setTtsStatus((prev) => ({ ...prev, [blockId]: "success" }));
-    }, 1500);
+  const openMaterialPicker = (blockId: string) => {
+    setPendingMaterialBlockId(blockId);
+    materialInputRef.current?.click();
+  };
+
+  const handleMaterialPick = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    if (!pendingMaterialBlockId || files.length === 0) {
+      event.target.value = "";
+      return;
+    }
+
+    setLocalMaterials((prev) => ({
+      ...prev,
+      [pendingMaterialBlockId]: [
+        ...(prev[pendingMaterialBlockId] ?? []),
+        ...files.map((file) => file.name)
+      ]
+    }));
+    setPendingMaterialBlockId(null);
+    event.target.value = "";
   };
 
   const syncScriptSlot = async (
@@ -1291,7 +1324,9 @@ const StructureMigrationView = ({
     <div className="figma-analysis-page migration-page">
       <header className="figma-analysis-topbar">
         <div className="figma-analysis-brand">
-          <span>迁镜</span>
+          <button className="figma-brand-home" onClick={onHome} type="button">
+            迁镜
+          </button>
           {isEditingTitle ? (
             <input
               autoFocus
@@ -1327,7 +1362,16 @@ const StructureMigrationView = ({
         <div className="figma-analysis-avatar" aria-hidden="true" />
       </header>
 
-      <div className="migration-scroll">
+      <input
+        ref={materialInputRef}
+        type="file"
+        accept="image/*,video/*,.txt,.md"
+        multiple
+        style={{ display: "none" }}
+        onChange={handleMaterialPick}
+      />
+
+      <section className="migration-fixed-frame">
         <div className="migration-toolbar">
           <button
             type="button"
@@ -1347,24 +1391,25 @@ const StructureMigrationView = ({
             <span aria-hidden="true">›</span>
           </button>
         </div>
+      </section>
 
+      <div className="migration-scroll">
         <div className="migration-matrix-container">
           <div className="migration-matrix">
             <div className="migration-header">
-              <span className="migration-col col-thumb">迁移结果</span>
-              <span className="migration-col col-duration">时长</span>
               <span className="migration-col col-desc">分镜描述</span>
-              <span className="migration-col col-material">我的素材</span>
+              <span className="migration-col col-duration">时长</span>
               <span className="migration-col col-voiceover">旁白</span>
-              <span className="migration-col col-status">素材状态</span>
+              <span className="migration-col col-material">我的素材</span>
+              <span className="migration-col col-add">添加素材</span>
             </div>
 
             <div className="migration-rows">
               {blocks.map((block, index) => {
                 const isSelected = selectedRowId === block.id;
-                const currentTts = ttsStatus[block.id] ?? "idle";
                 const voiceoverText = block.timeline?.voiceover ?? "";
-                const materialName = materialFiles[index]?.original_filename ?? `素材 ${index + 1}`;
+                const baseMaterialName = materialFiles[index]?.original_filename ?? `素材 ${index + 1}`;
+                const materialNames = [baseMaterialName, ...(localMaterials[block.id] ?? [])];
                 const materialNote = block.timeline?.visual_description || "00:00-00:03 裁切 + 加标题字";
                 const rowClass = [
                   "migration-row",
@@ -1394,12 +1439,16 @@ const StructureMigrationView = ({
                     }}
                     onClick={() => setSelectedRowId(block.id)}
                   >
-                    {/* 迁移结果: 缩略图（只读） */}
-                    <div className="migration-col col-thumb">
-                      <div className="migration-thumb-img" />
+                    {/* 分镜描述: 只读纯文字 */}
+                    <div className="migration-col col-desc">
+                      <div className="desc-tag">
+                        <span className="desc-tag-name">{readableSlot(block)}</span>
+                        <span className="desc-tag-index">{sourceReferenceMarks(block, index)}</span>
+                      </div>
+                      <div className="desc-body">{block.migrationResult}</div>
                     </div>
 
-                    {/* 时长: 可编辑（选中时灰底） */}
+                    {/* 时长: 可编辑 */}
                     <div className="migration-col col-duration editable">
                       <input
                         type="text"
@@ -1420,24 +1469,7 @@ const StructureMigrationView = ({
                       />
                     </div>
 
-                    {/* 分镜描述: 只读纯文字 */}
-                    <div className="migration-col col-desc">
-                      <div className="desc-tag">
-                        <span className="desc-tag-name">{readableSlot(block)}</span>
-                        <span className="desc-tag-index">{index + 1}</span>
-                      </div>
-                      <div className="desc-body">{block.migrationResult}</div>
-                    </div>
-
-                    {/* 我的素材: 只读，过多时框内滚动 */}
-                    <div className="migration-col col-material">
-                      <div className="material-scroll">
-                        <div className="material-name">{materialName}</div>
-                        <div className="material-note">{materialNote}</div>
-                      </div>
-                    </div>
-
-                    {/* 旁白: 可编辑（选中时灰底）+ TTS（仅选中显示） */}
+                    {/* 旁白: 可编辑 */}
                     <div className="migration-col col-voiceover editable">
                       <textarea
                         className="migration-voiceover-input"
@@ -1470,27 +1502,34 @@ const StructureMigrationView = ({
                         placeholder="输入旁白文本..."
                         rows={2}
                       />
-                      {isSelected ? (
-                        <button
-                          type="button"
-                          className={`tts-button ${currentTts}`}
-                          onMouseDown={stopDrag}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            handleTtsGenerate(block.id);
-                          }}
-                          disabled={currentTts === "loading" || !voiceoverText}
-                        >
-                          {currentTts === "idle" && "生成语音 (TTS)"}
-                          {currentTts === "loading" && "生成中..."}
-                          {currentTts === "success" && "✓ 语音就绪"}
-                        </button>
-                      ) : null}
                     </div>
 
-                    {/* 素材状态: 只读纯文字 */}
-                    <div className="migration-col col-status">
-                      <span className="status-text">{statusLabel[block.status]}</span>
+                    {/* 我的素材: 只读，过多时框内滚动 */}
+                    <div className="migration-col col-material">
+                      <div className="material-scroll">
+                        {materialNames.map((materialName) => (
+                          <div className="material-name" key={`${block.id}-${materialName}`}>
+                            {materialName}
+                          </div>
+                        ))}
+                        <div className="material-note">{materialNote}</div>
+                      </div>
+                    </div>
+
+                    <div className="migration-col col-add">
+                      <button
+                        className="migration-add-material"
+                        type="button"
+                        aria-label="添加素材"
+                        title="添加素材"
+                        onMouseDown={stopDrag}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openMaterialPicker(block.id);
+                        }}
+                      >
+                        +
+                      </button>
                     </div>
                   </div>
                 );
