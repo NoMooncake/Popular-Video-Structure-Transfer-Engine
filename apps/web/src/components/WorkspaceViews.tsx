@@ -51,6 +51,7 @@ type WorkspaceViewsProps = {
   onWorkflowReady: (result: WorkflowRunResult) => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  sampleFiles?: UploadedVideoFile[];
   canvasSession?: V2CanvasSession;
   scriptSession?: V2ScriptSession;
   selectedBlock: CanvasBlock;
@@ -246,6 +247,7 @@ export const WorkspaceViews = ({
   onWorkflowReady,
   sampleAnalysis,
   sampleFile,
+  sampleFiles,
   canvasSession,
   scriptSession,
   selectedBlock,
@@ -272,6 +274,7 @@ export const WorkspaceViews = ({
         onNext={() => onStepChange("migration")}
         sampleAnalysis={sampleAnalysis}
         sampleFile={sampleFile}
+        sampleFiles={sampleFiles}
         structureBlueprint={structureBlueprint}
         v2PipelineResult={v2PipelineResult}
         projectName={projectName}
@@ -491,6 +494,7 @@ const InputView = ({
       onWorkflowReady({
         materialFiles: uploadedMaterials.files,
         sampleFile: uploadedSampleFile,
+        sampleFiles: uploadedSample.files,
         scriptSession,
         v2PipelineResult: pipelineResult
       });
@@ -697,16 +701,14 @@ const buildBackendSampleRows = (
   });
 };
 
-const buildV2SampleRows = (tables: V2ReferenceAnalysisTable[]): SampleAnalysisRow[] => {
-  return tables.flatMap((table) =>
-    (table.rows ?? []).map((row, index) => ({
+const buildV2SampleRows = (table: V2ReferenceAnalysisTable): SampleAnalysisRow[] => {
+  return (table.rows ?? []).map((row, index) => ({
       duration: row.duration ?? "",
-      image: row.sample_video?.media?.uri ?? figmaSampleImages[index % figmaSampleImages.length],
+      image: row.sample_video?.media?.uri ?? "",
       shotTitle: row.shot_description?.title ?? `分镜 ${index + 1}`,
       shotDescription: row.shot_description?.description ?? "",
       migrationPossibility: row.migration_possibility ?? ""
-    }))
-  );
+    }));
 };
 
 const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
@@ -846,6 +848,7 @@ const FigmaSampleAnalysisView = ({
   onNext,
   sampleAnalysis,
   sampleFile,
+  sampleFiles,
   structureBlueprint,
   v2PipelineResult,
   projectName,
@@ -854,6 +857,7 @@ const FigmaSampleAnalysisView = ({
   onNext: () => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  sampleFiles?: UploadedVideoFile[];
   structureBlueprint?: StructureBlueprint;
   v2PipelineResult?: V2PipelineResult;
   projectName: string;
@@ -864,24 +868,39 @@ const FigmaSampleAnalysisView = ({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [tempTitle, setTempTitle] = useState(projectName);
   const addSampleInputRef = useRef<HTMLInputElement>(null);
-  const v2Rows = v2PipelineResult?.stages.reference_analysis_tables
-    ? buildV2SampleRows(v2PipelineResult.stages.reference_analysis_tables)
-    : null;
-  const backendRows = v2Rows?.length
-    ? v2Rows
+  const v2Tables = v2PipelineResult?.stages.reference_analysis_tables ?? [];
+  const backendSamples = v2PipelineResult
+    ? Array.from({
+        length: Math.max(v2Tables.length, sampleFiles?.length ?? 0)
+      }, (_, index) => {
+        const table = v2Tables[index];
+        return {
+          label:
+            sampleFiles?.[index]?.original_filename ??
+            table?.source_label ??
+            `样例 ${index + 1}`,
+          rows: table ? buildV2SampleRows(table) : []
+        };
+      })
     : sampleAnalysis
-      ? buildBackendSampleRows(sampleAnalysis, structureBlueprint)
-      : null;
+      ? [
+          {
+            label: sampleFile?.original_filename ?? "口红广告",
+            rows: buildBackendSampleRows(sampleAnalysis, structureBlueprint)
+          }
+        ]
+      : [];
+  const hasBackendSamples = backendSamples.length > 0;
   const sourceLabel = projectName;
 
-  const baseSampleCount = backendRows ? 1 : 3;
+  const baseSampleCount = hasBackendSamples ? backendSamples.length : 3;
 
   const handleAddSample = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     Array.from(files).forEach((file, fileIdx) => {
-      const newIndex = baseSampleCount + extraSamples.length + fileIdx + 1;
+      const newIndex = baseSampleCount + extraSamples.length + fileIdx;
       const placeholder: ExtraSample = {
         name: file.name,
         status: "loading",
@@ -908,10 +927,15 @@ const FigmaSampleAnalysisView = ({
 
   // Determine which rows to show
   const getActiveRows = (): { rows: SampleAnalysisRow[] | null; loading: boolean; label: string } => {
-    if (backendRows && activeSample === 0) {
-      return { rows: backendRows, loading: false, label: sampleFile?.original_filename ?? "口红广告" };
+    if (hasBackendSamples) {
+      const sample = backendSamples[activeSample] ?? backendSamples[0];
+      return {
+        rows: sample.rows,
+        loading: false,
+        label: sample.label
+      };
     }
-    const extraIdx = activeSample - baseSampleCount - 1;
+    const extraIdx = activeSample - baseSampleCount;
     if (extraIdx >= 0 && extraIdx < extraSamples.length) {
       const extra = extraSamples[extraIdx];
       return {
@@ -920,6 +944,7 @@ const FigmaSampleAnalysisView = ({
         label: extra.name
       };
     }
+
     return {
       rows: sampleAnalysisTables[activeSample] ?? sampleAnalysisTables[1],
       loading: false,
@@ -986,21 +1011,21 @@ const FigmaSampleAnalysisView = ({
 
       <div className="figma-analysis-content">
         <nav className="figma-sample-nav" aria-label="样例视频">
-          {(backendRows ? [0] : [1, 2, 3]).map((sampleNumber) => (
+          {(hasBackendSamples ? backendSamples.map((_, index) => index) : [1, 2, 3]).map((sampleNumber) => (
             <button
-              className={backendRows || sampleNumber === activeSample ? "active" : ""}
+              className={sampleNumber === activeSample ? "active" : ""}
               key={sampleNumber}
               onClick={() => setActiveSample(sampleNumber)}
               type="button"
             >
-              {backendRows ? "API" : sampleNumber}
+              {hasBackendSamples ? sampleNumber + 1 : sampleNumber}
             </button>
           ))}
           {extraSamples.map((_, i) => (
             <button
-              className={activeSample === baseSampleCount + i + 1 ? "active" : ""}
+              className={activeSample === baseSampleCount + i ? "active" : ""}
               key={`extra-${i}`}
-              onClick={() => setActiveSample(baseSampleCount + i + 1)}
+              onClick={() => setActiveSample(baseSampleCount + i)}
               type="button"
             >
               {baseSampleCount + i + 1}
@@ -1037,7 +1062,7 @@ const FigmaSampleAnalysisView = ({
                     {row.duration}
                   </div>
                   <div className="sample-media-cell" role="cell">
-                    <img alt="" src={row.image} />
+                    {row.image ? <img alt="" src={row.image} /> : <PlaceholderBlock label={active.label} />}
                   </div>
                   <div className="shot-desc-cell" role="cell">
                     <strong>{row.shotTitle}</strong>

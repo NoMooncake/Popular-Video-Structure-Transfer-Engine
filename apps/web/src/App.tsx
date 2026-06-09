@@ -31,6 +31,7 @@ export type WorkflowRunResult = {
   materialFiles: UploadedVideoFile[];
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  sampleFiles?: UploadedVideoFile[];
   canvasRevalidateResult?: V2CanvasRevalidateResult;
   canvasSession?: V2CanvasSession;
   scriptSession?: V2ScriptSession;
@@ -118,6 +119,7 @@ export const App = () => {
           onWorkflowReady={setWorkflowResult}
           sampleAnalysis={workflowResult?.sampleAnalysis}
           sampleFile={workflowResult?.sampleFile}
+          sampleFiles={workflowResult?.sampleFiles}
           canvasSession={workflowResult?.canvasSession}
           scriptSession={workflowResult?.scriptSession}
           selectedBlock={selectedBlock}
