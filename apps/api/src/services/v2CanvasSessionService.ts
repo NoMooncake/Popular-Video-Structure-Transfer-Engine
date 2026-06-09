@@ -264,7 +264,8 @@ export const createV2CanvasSessionFromRevalidateResult = (
       material_candidate_pool_id: normalizeOptionalString(
         asJsonObject(revalidateResult.material_candidate_pool).candidate_pool_id
       ),
-      matching_source: normalizeOptionalString(materialCoverage.matching_source)
+      matching_source: normalizeOptionalString(materialCoverage.matching_source),
+      cover_plan: asJsonObject(revalidateResult.cover_plan)
     }
   };
 
@@ -855,6 +856,7 @@ export const assembleV2CanvasFinalVideo = async (
   return {
     canvas_session: session,
     assembly_slots: assemblySlots,
+    cover_plan: asJsonObject(session.source.cover_plan),
     final_assembly: result
   };
 };

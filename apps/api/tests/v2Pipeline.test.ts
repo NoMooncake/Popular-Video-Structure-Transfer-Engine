@@ -2144,9 +2144,30 @@ test(
     assert.equal(shortRevalidate.canvas_nodes[0]?.coverage_status, "fully_matched");
     assert.equal(shortRevalidate.cover_plan.cover_title, "冰红茶，一眼心动");
     assert.ok(Array.isArray(shortRevalidate.cover_plan.cover_copy_options));
+    assert.deepEqual(shortRevalidate.cover_plan.video_title_recommendations, [
+      "冰红茶，一眼心动",
+      "冰红茶，一口入夏",
+      "热到融化？来口冰红茶",
+      "这个夏天，就要冰红茶",
+      "冰红茶清爽时刻"
+    ]);
+    assert.deepEqual(shortRevalidate.cover_plan.video_description_recommendations, [
+      "夏天热到没电？来一口冰红茶，把清爽感拉满。",
+      "冰红茶冰爽登场，水珠、冰块和畅快口感一起唤醒夏日好心情。",
+      "从炎热到清爽，只差一口冰红茶。适合夏日聚会、通勤和休闲时刻。",
+      "这一支冰红茶短片，用冰感特写和畅饮瞬间记录夏天最想要的清爽。"
+    ]);
     assert.match(
       String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
       /冰红茶/
+    );
+    assert.doesNotMatch(
+      String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
+      /\/Users\/|\/Volumes\/|等待多模态|候选素材|进一步确认/u
+    );
+    assert.doesNotMatch(
+      String(asRecord(shortRevalidate.cover_plan.cover_image_prompt).prompt),
+      /。。/u
     );
     assert.match(
       String(asRecord(shortRevalidate.cover_plan.recommended_source).frame_uri),

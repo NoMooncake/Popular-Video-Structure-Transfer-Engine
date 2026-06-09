@@ -1260,6 +1260,27 @@ const getCoverFrame = (segment: JsonObject | undefined): JsonObject | undefined 
   return frames[Math.floor(frames.length / 2)];
 };
 
+const sanitizeCoverHeroDescription = (
+  value: unknown,
+  fallback: string,
+  productName: string
+): string => {
+  const rawValue = normalizeOptionalString(value);
+  const fallbackValue = normalizeOptionalString(fallback) || `${productName}核心视觉特写`;
+  const hasInternalState =
+    rawValue &&
+    /(?:\/Users\/|\/Volumes\/|等待多模态|候选素材|进一步确认|\.(?:mov|mp4)\b)/iu.test(
+      rawValue
+    );
+  const sourceText = hasInternalState ? fallbackValue : rawValue || fallbackValue;
+
+  return sourceText
+    .replace(/^[a-z][a-z0-9_]*[¹²³⁴⁵⁶⁷⁸⁹⁰,，]*\s*\n/iu, "")
+    .replace(/\s+/gu, " ")
+    .replace(/\s*。{2,}/gu, "。")
+    .trim();
+};
+
 const buildV2CoverPlan = (
   session: V2ScriptSession,
   materialSegments: JsonObject[],
@@ -1275,10 +1296,11 @@ const buildV2CoverPlan = (
   const coverSegment = getCoverRecommendedSegment(materialSegments, slotCoverage);
   const coverFrame = getCoverFrame(coverSegment);
   const firstSlot = session.slots[0];
-  const heroDescription =
-    normalizeOptionalString(coverSegment?.content_summary) ||
-    firstSlot?.shot_description ||
-    `${productName}核心视觉特写`;
+  const heroDescription = sanitizeCoverHeroDescription(
+    coverSegment?.content_summary,
+    firstSlot?.shot_description || `${productName}核心视觉特写`,
+    productName
+  );
   const coverTitle =
     normalizeOptionalString(session.user_request.cover_title) ||
     `${productName}，一眼心动`;
@@ -1292,12 +1314,32 @@ const buildV2CoverPlan = (
     `${productName}高光时刻`,
     `这一刻，记住${productName}`
   ];
+  const videoTitleRecommendations = Array.from(
+    new Set([
+      coverTitle,
+      `${productName}，一口入夏`,
+      `热到融化？来口${productName}`,
+      `这个夏天，就要${productName}`,
+      `${productName}清爽时刻`
+    ])
+  ).slice(0, 5);
+  const videoDescriptionRecommendations = Array.from(
+    new Set([
+      `夏天热到没电？来一口${productName}，把清爽感拉满。`,
+      `${productName}冰爽登场，水珠、冰块和畅快口感一起唤醒夏日好心情。`,
+      `从炎热到清爽，只差一口${productName}。适合夏日聚会、通勤和休闲时刻。`,
+      `这一支${productName}短片，用冰感特写和畅饮瞬间记录夏天最想要的清爽。`
+    ])
+  ).slice(0, 4);
+  const coverHeroSentence = heroDescription.replace(/[。.!！?？]+$/u, "");
 
   return {
     cover_title: coverTitle,
     cover_subtitle: coverSubtitle,
     cover_copy_options: Array.from(new Set(copyOptions)).slice(0, 4),
-    visual_direction: `${heroDescription}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。`,
+    video_title_recommendations: videoTitleRecommendations,
+    video_description_recommendations: videoDescriptionRecommendations,
+    visual_direction: `${coverHeroSentence}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。`,
     recommended_source: coverSegment
       ? {
           type: "material_segment",
@@ -1315,7 +1357,7 @@ const buildV2CoverPlan = (
       prompt_source: "deterministic_canvas_cover_plan",
       prompt: [
         `竖屏商业广告封面，主题是${productName}。`,
-        `核心画面：${heroDescription}。`,
+        `核心画面：${coverHeroSentence}。`,
         "要求主体清晰、强视觉冲击、干净高对比、适合手机首屏浏览。",
         `封面主标题文案：${coverTitle}。`,
         "画面需要给标题文字预留空间，不要出现无关品牌、无关人物或杂乱背景。"
