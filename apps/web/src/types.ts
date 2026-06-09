@@ -178,6 +178,35 @@ export type CanvasBlock = {
   slot: StructureSlot;
   gap?: GapItem;
   timeline?: TimelineItem;
+  v2?: {
+    coverageSlot?: V2MaterialCoverageSlot;
+    sourcePipelineId?: string;
+  };
+};
+
+export type V2ReferenceAnalysisTableRow = {
+  row_id?: string;
+  duration?: string;
+  sample_video?: {
+    frame_id?: string;
+    time_seconds?: number;
+    media?: {
+      uri?: string;
+      mime_type?: string;
+    };
+  };
+  shot_description?: {
+    title?: string;
+    description?: string;
+  };
+  migration_possibility?: string;
+};
+
+export type V2ReferenceAnalysisTable = {
+  sample_index?: number;
+  file_id?: string;
+  source_label?: string;
+  rows?: V2ReferenceAnalysisTableRow[];
 };
 
 export type V2MaterialCoverageSlot = {
@@ -258,6 +287,7 @@ export type V2PipelineResult = {
   };
   stages: {
     reference_video_analyses: unknown[];
+    reference_analysis_tables?: V2ReferenceAnalysisTable[];
     user_material_analysis: Record<string, unknown>;
     fillable_architecture: Record<string, unknown>;
     material_coverage: {

@@ -2,20 +2,28 @@ import { useEffect, useMemo, useState } from "react";
 
 import { AppShell } from "./components/AppShell";
 import { WorkspaceViews } from "./components/WorkspaceViews";
-import { canvasBlocks as fallbackCanvasBlocks, createCanvasBlocks } from "./data/workflow";
+import {
+  canvasBlocks as fallbackCanvasBlocks,
+  createCanvasBlocks,
+  createCanvasBlocksFromV2Pipeline
+} from "./data/workflow";
 import type {
   CanvasBlock,
   SampleAnalysis,
   StepKey,
   StructureBlueprint,
-  UploadedVideoFile
+  UploadedVideoFile,
+  V2PipelineResult
 } from "./types";
+import type { V2ScriptSession } from "./api/client";
 
 export type WorkflowRunResult = {
   materialFiles: UploadedVideoFile[];
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
+  scriptSession?: V2ScriptSession;
   structureBlueprint?: StructureBlueprint;
+  v2PipelineResult?: V2PipelineResult;
 };
 
 export const App = () => {
@@ -26,6 +34,11 @@ export const App = () => {
   const [projectName, setProjectName] = useState("未命名项目 01");
 
   useEffect(() => {
+    if (workflowResult?.v2PipelineResult) {
+      setBlocks(createCanvasBlocksFromV2Pipeline(workflowResult.v2PipelineResult));
+      return;
+    }
+
     if (workflowResult?.structureBlueprint) {
       setBlocks(createCanvasBlocks(workflowResult.structureBlueprint));
     }
@@ -77,6 +90,7 @@ export const App = () => {
           selectedBlock={selectedBlock}
           selectedBlockId={selectedBlockId}
           structureBlueprint={workflowResult?.structureBlueprint}
+          v2PipelineResult={workflowResult?.v2PipelineResult}
           projectName={projectName}
           onProjectNameChange={setProjectName}
         />
