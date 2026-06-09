@@ -405,7 +405,6 @@ const InputView = ({
     "idle" | "uploading" | "analyzing" | "extracting" | "success" | "error"
   >("idle");
   const [sampleFiles, setSampleFiles] = useState<File[]>([]);
-  const [targetTopic] = useState("宠物用品 / 猫粮"); // Kept for backend call
   const [showModal, setShowModal] = useState(false);
 
   const isRunning = ["uploading", "analyzing", "extracting"].includes(pipelineStatus);
@@ -465,9 +464,7 @@ const InputView = ({
           ...textAssets
         ],
         user_request: {
-          goal: brief,
-          product_name: targetTopic,
-          style_preferences: [toBackendCategory(targetTopic)]
+          goal: brief
         },
         options: {
           allow_fallback: true,
@@ -479,8 +476,7 @@ const InputView = ({
       const scriptSession = await createV2ScriptSession({
         pipeline_result: pipelineResult,
         user_request: {
-          goal: brief,
-          product_name: targetTopic
+          goal: brief
         },
         target_duration_seconds: pipelineResult.summary.target_duration_seconds
       });

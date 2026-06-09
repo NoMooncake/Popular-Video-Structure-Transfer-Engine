@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { storageConfig } from "../config/storage.js";
+import { findUploadedVideoById } from "../services/uploadService.js";
 import { runFFmpeg, runFFprobe } from "../utils/ffmpeg.js";
 import type { V2VideoRef } from "./types.js";
 
@@ -32,6 +33,24 @@ const isLocalVideoPath = (value: string | undefined): value is string => {
       /\.(mp4|mov|avi|wmv|webm|m4v)(?:[?#].*)?$/iu.test(value) &&
       fs.existsSync(value)
   );
+};
+
+const extractFileIdFromUploadUri = (uri: string | undefined): string | undefined => {
+  if (!uri) {
+    return undefined;
+  }
+
+  const match = uri.match(/\/api\/upload\/files\/([^/?#]+)/u);
+  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
+};
+
+const resolveLocalVideoPath = (videoRef: V2VideoRef): string | undefined => {
+  if (isLocalVideoPath(videoRef.uri)) {
+    return videoRef.uri;
+  }
+
+  const fileId = videoRef.file_id || extractFileIdFromUploadUri(videoRef.uri);
+  return fileId ? findUploadedVideoById(fileId) : undefined;
 };
 
 const ensureOutputDir = (): string => {
@@ -116,7 +135,14 @@ export const collectV2ReferenceFramesFromVideos = async (
     return [];
   }
 
-  const localVideos = videoRefs.filter((videoRef) => isLocalVideoPath(videoRef.uri));
+  const localVideos = videoRefs
+    .map((videoRef) => ({
+      ...videoRef,
+      uri: resolveLocalVideoPath(videoRef)
+    }))
+    .filter((videoRef): videoRef is V2VideoRef & { uri: string } =>
+      isLocalVideoPath(videoRef.uri)
+    );
   if (localVideos.length === 0) {
     return [];
   }
