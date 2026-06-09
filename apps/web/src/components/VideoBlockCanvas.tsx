@@ -128,10 +128,10 @@ export const VideoBlockCanvas = ({
   const [candidateSeeds, setCandidateSeeds] = useState<Record<string, number>>({});
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const suppressNextPlayRef = useRef(false);
   const dragRef = useRef<{
     blockId: string;
     didMove: boolean;
+    startedOnPlay: boolean;
     startX: number;
     startY: number;
     startLeft: number;
@@ -307,6 +307,7 @@ export const VideoBlockCanvas = ({
 
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>, blockId: string) => {
     const target = event.target as HTMLElement;
+    const startedOnPlay = Boolean(target.closest(".figma-play-overlay"));
     if (target.closest("button:not(.figma-play-overlay), input, textarea")) {
       return;
     }
@@ -318,6 +319,7 @@ export const VideoBlockCanvas = ({
     dragRef.current = {
       blockId,
       didMove: false,
+      startedOnPlay,
       startX: event.clientX,
       startY: event.clientY,
       startLeft: current.x,
@@ -362,20 +364,22 @@ export const VideoBlockCanvas = ({
       return;
     }
 
-    const { blockId, didMove } = dragRef.current;
+    const { blockId, didMove, startedOnPlay } = dragRef.current;
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragRef.current = null;
     setIsDragging(false);
 
     if (didMove) {
-      suppressNextPlayRef.current = true;
-      window.setTimeout(() => {
-        suppressNextPlayRef.current = false;
-      }, 0);
       return;
     }
 
     onSelectBlock(blockId);
+    if (startedOnPlay) {
+      setActiveEditorBlockId(null);
+      setPlaybackBlockId(blockId);
+      return;
+    }
+
     const blockIndex = blocks.findIndex((block) => block.id === blockId);
     const block = blocks[blockIndex];
     const status = block ? getCanvasStatus(block, blockIndex) : null;
@@ -633,11 +637,13 @@ export const VideoBlockCanvas = ({
                           <button
                             type="button"
                             className="figma-play-overlay"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              if (suppressNextPlayRef.current) {
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") {
                                 return;
                               }
+                              event.preventDefault();
+                              event.stopPropagation();
                               setPlaybackBlockId(block.id);
                             }}
                             title="播放视频"
