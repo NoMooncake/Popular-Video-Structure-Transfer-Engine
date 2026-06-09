@@ -1502,7 +1502,7 @@ input {
 .figma-analysis-row {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
   min-height: 240px;
 }
 
@@ -1519,6 +1519,7 @@ input {
 
 .figma-analysis-head {
   min-height: 46px;
+  align-items: center;
 }
 
 .figma-analysis-row > div {
@@ -1545,15 +1546,17 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 240px;
+  min-height: 240px;
   padding: 0 4px;
 }
 
 .sample-media-cell {
   width: 300px;
   flex-shrink: 0;
-  height: 240px;
+  min-height: 240px;
   padding: 8px;
+  display: flex;
+  align-items: center;
 }
 
 .sample-media-cell img {
@@ -1571,8 +1574,9 @@ input {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 240px;
-  padding: 0 4px;
+  min-height: 240px;
+  padding: 16px 4px;
+  overflow-wrap: anywhere;
 }
 
 .shot-desc-cell strong {
@@ -1581,7 +1585,7 @@ input {
   font-weight: 400;
   line-height: 1.5;
   transition: color 0.2s ease;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .figma-analysis-row:not(.figma-analysis-head):hover .shot-desc-cell strong {
@@ -1600,8 +1604,9 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 240px;
-  padding: 0 8px;
+  min-height: 240px;
+  padding: 16px 8px;
+  overflow-wrap: anywhere;
 }
 
 .figma-analysis-loading {

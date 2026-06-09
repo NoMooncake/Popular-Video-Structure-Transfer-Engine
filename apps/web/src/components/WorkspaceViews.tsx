@@ -272,9 +272,11 @@ export const WorkspaceViews = ({
     return (
       <FigmaSampleAnalysisView
         onNext={() => onStepChange("migration")}
+        onWorkflowPatch={onWorkflowPatch}
         sampleAnalysis={sampleAnalysis}
         sampleFile={sampleFile}
         sampleFiles={sampleFiles}
+        workflowResult={workflowResult}
         structureBlueprint={structureBlueprint}
         v2PipelineResult={v2PipelineResult}
         projectName={projectName}
@@ -842,18 +844,22 @@ type ExtraSample = {
 
 const FigmaSampleAnalysisView = ({
   onNext,
+  onWorkflowPatch,
   sampleAnalysis,
   sampleFile,
   sampleFiles,
+  workflowResult,
   structureBlueprint,
   v2PipelineResult,
   projectName,
   onProjectNameChange
 }: {
   onNext: () => void;
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   sampleAnalysis?: SampleAnalysis;
   sampleFile?: UploadedVideoFile;
   sampleFiles?: UploadedVideoFile[];
+  workflowResult: WorkflowRunResult | null;
   structureBlueprint?: StructureBlueprint;
   v2PipelineResult?: V2PipelineResult;
   projectName: string;
@@ -891,11 +897,91 @@ const FigmaSampleAnalysisView = ({
 
   const baseSampleCount = hasBackendSamples ? backendSamples.length : 3;
 
-  const handleAddSample = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const getCurrentGoal = (): string => {
+    const scriptGoal = workflowResult?.scriptSession?.user_request.goal;
+    return typeof scriptGoal === "string" && scriptGoal.trim()
+      ? scriptGoal
+      : projectName;
+  };
+
+  const handleAddSample = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((file, fileIdx) => {
+    const selectedFiles = Array.from(files);
+    e.target.value = "";
+
+    if (v2PipelineResult) {
+      const firstNewIndex = baseSampleCount + extraSamples.length;
+      setExtraSamples((prev) => [
+        ...prev,
+        ...selectedFiles.map((file) => ({
+          name: file.name,
+          status: "loading" as const,
+          rows: []
+        }))
+      ]);
+      setActiveSample(firstNewIndex);
+
+      try {
+        const uploadedSample = await uploadSampleVideos(selectedFiles);
+        const nextSampleFiles = [...(sampleFiles ?? []), ...uploadedSample.files];
+        const goal = getCurrentGoal();
+        const pipelineResult = await analyzeV2Pipeline({
+          reference_file_ids: nextSampleFiles.map((file) => file.file_id),
+          user_material_file_ids: workflowResult?.materialFiles.map((file) => file.file_id) ?? [],
+          text_assets: [
+            {
+              asset_id: "brief_01",
+              type: "brief",
+              content: goal
+            }
+          ],
+          user_request: {
+            goal
+          },
+          options: {
+            allow_fallback: true,
+            generate_image_candidates: false,
+            image_candidate_count: 4,
+            target_duration_seconds: v2PipelineResult.summary.target_duration_seconds
+          }
+        });
+        const scriptSession = await createV2ScriptSession({
+          pipeline_result: pipelineResult,
+          user_request: {
+            goal
+          },
+          target_duration_seconds: pipelineResult.summary.target_duration_seconds
+        });
+
+        onWorkflowPatch({
+          sampleFile: nextSampleFiles[0],
+          sampleFiles: nextSampleFiles,
+          scriptSession,
+          v2PipelineResult: pipelineResult,
+          canvasRevalidateResult: undefined,
+          canvasSession: undefined,
+          finalAssembly: undefined,
+          finalVideo: undefined
+        });
+        setExtraSamples([]);
+        setActiveSample(Math.max(0, nextSampleFiles.length - 1));
+      } catch (error) {
+        console.warn("Failed to add v2 sample video.", error);
+        setExtraSamples((prev) =>
+          prev.map((sample, index) =>
+            index >= prev.length - selectedFiles.length
+              ? { ...sample, status: "done" as const, rows: [] }
+              : sample
+          )
+        );
+      }
+
+      return;
+    }
+
+    selectedFiles.forEach((file, fileIdx) => {
       const newIndex = baseSampleCount + extraSamples.length + fileIdx;
       const placeholder: ExtraSample = {
         name: file.name,
@@ -917,20 +1003,10 @@ const FigmaSampleAnalysisView = ({
         );
       }, 1500);
     });
-
-    e.target.value = "";
   };
 
   // Determine which rows to show
   const getActiveRows = (): { rows: SampleAnalysisRow[] | null; loading: boolean; label: string } => {
-    if (hasBackendSamples) {
-      const sample = backendSamples[activeSample] ?? backendSamples[0];
-      return {
-        rows: sample.rows,
-        loading: false,
-        label: sample.label
-      };
-    }
     const extraIdx = activeSample - baseSampleCount;
     if (extraIdx >= 0 && extraIdx < extraSamples.length) {
       const extra = extraSamples[extraIdx];
@@ -938,6 +1014,15 @@ const FigmaSampleAnalysisView = ({
         rows: extra.status === "done" ? extra.rows : null,
         loading: extra.status === "loading",
         label: extra.name
+      };
+    }
+
+    if (hasBackendSamples) {
+      const sample = backendSamples[activeSample] ?? backendSamples[0];
+      return {
+        rows: sample.rows,
+        loading: false,
+        label: sample.label
       };
     }
 
