@@ -9,6 +9,7 @@ import {
   reorderV2ScriptSlots,
   updateV2ScriptSlot,
   uploadMaterialFiles,
+  uploadV2ScriptSlotMaterials,
   uploadSampleVideos
 } from "../api/client";
 import {
@@ -1318,20 +1319,38 @@ const StructureMigrationView = ({
     materialInputRef.current?.click();
   };
 
-  const handleMaterialPick = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleMaterialPick = async (event: ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(event.target.files ?? []);
-    if (!pendingMaterialBlockId || files.length === 0) {
+    const targetBlockId = pendingMaterialBlockId;
+    if (!targetBlockId || files.length === 0) {
       event.target.value = "";
       return;
     }
 
     setLocalMaterials((prev) => ({
       ...prev,
-      [pendingMaterialBlockId]: [
-        ...(prev[pendingMaterialBlockId] ?? []),
+      [targetBlockId]: [
+        ...(prev[targetBlockId] ?? []),
         ...files.map((file) => file.name)
       ]
     }));
+    if (scriptSession) {
+      try {
+        const response = await uploadV2ScriptSlotMaterials(
+          scriptSession.session_id,
+          targetBlockId,
+          files
+        );
+        onWorkflowPatch({
+          scriptSession: response.script_session,
+          canvasRevalidateResult: undefined,
+          canvasSession: undefined
+        });
+      } catch (error) {
+        console.warn("V2 script slot material upload failed.", error);
+      }
+    }
+
     setPendingMaterialBlockId(null);
     event.target.value = "";
   };

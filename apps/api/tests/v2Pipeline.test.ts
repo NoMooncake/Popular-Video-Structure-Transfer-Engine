@@ -2712,7 +2712,7 @@ test(
 );
 
 test(
-  "v2 canvas material allocation does not reuse one source video across slots",
+  "v2 canvas material allocation reuses one source video across non-overlapping ranges",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {
     const fileId = createUploadedTestVideo(8);
@@ -2792,10 +2792,18 @@ test(
     assert.equal(firstCoverage.coverage_status, "covered");
     assert.equal(firstCoverage.matched_material_duration, 4);
     assert.equal(asRecordArray(firstCoverage.assigned_segments).length, 1);
-    assert.equal(secondCoverage.coverage_status, "missing");
-    assert.equal(secondCoverage.matched_material_duration, 0);
-    assert.equal(asRecordArray(secondCoverage.assigned_segments).length, 0);
-    assert.equal(secondCoverage.missing_duration, 4);
+    assert.equal(secondCoverage.coverage_status, "covered");
+    assert.equal(secondCoverage.matched_material_duration, 4);
+    assert.equal(asRecordArray(secondCoverage.assigned_segments).length, 1);
+    assert.equal(secondCoverage.missing_duration, 0);
+
+    const firstAssignedSegment = asRecord(asRecordArray(firstCoverage.assigned_segments)[0]);
+    const secondAssignedSegment = asRecord(asRecordArray(secondCoverage.assigned_segments)[0]);
+    const firstSourceOut = Number(firstAssignedSegment.source_out_seconds);
+    const secondSourceIn = Number(secondAssignedSegment.source_in_seconds);
+    assert.equal(firstAssignedSegment.file_id, fileId);
+    assert.equal(secondAssignedSegment.file_id, fileId);
+    assert.ok(secondSourceIn >= firstSourceOut);
   }
 );
 

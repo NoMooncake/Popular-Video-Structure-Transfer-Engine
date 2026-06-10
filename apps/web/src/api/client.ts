@@ -2,6 +2,7 @@ import type {
   SampleAnalysis,
   StructureBlueprint,
   UploadResponse,
+  UploadedVideoFile,
   V2FinalAssemblyRequest,
   V2FinalAssemblyResult,
   V2MaterialCoverageSlot,
@@ -411,6 +412,30 @@ export const reorderV2ScriptSlots = async (
       body: JSON.stringify({
         slot_ids: slotIds
       })
+    })
+  );
+};
+
+export const uploadV2ScriptSlotMaterials = async (
+  sessionId: string,
+  slotId: string,
+  files: File[]
+): Promise<{
+  files: UploadedVideoFile[];
+  script_session: V2ScriptSession;
+}> => {
+  const formData = new FormData();
+  for (const file of files) {
+    formData.append("files", file);
+  }
+
+  return toJson<{
+    files: UploadedVideoFile[];
+    script_session: V2ScriptSession;
+  }>(
+    await fetch(`/api/v2/script-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/materials/upload`, {
+      method: "POST",
+      body: formData
     })
   );
 };

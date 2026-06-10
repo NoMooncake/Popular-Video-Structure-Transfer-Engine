@@ -835,7 +835,12 @@ const isSegmentUsableForSlot = (segment: JsonObject, slot: V2ScriptSlot): boolea
 
 const makeSegmentAssignment = (
   segment: JsonObject,
-  matchedDuration: number
+  matchedDuration: number,
+  allocatedRange?: {
+    source_in_seconds: number;
+    source_out_seconds: number;
+    duration_seconds: number;
+  }
 ): JsonObject => ({
   segment_id: segment.segment_id,
   source_material_id: segment.source_material_id,
@@ -844,8 +849,18 @@ const makeSegmentAssignment = (
   label: segment.label,
   material_assigned_at: segment.material_assigned_at,
   slot_material_order_index: segment.slot_material_order_index,
-  source_in_seconds: segment.final_source_in_seconds ?? segment.source_in_seconds,
-  source_out_seconds: segment.final_source_out_seconds ?? segment.source_out_seconds,
+  source_in_seconds:
+    allocatedRange?.source_in_seconds ??
+    segment.final_source_in_seconds ??
+    segment.source_in_seconds,
+  source_out_seconds:
+    allocatedRange?.source_out_seconds ??
+    segment.final_source_out_seconds ??
+    segment.source_out_seconds,
+  final_source_in_seconds:
+    allocatedRange?.source_in_seconds ?? segment.final_source_in_seconds,
+  final_source_out_seconds:
+    allocatedRange?.source_out_seconds ?? segment.final_source_out_seconds,
   matched_material_duration: matchedDuration,
   quality_score: segment.quality_score,
   visual_tags: segment.visual_tags,
@@ -930,6 +945,13 @@ type MaterialAllocationState = {
   usedRangesByKey: Map<string, UsedMaterialRange[]>;
 };
 
+type MaterialRange = {
+  source_in_seconds: number;
+  source_out_seconds: number;
+  duration_seconds: number;
+  reused?: boolean;
+};
+
 const getSegmentFinalRange = (
   segment: JsonObject
 ): { source_in_seconds: number; source_out_seconds: number; duration_seconds: number } => {
@@ -960,30 +982,92 @@ const materialRangesOverlap = (
   return overlapSeconds > 0.05;
 };
 
-const isSegmentRangeAvailable = (
+const findAvailableSegmentRange = (
   segment: JsonObject,
-  slot: V2ScriptSlot,
-  allocationState: MaterialAllocationState
-): boolean => {
+  allocationState: MaterialAllocationState,
+  requestedDuration: number
+): MaterialRange | undefined => {
   const materialKey = getSegmentPhysicalMaterialKey(segment);
-  const usedRanges = allocationState.usedRangesByKey.get(materialKey) || [];
   const segmentRange = getSegmentFinalRange(segment);
+  if (requestedDuration <= 0 || segmentRange.duration_seconds <= 0) {
+    return undefined;
+  }
 
-  return !usedRanges.some((usedRange) => materialRangesOverlap(segmentRange, usedRange));
+  const usedRanges = [...(allocationState.usedRangesByKey.get(materialKey) || [])].sort(
+    (left, right) => left.source_in_seconds - right.source_in_seconds
+  );
+  const minAllocatableDuration = 0.05;
+  let cursor = segmentRange.source_in_seconds;
+  const segmentEnd = segmentRange.source_out_seconds;
+  const buildRange = (start: number, end: number): MaterialRange | undefined => {
+    const availableDuration = Number((end - start).toFixed(3));
+    if (availableDuration <= minAllocatableDuration) {
+      return undefined;
+    }
+
+    const duration = Number(Math.min(requestedDuration, availableDuration).toFixed(3));
+    if (duration <= minAllocatableDuration) {
+      return undefined;
+    }
+
+    return {
+      source_in_seconds: Number(start.toFixed(3)),
+      source_out_seconds: Number((start + duration).toFixed(3)),
+      duration_seconds: duration
+    };
+  };
+
+  for (const usedRange of usedRanges) {
+    if (usedRange.source_out_seconds <= cursor + minAllocatableDuration) {
+      continue;
+    }
+
+    const gapEnd = Math.min(usedRange.source_in_seconds, segmentEnd);
+    const availableRange = buildRange(cursor, gapEnd);
+    if (availableRange) {
+      return availableRange;
+    }
+
+    if (materialRangesOverlap(segmentRange, usedRange)) {
+      cursor = Math.max(cursor, usedRange.source_out_seconds);
+      if (cursor >= segmentEnd - minAllocatableDuration) {
+        break;
+      }
+    }
+  }
+
+  const tailRange = buildRange(cursor, segmentEnd);
+  if (tailRange) {
+    return tailRange;
+  }
+
+  const reusedDuration = Number(
+    Math.min(requestedDuration, segmentRange.duration_seconds).toFixed(3)
+  );
+  if (reusedDuration <= minAllocatableDuration) {
+    return undefined;
+  }
+
+  return {
+    source_in_seconds: Number(segmentRange.source_in_seconds.toFixed(3)),
+    source_out_seconds: Number((segmentRange.source_in_seconds + reusedDuration).toFixed(3)),
+    duration_seconds: reusedDuration,
+    reused: true
+  };
 };
 
 const markSegmentRangeUsed = (
   slot: V2ScriptSlot,
   segment: JsonObject,
-  allocationState: MaterialAllocationState
+  allocationState: MaterialAllocationState,
+  allocatedRange: MaterialRange
 ): void => {
   const materialKey = getSegmentPhysicalMaterialKey(segment);
   const usedRanges = allocationState.usedRangesByKey.get(materialKey) || [];
-  const segmentRange = getSegmentFinalRange(segment);
 
   usedRanges.push({
-    source_in_seconds: segmentRange.source_in_seconds,
-    source_out_seconds: segmentRange.source_out_seconds,
+    source_in_seconds: allocatedRange.source_in_seconds,
+    source_out_seconds: allocatedRange.source_out_seconds,
     slot_id: slot.slot_id,
     segment_id: normalizeOptionalString(segment.segment_id)
   });
@@ -1068,38 +1152,37 @@ const allocateSegmentsForSlot = (
       return;
     }
 
-    if (!isSegmentRangeAvailable(segment, slot, allocationState)) {
-      return;
-    }
-
     const remainingSegmentDuration = remainingBySegmentId.get(segmentId) || 0;
     if (remainingSegmentDuration <= 0) {
       return;
     }
 
-    const matchedDuration = Number(
+    const requestedDuration = Number(
       Math.min(requiredRemaining, remainingSegmentDuration, maxDuration ?? Number.POSITIVE_INFINITY)
         .toFixed(3)
     );
+    const allocatedRange = findAvailableSegmentRange(
+      segment,
+      allocationState,
+      requestedDuration
+    );
+    if (!allocatedRange) {
+      return;
+    }
+
+    const matchedDuration = allocatedRange.duration_seconds;
     if (matchedDuration <= 0) {
       return;
     }
 
-    const existingAssignment = assignedSegments.find(
-      (assignment) => normalizeOptionalString(assignment.segment_id) === segmentId
-    );
-    if (existingAssignment) {
-      existingAssignment.matched_material_duration = Number(
-        (getNumber(existingAssignment.matched_material_duration) + matchedDuration).toFixed(3)
-      );
-    } else {
-      assignedSegments.push({
-        ...makeSegmentAssignment(segment, matchedDuration),
-        allocation_policy: "coherent_non_overlapping_material_range",
-        physical_material_key: getSegmentPhysicalMaterialKey(segment)
-      });
-      markSegmentRangeUsed(slot, segment, allocationState);
-    }
+    assignedSegments.push({
+      ...makeSegmentAssignment(segment, matchedDuration, allocatedRange),
+      allocation_policy: allocatedRange.reused
+        ? "coherent_reused_material_range"
+        : "coherent_non_overlapping_material_range",
+      physical_material_key: getSegmentPhysicalMaterialKey(segment)
+    });
+    markSegmentRangeUsed(slot, segment, allocationState, allocatedRange);
     remainingBySegmentId.set(
       segmentId,
       Number((remainingSegmentDuration - matchedDuration).toFixed(3))
@@ -1213,7 +1296,7 @@ const buildSegmentAwareMaterialCoverage = (
   const allocationState: MaterialAllocationState = {
     usedRangesByKey: new Map<string, UsedMaterialRange[]>()
   };
-  const slotCoverage = session.slots.map((slot) => {
+  const slotCoverageInputs = session.slots.map((slot) => {
     const base =
       baseCoverageByKey.get(slot.slot_id) ||
       baseCoverageByKey.get(slot.slot_type) ||
@@ -1222,12 +1305,48 @@ const buildSegmentAwareMaterialCoverage = (
       .filter((segment) => isSegmentUsableForSlot(asJsonObject(segment), slot))
       .map(asJsonObject)
       .sort(compareCandidateSegments);
-    const assignedSegments = allocateSegmentsForSlot(
-      slot,
-      candidateSegments,
-      allocationState
-    );
 
+    return {
+      slot,
+      base,
+      candidateSegments
+    };
+  });
+  const assignedSegmentsBySlotId = new Map<string, JsonObject[]>();
+  const allocationInputs = [...slotCoverageInputs].sort((left, right) => {
+    const leftMaterialCount = new Set(
+      left.candidateSegments.map((segment) => getSegmentPhysicalMaterialKey(segment))
+    ).size;
+    const rightMaterialCount = new Set(
+      right.candidateSegments.map((segment) => getSegmentPhysicalMaterialKey(segment))
+    ).size;
+    if (leftMaterialCount !== rightMaterialCount) {
+      return leftMaterialCount - rightMaterialCount;
+    }
+
+    const leftCandidateDuration = left.candidateSegments.reduce(
+      (total, segment) => total + getSegmentFinalDuration(segment),
+      0
+    );
+    const rightCandidateDuration = right.candidateSegments.reduce(
+      (total, segment) => total + getSegmentFinalDuration(segment),
+      0
+    );
+    if (leftCandidateDuration !== rightCandidateDuration) {
+      return leftCandidateDuration - rightCandidateDuration;
+    }
+
+    return left.slot.display_order - right.slot.display_order;
+  });
+  for (const input of allocationInputs) {
+    assignedSegmentsBySlotId.set(
+      input.slot.slot_id,
+      allocateSegmentsForSlot(input.slot, input.candidateSegments, allocationState)
+    );
+  }
+
+  const slotCoverage = slotCoverageInputs.map(({ slot, base, candidateSegments }) => {
+    const assignedSegments = assignedSegmentsBySlotId.get(slot.slot_id) || [];
     const matchedMaterialDuration = Number(
       assignedSegments
         .reduce((total, segment) => total + getNumber(segment.matched_material_duration), 0)
@@ -1348,7 +1467,7 @@ const buildSegmentAwareMaterialCoverage = (
       ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
       minimum_ai_completion_gap_seconds: minimumAiCompletionGapSeconds,
       material_reuse_policy: {
-        mode: "single_slot_per_source_video",
+        mode: "prefer_non_overlapping_source_ranges_with_reuse_fallback",
         physical_material_keys_seen_so_far: Array.from(allocationState.usedRangesByKey.keys())
       },
       ai_completion_required_duration:
