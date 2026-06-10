@@ -543,10 +543,57 @@ test("v2 material coverage does not use reference copywriting as target voiceove
   const firstSlot = asRecord(coverage.slot_coverage[0]);
   const frontendDisplay = asRecord(firstSlot.frontend_display);
 
-  assert.equal(firstSlot.voiceover_text, "液体吸油神器，这一段重点看产品主视觉亮相。");
-  assert.equal(frontendDisplay.copy, "液体吸油神器，这一段重点看产品主视觉亮相。");
+  assert.equal(firstSlot.voiceover_text, "液体吸油神器登场，把清爽感直接拉满。");
+  assert.equal(frontendDisplay.copy, "液体吸油神器登场，把清爽感直接拉满。");
   assert.notEqual(firstSlot.voiceover_text, "样例视频原始旁白");
   assert.notEqual(frontendDisplay.copy, "样例视频原始旁白");
+});
+
+test("v2 material coverage fallback voiceover does not expose request text or slot keys", async () => {
+  const normalized = {
+    reference_videos: [],
+    reference_file_ids: [],
+    user_materials: [],
+    user_material_file_ids: [],
+    text_assets: [],
+    user_request: {
+      goal: "生成一个冰红茶宣传视频大约12秒"
+    },
+    options: {
+      image_candidate_count: 4,
+      generate_image_candidates: false,
+      target_duration_seconds: 12,
+      allow_fallback: true
+    }
+  } satisfies Required<V2PipelineRequest>;
+
+  const coverage = await buildV2DeterministicMaterialCoverage(
+    normalized,
+    {
+      slots: [
+        {
+          slot_id: "slot_02",
+          slot_type: "pain_point_scene",
+          duration_seconds: 1.6,
+          source_reference_indices: [1]
+        }
+      ]
+    },
+    {
+      material_analysis: {
+        material_segments: []
+      }
+    },
+    []
+  );
+
+  const firstSlot = asRecord(coverage.slot_coverage[0]);
+  const frontendDisplay = asRecord(firstSlot.frontend_display);
+
+  assert.equal(firstSlot.voiceover_text, "热到没精神时，就想来一口真正清爽的冰红茶。");
+  assert.equal(frontendDisplay.copy, "热到没精神时，就想来一口真正清爽的冰红茶。");
+  assert.ok(!String(firstSlot.voiceover_text).includes("生成一个冰红茶宣传视频"));
+  assert.ok(!String(firstSlot.voiceover_text).includes("pain_point_scene"));
 });
 
 test(
@@ -637,11 +684,11 @@ test(
     assert.equal(coverage.slot_coverage[0]?.frontend_coverage_label, "完全匹配");
     assert.deepEqual(asRecord(coverage.slot_coverage[0]?.frontend_display), {
       migration_result_title: "强视觉开场",
-      migration_result_description: "先用一句话抓住注意力，突出生成 10 秒广告最直接的吸引点。",
+      migration_result_description: "用一句短促有冲击力的开场，突出这个产品的清爽吸引力。",
       duration_text: "3s",
       shot_description: "待补充分镜描述",
       material_summary: "ice_tea_material_01 3s",
-      copy: "生成 10 秒广告，开场先把最想解决的问题说出来。",
+      copy: "这个产品，冰爽一口，马上痛快。",
       material_status: "完全匹配",
       add_material_button: {
         visible: true,

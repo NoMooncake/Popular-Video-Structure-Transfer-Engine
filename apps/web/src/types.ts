@@ -254,6 +254,8 @@ export type V2MaterialCoverageSlot = {
   slot_id: string;
   slot_type: string;
   slot_name?: string;
+  source_reference_indices?: number[];
+  source_reference_superscript?: string;
   visual_goal?: string;
   copy_direction?: string;
   voiceover_text?: string;
@@ -276,6 +278,8 @@ export type V2MaterialCoverageSlot = {
     material_summary?: string;
     copy?: string;
     material_status?: string;
+    source_reference_indices?: number[];
+    source_reference_superscript?: string;
   };
   user_duration_short_decision?: "pending" | "accepted_as_sufficient" | "not_applicable";
   ai_completion_required_duration?: number;

@@ -129,6 +129,77 @@ const normalizeStringArray = (value: unknown): string[] => {
     .filter((item): item is string => Boolean(item));
 };
 
+const cleanProductLabel = (value: string): string => {
+  const cleaned = value
+    .replace(/^开始一次分镜迁移[:：]*/u, "")
+    .replace(/^我想基于.*?生成一[条个]?/u, "")
+    .replace(/^(?:我想|请|帮我)?(?:生成|制作|做|产出|剪辑)一?[个条支]?/u, "")
+    .replace(/(?:大约|约|左右)?\d+(?:\.\d+)?\s*(?:秒|s|S).*$/u, "")
+    .replace(/(?:短视频|视频|广告|宣传片|宣传)$/u, "")
+    .replace(/[“”"']/gu, "")
+    .replace(/[，。,.、：:；;！!？?]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+
+  return cleaned || "这个产品";
+};
+
+const getRequestProductLabel = (normalized: Required<V2PipelineRequest>): string => {
+  const explicitProduct = normalizeOptionalString(normalized.user_request.product_name);
+  if (explicitProduct) {
+    return cleanProductLabel(explicitProduct);
+  }
+
+  const goal = normalizeOptionalString(normalized.user_request.goal);
+  if (!goal) {
+    return "这个产品";
+  }
+
+  const quotedTopic = goal.match(/[“"]([^”"]{2,30})[”"]/u)?.[1];
+  if (quotedTopic) {
+    return cleanProductLabel(quotedTopic);
+  }
+
+  const generatedTopic = goal.match(
+    /(?:生成|制作|做|产出|剪辑)一?[个条支]?([^，。,.、]{2,30}?)(?:短视频|视频|广告|宣传片)/u
+  )?.[1];
+
+  return cleanProductLabel(generatedTopic || goal);
+};
+
+const getSlotCopyFocus = (
+  slotType: string,
+  slotName: string | undefined,
+  visualGoal: string | undefined
+): string => {
+  const explicitFocus = normalizeOptionalString(visualGoal) || normalizeOptionalString(slotName);
+  if (explicitFocus && !/[a-z]+_[a-z_]+/iu.test(explicitFocus)) {
+    return explicitFocus;
+  }
+
+  if (/pain|problem|需求|痛点/iu.test(slotType)) {
+    return "清爽解渴的需求场景";
+  }
+
+  if (/hero|product|亮相|产品/iu.test(slotType)) {
+    return "产品清爽亮相";
+  }
+
+  if (/proof|selling|卖点|证明/iu.test(slotType)) {
+    return "核心卖点";
+  }
+
+  if (/usage|process|使用|动作/iu.test(slotType)) {
+    return "畅饮场景";
+  }
+
+  if (/compare|effect|效果|对比/iu.test(slotType)) {
+    return "使用前后的感受变化";
+  }
+
+  return "这一段产品卖点";
+};
+
 const normalizeVideoRefs = (
   explicitRefs: unknown,
   fileIds: unknown,
@@ -2383,23 +2454,22 @@ const getFallbackSlotCopyDirection = (
   slotName: string | undefined,
   visualGoal: string | undefined
 ): string => {
-  const productOrGoal =
-    normalized.user_request.product_name || normalized.user_request.goal || "目标产品";
-  const focus = (visualGoal || slotName || slotType).replace(/\s+/gu, " ").trim();
+  const product = getRequestProductLabel(normalized);
+  const focus = getSlotCopyFocus(slotType, slotName, visualGoal);
 
   if (/hook/iu.test(slotType)) {
-    return `先用一句话抓住注意力，突出${productOrGoal}最直接的吸引点。`;
+    return `用一句短促有冲击力的开场，突出${product}的清爽吸引力。`;
   }
 
   if (/cta|action/iu.test(slotType)) {
-    return `收束卖点并引导观众继续了解${productOrGoal}。`;
+    return `收束卖点并引导观众继续了解${product}。`;
   }
 
   if (focus) {
     return `突出${focus}，让观众快速理解这一段的产品卖点。`;
   }
 
-  return `围绕${productOrGoal}补一句简短旁白，服务当前分镜节奏。`;
+  return `围绕${product}补一句简短旁白，服务当前分镜节奏。`;
 };
 
 const getFallbackSlotVoiceoverText = (
@@ -2409,29 +2479,46 @@ const getFallbackSlotVoiceoverText = (
   visualGoal: string | undefined,
   copyDirection: string | undefined
 ): string => {
-  const productOrGoal =
-    normalized.user_request.product_name || normalized.user_request.goal || "目标产品";
+  const product = getRequestProductLabel(normalized);
   const audience = normalized.user_request.target_audience;
   const mustInclude = normalizeStringArray(normalized.user_request.must_include).slice(0, 2);
-  const focus = (visualGoal || copyDirection || slotName || slotType)
-    .replace(/\s+/gu, " ")
-    .trim();
+  const focus = getSlotCopyFocus(slotType, slotName, visualGoal || copyDirection);
   const audienceText = audience ? `，给${audience}` : "";
   const includeText = mustInclude.length > 0 ? `，重点讲清${mustInclude.join("、")}` : "";
 
   if (/hook/iu.test(slotType)) {
-    return `${productOrGoal}${audienceText}，开场先把最想解决的问题说出来${includeText}。`;
+    return `${product}${audienceText}，冰爽一口，马上痛快${includeText}。`;
   }
 
   if (/cta|action/iu.test(slotType)) {
-    return `想要这类效果，就从${productOrGoal}开始了解${includeText}。`;
+    return `想要清爽痛快，就从${product}开始${includeText}。`;
+  }
+
+  if (/pain|problem|需求|痛点/iu.test(slotType)) {
+    return `热到没精神时，就想来一口真正清爽的${product}${includeText}。`;
+  }
+
+  if (/hero|product|亮相|产品/iu.test(slotType)) {
+    return `${product}登场，把清爽感直接拉满${includeText}。`;
+  }
+
+  if (/proof|selling|卖点|证明/iu.test(slotType)) {
+    return `看得见的冰爽，喝得到的痛快${includeText}。`;
+  }
+
+  if (/usage|process|使用|动作/iu.test(slotType)) {
+    return `随时开喝，把清爽带在身边${includeText}。`;
+  }
+
+  if (/compare|effect|效果|对比/iu.test(slotType)) {
+    return `前后感受一对比，清爽变化看得见${includeText}。`;
   }
 
   if (focus) {
-    return `${productOrGoal}${audienceText}，这一段重点看${focus}${includeText}。`;
+    return `${product}${audienceText}，这一段讲清${focus}${includeText}。`;
   }
 
-  return `${productOrGoal}${audienceText}，用一句清楚的旁白补齐这一段卖点${includeText}。`;
+  return `${product}${audienceText}，用一句清楚的旁白补齐这一段卖点${includeText}。`;
 };
 
 const formatFrontendMaterialSummary = (

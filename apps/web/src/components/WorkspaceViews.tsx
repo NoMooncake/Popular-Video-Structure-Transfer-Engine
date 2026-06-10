@@ -257,15 +257,48 @@ const getBlockMaterialNames = (block: CanvasBlock): string[] => {
     });
 };
 
-const sourceReferenceMarks = (block: CanvasBlock, fallbackIndex: number) => {
-  const references = block.slot.source_evidence?.length
-    ? block.slot.source_evidence
-    : [`sample_${fallbackIndex + 1}`];
+const getScriptSlotMaterialSummary = (
+  block: CanvasBlock,
+  scriptSession?: V2ScriptSession
+): string[] => {
+  const scriptSlot = scriptSession?.slots.find((slot) => slot.slot_id === block.id);
+  const materials = scriptSlot?.materials ?? [];
+  if (materials.length === 0) {
+    return [];
+  }
 
-  return references
-    .slice(0, 3)
-    .map((_, index) => sourceMarks[index] ?? String(index + 1))
-    .join("");
+  if (materials.length === 1) {
+    const material = materials[0];
+    return [`${material.label || material.material_id || material.file_id || "素材"} 待节选`];
+  }
+
+  return [`${materials.length} 条素材待节选`];
+};
+
+const sourceReferenceMarks = (block: CanvasBlock, fallbackIndex: number) => {
+  const superscript =
+    block.v2?.coverageSlot?.frontend_display?.source_reference_superscript ||
+    block.v2?.coverageSlot?.source_reference_superscript ||
+    block.slot.source_evidence?.find((item) => /^[¹²³⁴⁵⁶]+$/u.test(item));
+  if (superscript) {
+    return superscript;
+  }
+
+  const referenceIndices =
+    block.v2?.coverageSlot?.frontend_display?.source_reference_indices ||
+    block.v2?.coverageSlot?.source_reference_indices ||
+    block.slot.source_evidence
+      ?.map((item) => Number(item.match(/\d+/u)?.[0]))
+      .filter((value) => Number.isFinite(value) && value > 0);
+
+  if (referenceIndices?.length) {
+    return referenceIndices
+      .slice(0, 3)
+      .map((value) => sourceMarks[value - 1] ?? String(value))
+      .join("");
+  }
+
+  return sourceMarks[fallbackIndex] ?? String(fallbackIndex + 1);
 };
 
 const toBackendCategory = (value: string) => {
@@ -1480,8 +1513,12 @@ const StructureMigrationView = ({
               {blocks.map((block, index) => {
                 const isSelected = selectedRowId === block.id;
                 const voiceoverText = block.timeline?.voiceover ?? "";
+                const clippedMaterialNames = getBlockMaterialNames(block);
                 const materialNames = [
-                  ...getBlockMaterialNames(block),
+                  ...clippedMaterialNames,
+                  ...(clippedMaterialNames.length === 0
+                    ? getScriptSlotMaterialSummary(block, scriptSession)
+                    : []),
                   ...(localMaterials[block.id] ?? [])
                 ];
                 const rowClass = [

@@ -161,14 +161,91 @@ const normalizeV2Copy = (value: string | undefined): string | undefined => {
     return undefined;
   }
 
+  if (
+    /(?:生成|制作|做)一?[个条支]?.{0,24}(?:视频|短视频|广告)/u.test(trimmed) ||
+    /这一段重点看突出/u.test(trimmed) ||
+    /[a-z]+_[a-z_]+/iu.test(trimmed)
+  ) {
+    return undefined;
+  }
+
   return trimmed;
+};
+
+const inferV2ProductLabel = (slot: V2MaterialCoverageSlot): string => {
+  const sourceText = [
+    slot.visual_goal,
+    slot.frontend_display?.shot_description,
+    slot.frontend_display?.material_summary,
+    slot.gap_reason
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  if (sourceText.includes("冰红茶")) {
+    return "冰红茶";
+  }
+
+  const productMatch = sourceText.match(/([\u4e00-\u9fa5A-Za-z0-9]{2,16})(?:瓶身|产品|包装|登场|亮相)/u)?.[1];
+  return productMatch || "这个产品";
+};
+
+const getV2FallbackCopy = (slot: V2MaterialCoverageSlot): string => {
+  const product = inferV2ProductLabel(slot);
+  const slotType = slot.slot_type;
+
+  if (/hook/iu.test(slotType)) {
+    return `${product}，冰爽一口，马上痛快。`;
+  }
+
+  if (/pain|problem|需求|痛点/iu.test(slotType)) {
+    return `热到没精神时，就想来一口真正清爽的${product}。`;
+  }
+
+  if (/hero|product|亮相|产品/iu.test(slotType)) {
+    return `${product}登场，把清爽感直接拉满。`;
+  }
+
+  if (/proof|selling|卖点|证明/iu.test(slotType)) {
+    return "看得见的冰爽，喝得到的痛快。";
+  }
+
+  if (/usage|process|使用|动作/iu.test(slotType)) {
+    return "随时开喝，把清爽带在身边。";
+  }
+
+  if (/compare|effect|效果|对比/iu.test(slotType)) {
+    return "前后感受一对比，清爽变化看得见。";
+  }
+
+  if (/cta|action/iu.test(slotType)) {
+    return `想要清爽痛快，就从${product}开始。`;
+  }
+
+  return "";
 };
 
 const getV2Copy = (slot: V2MaterialCoverageSlot): string =>
   normalizeV2Copy(slot.frontend_display?.copy) ||
   normalizeV2Copy(slot.voiceover_text) ||
   normalizeV2Copy(slot.caption_text) ||
-  "";
+  getV2FallbackCopy(slot);
+
+const getV2SourceReferenceEvidence = (slot: V2MaterialCoverageSlot): string[] => {
+  const superscript =
+    slot.frontend_display?.source_reference_superscript ||
+    slot.source_reference_superscript;
+  if (superscript) {
+    return [superscript];
+  }
+
+  const indices =
+    slot.frontend_display?.source_reference_indices ||
+    slot.source_reference_indices ||
+    [];
+
+  return indices.map((index) => `sample_${index}`);
+};
 
 const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] => ({
   slot_id: slot.slot_id,
@@ -189,11 +266,7 @@ const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] =>
     slot.frontend_display?.shot_description ??
     slot.visual_goal ??
     getV2SlotLabel(slot),
-  source_evidence: [
-    slot.frontend_display?.material_status,
-    slot.frontend_coverage_label,
-    slot.gap_reason
-  ].filter((item): item is string => Boolean(item)),
+  source_evidence: getV2SourceReferenceEvidence(slot),
   confidence: 0.8
 });
 
