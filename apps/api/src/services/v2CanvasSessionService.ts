@@ -8,6 +8,7 @@ import {
   assembleV2FinalVideo,
   generateV2ImageCandidates,
   generateV2ImageToVideo,
+  getV2VideoGenerationTask,
   reviewAndTrimV2GeneratedVideo,
   V2PipelineInputError
 } from "./v2PipelineService.js";
@@ -75,6 +76,9 @@ const getNumber = (value: unknown, fallback = 0): number => {
   const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue : fallback;
 };
+
+const wait = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 const sanitizeId = (value: string): string => {
   const normalizedValue = value.replace(/[^a-zA-Z0-9_-]/gu, "");
@@ -442,6 +446,14 @@ export const generateV2CanvasImageCandidates = async (
       }
     });
   });
+  for (const imageCandidateNode of imageCandidateNodes) {
+    upsertEdge(session, {
+      edge_id: makeNodeId(imageCandidateNode.node_id, "to", missingNode.node_id),
+      source_node_id: imageCandidateNode.node_id,
+      target_node_id: missingNode.node_id,
+      edge_type: "image_to_gap"
+    });
+  }
 
   session.updated_at = new Date().toISOString();
   saveCanvasSession(session);
@@ -497,6 +509,65 @@ const getSourceVideoUriForMissingNode = (missingNode: V2CanvasNode): string | un
   return undefined;
 };
 
+const getVideoGenerationTaskId = (value: JsonObject): string | undefined =>
+  normalizeOptionalString(value.id) ||
+  normalizeOptionalString(value.task_id) ||
+  normalizeOptionalString(asJsonObject(value.data).id) ||
+  normalizeOptionalString(asJsonObject(value.data).task_id);
+
+const getVideoGenerationStatus = (value: JsonObject): string | undefined =>
+  normalizeOptionalString(value.status) ||
+  normalizeOptionalString(asJsonObject(value.data).status);
+
+const isVideoGenerationFailureStatus = (status: string | undefined): boolean =>
+  Boolean(status && /^(?:failed|error|canceled|cancelled)$/iu.test(status));
+
+const isVideoGenerationCompleteStatus = (status: string | undefined): boolean =>
+  Boolean(status && /^(?:succeeded|success|completed|complete|done)$/iu.test(status));
+
+const waitForCanvasGeneratedVideo = async (
+  generationResult: JsonObject,
+  payload: JsonObject
+): Promise<JsonObject> => {
+  const taskId = getVideoGenerationTaskId(generationResult);
+  if (!taskId || payload.wait_for_completion === false) {
+    return generationResult;
+  }
+
+  if (getGeneratedVideoUri(generationResult)) {
+    return generationResult;
+  }
+
+  const maxAttempts = Math.max(1, getNumber(payload.poll_attempts, 72));
+  const intervalMs = Math.max(1000, getNumber(payload.poll_interval_ms, 5000));
+  let latestResult = generationResult;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    await wait(intervalMs);
+    latestResult = await getV2VideoGenerationTask(taskId);
+
+    const status = getVideoGenerationStatus(latestResult);
+    if (isVideoGenerationFailureStatus(status)) {
+      throw new V2PipelineInputError(`video generation task failed: ${status}`);
+    }
+
+    if (getGeneratedVideoUri(latestResult)) {
+      return latestResult;
+    }
+
+    if (isVideoGenerationCompleteStatus(status)) {
+      throw new V2PipelineInputError(
+        `video generation task completed without a video URL: ${taskId}`
+      );
+    }
+  }
+
+  throw new V2PipelineInputError(
+    `video generation task did not complete before timeout: ${taskId}`,
+    504
+  );
+};
+
 export const generateV2CanvasGapVideo = async (
   canvasSessionId: string,
   payload: JsonObject
@@ -518,7 +589,9 @@ export const generateV2CanvasGapVideo = async (
     normalizeOptionalString(imageCandidateNode?.data.uri) ||
     normalizeOptionalString(imageCandidateNode?.data.url) ||
     normalizeOptionalString(imageCandidateNode?.data.image_url);
-  const sourceVideoUri = imageUri ? undefined : getSourceVideoUriForMissingNode(missingNode);
+  const sourceVideoUri = imageUri
+    ? undefined
+    : normalizeOptionalString(payload.source_video_uri) || getSourceVideoUriForMissingNode(missingNode);
   if (!imageUri && !sourceVideoUri) {
     throw new V2PipelineInputError(
       "gap video generation requires a connected image candidate or an existing material reference"
@@ -533,7 +606,7 @@ export const generateV2CanvasGapVideo = async (
     normalizeOptionalString(missingNode.data.slot_description) ||
     normalizeOptionalString(missingNode.data.visual_description) ||
     normalizeOptionalString(missingNode.data.description);
-  const generationResult = await generateV2ImageToVideo({
+  const submittedGenerationResult = await generateV2ImageToVideo({
     video_prompt: videoPrompt,
     approved_image_uri: imageUri,
     source_video_uri: sourceVideoUri,
@@ -547,6 +620,8 @@ export const generateV2CanvasGapVideo = async (
     allow_fallback: payload.allow_fallback === true,
     use_video_provider: payload.use_video_provider !== false
   });
+  const generationResult = await waitForCanvasGeneratedVideo(submittedGenerationResult, payload);
+  const generatedVideoUri = getGeneratedVideoUri(generationResult);
   const generatedVideoNode = upsertNode(session, {
     node_id: makeNodeId(
       missingNode.slot_id || "slot",
@@ -566,7 +641,10 @@ export const generateV2CanvasGapVideo = async (
       target_duration_seconds: gapDurationSeconds,
       slot_type: slotType,
       slot_description: slotDescription,
+      submitted_generation_result: submittedGenerationResult,
       generation_result: generationResult,
+      video_uri: generatedVideoUri,
+      usable_video_uri: generatedVideoUri,
       created_at: new Date().toISOString()
     }
   });
@@ -589,6 +667,9 @@ export const generateV2CanvasGapVideo = async (
 
 const getGeneratedVideoUri = (value: JsonObject): string | undefined => {
   const directUri =
+    normalizeOptionalString(value.final_video_url) ||
+    normalizeOptionalString(value.trimmed_video_url) ||
+    normalizeOptionalString(value.usable_video_uri) ||
     normalizeOptionalString(value.video_uri) ||
     normalizeOptionalString(value.video_url) ||
     normalizeOptionalString(value.url) ||
@@ -599,6 +680,9 @@ const getGeneratedVideoUri = (value: JsonObject): string | undefined => {
 
   const data = asJsonObject(value.data);
   const nestedDirectUri =
+    normalizeOptionalString(data.final_video_url) ||
+    normalizeOptionalString(data.trimmed_video_url) ||
+    normalizeOptionalString(data.usable_video_uri) ||
     normalizeOptionalString(data.video_uri) ||
     normalizeOptionalString(data.video_url) ||
     normalizeOptionalString(data.url) ||
@@ -607,8 +691,23 @@ const getGeneratedVideoUri = (value: JsonObject): string | undefined => {
     return nestedDirectUri;
   }
 
+  const content = asJsonObject(value.content);
+  const contentUri =
+    normalizeOptionalString(content.final_video_url) ||
+    normalizeOptionalString(content.trimmed_video_url) ||
+    normalizeOptionalString(content.usable_video_uri) ||
+    normalizeOptionalString(content.video_uri) ||
+    normalizeOptionalString(content.video_url) ||
+    normalizeOptionalString(content.url);
+  if (contentUri) {
+    return contentUri;
+  }
+
   const generationResult = asJsonObject(value.generation_result);
   return (
+    normalizeOptionalString(generationResult.final_video_url) ||
+    normalizeOptionalString(generationResult.trimmed_video_url) ||
+    normalizeOptionalString(generationResult.usable_video_uri) ||
     normalizeOptionalString(generationResult.video_uri) ||
     normalizeOptionalString(generationResult.video_url) ||
     normalizeOptionalString(generationResult.url) ||

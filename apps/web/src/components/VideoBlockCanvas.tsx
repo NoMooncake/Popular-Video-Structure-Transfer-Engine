@@ -248,11 +248,13 @@ const extractGeneratedVideoUri = (response: unknown): string | undefined => {
   const record = asRecord(response);
   const output = asRecord(record.output);
   const data = asRecord(record.data);
+  const content = asRecord(record.content);
 
   return (
-    getStringField(record, ["video_uri", "uri", "url", "video_url"]) ||
-    getStringField(output, ["video_uri", "uri", "url", "video_url"]) ||
-    getStringField(data, ["video_uri", "uri", "url", "video_url"])
+    getStringField(record, ["usable_video_uri", "final_video_url", "trimmed_video_url", "video_uri", "uri", "url", "video_url"]) ||
+    getStringField(output, ["usable_video_uri", "final_video_url", "trimmed_video_url", "video_uri", "uri", "url", "video_url"]) ||
+    getStringField(data, ["usable_video_uri", "final_video_url", "trimmed_video_url", "video_uri", "uri", "url", "video_url"]) ||
+    getStringField(content, ["usable_video_uri", "final_video_url", "trimmed_video_url", "video_uri", "uri", "url", "video_url"])
   );
 };
 
@@ -936,8 +938,12 @@ export const VideoBlockCanvas = ({
     const sourceVideoUri = block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri;
     const fallbackImage =
       keyframeCandidates[block.id]?.[0] ?? materialImageForBlock(block) ?? imageForBlock(block, index);
+    const generatedKeyframe = keyframeCandidates[block.id]?.[0];
     const payload: VideoGenerationPayload = {
-      keyframe_image: selectedKeyframes[block.id] ?? (sourceVideoUri ? undefined : fallbackImage),
+      keyframe_image:
+        selectedKeyframes[block.id] ??
+        generatedKeyframe ??
+        (sourceVideoUri ? undefined : fallbackImage),
       source_video_uri: sourceVideoUri,
       video_prompt: videoPrompt
     };
@@ -956,10 +962,13 @@ export const VideoBlockCanvas = ({
 
       const response: unknown = await generateV2CanvasGapVideo(canvasSessionId, {
         approved_image_uri: payload.keyframe_image,
+        source_video_uri: payload.source_video_uri,
         duration_seconds: durationSeconds,
         slot_id: getBackendSlotId(block),
         missing_node_id: getMissingNodeId(block),
         video_prompt: payload.video_prompt,
+        auto_trim_review: true,
+        wait_for_completion: true,
         allow_fallback: false
       });
       if (hasCanvasSession(response)) {

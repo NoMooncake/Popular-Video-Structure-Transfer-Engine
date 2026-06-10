@@ -462,9 +462,12 @@ export const generateV2CanvasGapVideo = async (
     slot_id: string;
     missing_node_id?: string;
     approved_image_uri?: string;
+    source_video_uri?: string;
     video_prompt?: string;
     duration_seconds?: number;
+    auto_trim_review?: boolean;
     allow_fallback?: boolean;
+    wait_for_completion?: boolean;
     use_video_provider?: boolean;
   }
 ): Promise<V2CanvasGapVideoResponse> => {
