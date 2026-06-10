@@ -339,6 +339,11 @@ export const WorkspaceViews = ({
   if (activeStep === "input") {
     return (
       <InputView
+        hasExistingCanvas={Boolean(
+          workflowResult?.canvasSession ||
+            workflowResult?.canvasSessionId ||
+            workflowResult?.canvasRevalidateResult
+        )}
         onNext={() => onStepChange("analysis")}
         onStepChange={onStepChange}
         onWorkflowReady={onWorkflowReady}
@@ -470,11 +475,13 @@ const CanvasTopBar = ({
 };
 
 const InputView = ({
+  hasExistingCanvas,
   onNext,
   onStepChange,
   onWorkflowReady,
   projectName
 }: {
+  hasExistingCanvas: boolean;
   onNext: () => void;
   onStepChange: (step: StepKey) => void;
   onWorkflowReady: (result: WorkflowRunResult) => void;
@@ -519,7 +526,11 @@ const InputView = ({
       const result = await runVideoAnalysisWorkflow({
         brief,
         materialFiles,
-        sampleFiles
+        sampleFiles,
+        onProgress: (progress) => {
+          setPipelineStatus(progress.stage);
+          setPipelineNote(progress.note);
+        }
       });
 
       setPipelineStatus("success");
@@ -567,7 +578,7 @@ const InputView = ({
           {isRunning ? (
             <div className="upload-loading-inline" role="status" aria-live="polite">
               <span aria-hidden="true" />
-              正在上传
+              {pipelineNote}
             </div>
           ) : null}
 
@@ -646,14 +657,27 @@ const InputView = ({
         <section className="canvas-section">
           <h3>现有画布</h3>
           <div className="existing-canvases-scroll">
-            {homeCanvasPlaceholderImages.map((src, i) => (
-              <article className="canvas-card canvas-card-placeholder" key={i}>
-                <img src={src} alt="Canvas placeholder" />
-                <div className="canvas-card-title">
-                  {["Canvas广告", "TF口红", "Vlog"][i] ?? `画布 ${i + 1}`}
-                </div>
-              </article>
-            ))}
+            {homeCanvasPlaceholderImages.map((src, i) => {
+              const title = hasExistingCanvas && i === 0
+                ? projectName || "未命名项目"
+                : ["Canvas广告", "TF口红", "Vlog"][i] ?? `画布 ${i + 1}`;
+              const cardContent = (
+                <>
+                  <img src={src} alt="Canvas placeholder" />
+                  <div className="canvas-card-title">{title}</div>
+                </>
+              );
+
+              return hasExistingCanvas && i === 0 ? (
+                <button className="canvas-card" key={i} onClick={() => onStepChange("gap-fill")} type="button">
+                  {cardContent}
+                </button>
+              ) : (
+                <article className="canvas-card canvas-card-placeholder" key={i}>
+                  {cardContent}
+                </article>
+              );
+            })}
           </div>
         </section>
       </main>

@@ -6,7 +6,8 @@ import {
   canvasBlocks as fallbackCanvasBlocks,
   createCanvasBlocks,
   createCanvasBlocksFromV2Coverage,
-  createCanvasBlocksFromV2Pipeline
+  createCanvasBlocksFromV2Pipeline,
+  mergeV2ScriptSessionIntoBlocks
 } from "./data/workflow";
 import type {
   CanvasBlock,
@@ -49,16 +50,24 @@ export const App = () => {
   useEffect(() => {
     if (workflowResult?.canvasRevalidateResult) {
       setBlocks(
-        createCanvasBlocksFromV2Coverage(
-          workflowResult.canvasRevalidateResult.material_coverage.slot_coverage,
-          workflowResult.canvasRevalidateResult.canvas_session_id
+        mergeV2ScriptSessionIntoBlocks(
+          createCanvasBlocksFromV2Coverage(
+            workflowResult.canvasRevalidateResult.material_coverage.slot_coverage,
+            workflowResult.canvasRevalidateResult.canvas_session_id
+          ),
+          workflowResult.scriptSession
         )
       );
       return;
     }
 
     if (workflowResult?.v2PipelineResult) {
-      setBlocks(createCanvasBlocksFromV2Pipeline(workflowResult.v2PipelineResult));
+      setBlocks(
+        mergeV2ScriptSessionIntoBlocks(
+          createCanvasBlocksFromV2Pipeline(workflowResult.v2PipelineResult),
+          workflowResult.scriptSession
+        )
+      );
       return;
     }
 
@@ -67,6 +76,7 @@ export const App = () => {
     }
   }, [
     workflowResult?.canvasRevalidateResult,
+    workflowResult?.scriptSession,
     workflowResult?.structureBlueprint,
     workflowResult?.v2PipelineResult
   ]);

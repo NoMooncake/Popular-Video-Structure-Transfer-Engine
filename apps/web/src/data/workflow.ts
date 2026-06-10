@@ -12,9 +12,11 @@ import type {
   StructureBlueprint,
   TimelineItem,
   TimelinePlan,
+  V2MaterialAssignment,
   V2MaterialCoverageSlot,
   V2PipelineResult
 } from "../types";
+import type { V2ScriptSession } from "../api/client";
 
 export const structureBlueprint = structureBlueprintJson as StructureBlueprint;
 export const gapReport = gapReportJson as GapReport;
@@ -296,6 +298,59 @@ export const createCanvasBlocksFromV2Pipeline = (
   pipelineResult.stages.material_coverage.slot_coverage,
   pipelineResult.id
 );
+
+export const mergeV2ScriptSessionIntoBlocks = (
+  blocks: CanvasBlock[],
+  scriptSession?: V2ScriptSession
+): CanvasBlock[] => {
+  if (!scriptSession) {
+    return blocks;
+  }
+
+  const scriptSlotById = new Map(scriptSession.slots.map((slot) => [slot.slot_id, slot]));
+
+  return blocks.map((block) => {
+    const scriptSlot = scriptSlotById.get(block.id);
+    if (!scriptSlot || scriptSlot.materials.length === 0 || !block.v2?.coverageSlot) {
+      return block;
+    }
+
+    const assignedMaterials = [
+      ...(block.v2.coverageSlot.assigned_materials ?? []),
+      ...scriptSlot.materials.map((material): V2MaterialAssignment => ({
+        material_id: material.material_id,
+        file_id: material.file_id,
+        uri: material.uri,
+        label: material.label
+      }))
+    ];
+    const seen = new Set<string>();
+    const dedupedMaterials = assignedMaterials.filter((material) => {
+      const key = [
+        material.material_id,
+        material.source_material_id,
+        material.file_id,
+        material.uri
+      ].join(":");
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+
+    return {
+      ...block,
+      v2: {
+        ...block.v2,
+        coverageSlot: {
+          ...block.v2.coverageSlot,
+          assigned_materials: dedupedMaterials
+        }
+      }
+    };
+  });
+};
 
 export const canvasBlocks: CanvasBlock[] = createCanvasBlocks(structureBlueprint);
 
