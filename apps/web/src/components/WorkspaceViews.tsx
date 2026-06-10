@@ -203,15 +203,15 @@ const formatMaterialTimeRange = (material: V2MaterialAssignment): string => {
     : "";
 };
 
-const isDisplayableMaterialSegment = (material: V2MaterialAssignment): boolean => {
-  const start = material.source_in_seconds ?? material.start_seconds;
-  const end = material.source_out_seconds ?? material.end_seconds;
-  const hasTimeRange =
-    (typeof start === "number" && typeof end === "number" && end > start) ||
-    Boolean(material.time_range?.trim());
-
-  return Boolean(material.segment_id && hasTimeRange);
-};
+const isDisplayableMaterial = (material: V2MaterialAssignment): boolean =>
+  Boolean(
+    material.label ||
+      material.material_id ||
+      material.source_material_id ||
+      material.file_id ||
+      material.segment_id ||
+      material.uri
+  );
 
 const getMaterialDisplayName = (material: V2MaterialAssignment, index: number): string => {
   const label =
@@ -235,7 +235,7 @@ const getBlockMaterialNames = (block: CanvasBlock): string[] => {
   const seen = new Set<string>();
 
   return materials
-    .filter(isDisplayableMaterialSegment)
+    .filter(isDisplayableMaterial)
     .map((material, index) => getMaterialDisplayName(material, index))
     .filter((name) => {
       if (!name || seen.has(name)) {
