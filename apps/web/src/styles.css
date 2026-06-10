@@ -19,9 +19,10 @@
   color: var(--text);
   background: var(--bg);
   font-family:
-    Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", Arial,
-    sans-serif;
+    "Heiti SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", Arial, sans-serif;
   font-synthesis: none;
+  font-weight: 400;
   text-rendering: optimizeLegibility;
 }
 
@@ -47,6 +48,7 @@ button,
 input,
 textarea {
   font: inherit;
+  font-weight: 400;
 }
 
 button {
@@ -5113,5 +5115,92 @@ input {
 
   .input-page-redesign .upload-card-large {
     width: 100%;
+  }
+}
+
+/* Figma typography and upload empty states. */
+body,
+.app-shell,
+.workspace,
+.app-shell * {
+  font-family:
+    "Heiti SC", "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC",
+    "Noto Sans CJK SC", Arial, sans-serif;
+  font-weight: 400;
+}
+
+.input-page-redesign .hero-simple {
+  padding: 0;
+  text-align: left;
+}
+
+.input-page-redesign .hero-simple h2::before {
+  content: "\4ECA\5929\60F3\505A\4E2A\4EC0\4E48\6837\7684\89C6\9891\FF1F";
+}
+
+.input-page-redesign .upload-card-large:nth-child(1)::before {
+  content: "\53C2\8003\7D20\6750";
+}
+
+.input-page-redesign .upload-card-large:nth-child(2)::before {
+  content: "\771F\5B9E\7D20\6750";
+}
+
+.input-page-redesign .upload-placeholder {
+  width: 218px;
+}
+
+.input-page-redesign .upload-placeholder > * {
+  display: none;
+}
+
+.input-page-redesign .upload-placeholder::before {
+  content: "";
+  width: 48px;
+  height: 48px;
+  color: #ffffff;
+  background:
+    linear-gradient(currentColor, currentColor) center / 3px 35px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 35px 3px no-repeat;
+}
+
+.input-page-redesign .upload-placeholder::after {
+  display: block;
+  width: 100%;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.input-page-redesign .upload-card-large:nth-child(1) .upload-placeholder::after {
+  content: "\6DFB\52A0\4F60\60F3\5206\6790\7684\6837\4F8B\89C6\9891";
+}
+
+.input-page-redesign .upload-card-large:nth-child(2) .upload-placeholder::after {
+  content: "\6DFB\52A0\4F60\7684\7D20\6750";
+}
+
+.home-brand-button,
+.figma-brand-home,
+.figma-canvas-brand span,
+.preview-brand span {
+  font-size: 0;
+}
+
+.home-brand-button::before,
+.figma-brand-home::before,
+.figma-canvas-brand span::before,
+.preview-brand span::before {
+  content: "\8FC1\955C";
+  font-size: 36px;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .figma-brand-home::before,
+  .figma-canvas-brand span::before {
+    font-size: 30px;
   }
 }
