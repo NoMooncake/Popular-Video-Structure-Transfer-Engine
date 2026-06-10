@@ -694,6 +694,36 @@ const buildSummaryReferenceRows = (
   }));
 };
 
+const buildFrameFallbackReferenceRows = (
+  frames: V2ReferenceFrame[],
+  targetDuration: number
+): JsonObject[] => {
+  return frames.map((frame, index) => {
+    const frameCount = Math.max(1, frames.length);
+    const fallbackStart = (index / frameCount) * targetDuration;
+    const fallbackEnd = ((index + 1) / frameCount) * targetDuration;
+    const nextFrame = frames[index + 1];
+    const startSeconds =
+      Number.isFinite(frame.time_seconds) && frame.time_seconds >= 0
+        ? frame.time_seconds
+        : fallbackStart;
+    const endSeconds =
+      nextFrame && nextFrame.time_seconds > startSeconds
+        ? nextFrame.time_seconds
+        : Math.max(startSeconds + 0.8, fallbackEnd);
+
+    return {
+      row_id: `reference_frame_row_${String(index + 1).padStart(2, "0")}`,
+      start_seconds: Number(startSeconds.toFixed(3)),
+      end_seconds: Number(endSeconds.toFixed(3)),
+      title: `分镜 ${index + 1}`,
+      visual_description: "根据样例关键帧提取可迁移的画面节奏、构图和产品展示方式。",
+      migration_possibility: "可迁移为新视频中相同结构位置的画面、节奏和商业说服表达。",
+      frame_refs: [frame.frame_id]
+    };
+  });
+};
+
 export const buildV2ReferenceAnalysisTables = (
   analyses: JsonObject[],
   videoRefs: V2VideoRef[],
@@ -708,6 +738,8 @@ export const buildV2ReferenceAnalysisTables = (
       timelineRecords.length > 0
         ? timelineRecords
         : buildSummaryReferenceRows(analysis, targetDuration);
+    const effectiveRecords =
+      records.length > 0 ? records : buildFrameFallbackReferenceRows(frames, targetDuration);
 
     return {
       sample_index: index + 1,
@@ -721,13 +753,13 @@ export const buildV2ReferenceAnalysisTables = (
         uri: frame.public_uri,
         source_label: frame.source_label
       })),
-      rows: records.map((record, rowIndex) =>
+      rows: effectiveRecords.map((record, rowIndex) =>
         buildReferenceTableRow(
           analysis,
           record,
           frames,
           rowIndex,
-          records.length,
+          effectiveRecords.length,
           targetDuration
         )
       )
@@ -1837,6 +1869,76 @@ const formatMaterialSegmentTimeRange = (segment: JsonObject): string | undefined
   return undefined;
 };
 
+type UsedV2MaterialRange = {
+  start_seconds: number;
+  end_seconds: number;
+  slot_id: string;
+  segment_id?: string;
+};
+
+const getMaterialSegmentRange = (
+  segment: JsonObject
+): { start_seconds: number; end_seconds: number } | undefined => {
+  const startSeconds = Number(segment.start_seconds);
+  const endSeconds = Number(segment.end_seconds);
+
+  if (Number.isFinite(startSeconds) && Number.isFinite(endSeconds) && endSeconds > startSeconds) {
+    return {
+      start_seconds: Number(startSeconds.toFixed(3)),
+      end_seconds: Number(endSeconds.toFixed(3))
+    };
+  }
+
+  return undefined;
+};
+
+const materialSegmentRangesOverlap = (
+  left: { start_seconds: number; end_seconds: number },
+  right: { start_seconds: number; end_seconds: number }
+): boolean => {
+  const overlapSeconds =
+    Math.min(left.end_seconds, right.end_seconds) -
+    Math.max(left.start_seconds, right.start_seconds);
+
+  return overlapSeconds > 0.05;
+};
+
+const isMaterialSegmentRangeAvailable = (
+  materialId: string,
+  segment: JsonObject,
+  usedRangesByMaterialId: Map<string, UsedV2MaterialRange[]>
+): boolean => {
+  const segmentRange = getMaterialSegmentRange(segment);
+  if (!segmentRange) {
+    return true;
+  }
+
+  const usedRanges = usedRangesByMaterialId.get(materialId) || [];
+  return !usedRanges.some((usedRange) =>
+    materialSegmentRangesOverlap(segmentRange, usedRange)
+  );
+};
+
+const markMaterialSegmentRangeUsed = (
+  materialId: string,
+  slotId: string,
+  segment: JsonObject,
+  usedRangesByMaterialId: Map<string, UsedV2MaterialRange[]>
+): void => {
+  const segmentRange = getMaterialSegmentRange(segment);
+  if (!segmentRange) {
+    return;
+  }
+
+  const usedRanges = usedRangesByMaterialId.get(materialId) || [];
+  usedRanges.push({
+    ...segmentRange,
+    slot_id: slotId,
+    segment_id: normalizeOptionalString(segment.segment_id)
+  });
+  usedRangesByMaterialId.set(materialId, usedRanges);
+};
+
 const normalizeSourceReferenceIndices = (value: unknown): number[] => {
   const rawValues = Array.isArray(value) ? value : value === undefined ? [] : [value];
   return Array.from(
@@ -2274,6 +2376,31 @@ const formatFrontendSeconds = (seconds: number): string => {
   return `${Number(seconds.toFixed(3))}s`;
 };
 
+const getFallbackSlotCopyDirection = (
+  normalized: Required<V2PipelineRequest>,
+  slotType: string,
+  slotName: string | undefined,
+  visualGoal: string | undefined
+): string => {
+  const productOrGoal =
+    normalized.user_request.product_name || normalized.user_request.goal || "目标产品";
+  const focus = (visualGoal || slotName || slotType).replace(/\s+/gu, " ").trim();
+
+  if (/hook/iu.test(slotType)) {
+    return `先用一句话抓住注意力，突出${productOrGoal}最直接的吸引点。`;
+  }
+
+  if (/cta|action/iu.test(slotType)) {
+    return `收束卖点并引导观众继续了解${productOrGoal}。`;
+  }
+
+  if (focus) {
+    return `突出${focus}，让观众快速理解这一段的产品卖点。`;
+  }
+
+  return `围绕${productOrGoal}补一句简短旁白，服务当前分镜节奏。`;
+};
+
 const formatFrontendMaterialSummary = (
   matches: JsonObject[],
   candidateMaterials: JsonObject[]
@@ -2548,6 +2675,7 @@ export const buildV2DeterministicMaterialCoverage = async (
     ])
   );
   const remainingSegmentDurations = new Map<string, number>();
+  const usedSegmentRangesByMaterialId = new Map<string, UsedV2MaterialRange[]>();
   for (const asset of materialAssets) {
     const materialId = String(asset.material_id);
     for (const segment of asJsonObjectArray(asset.material_segments)) {
@@ -2616,9 +2744,12 @@ export const buildV2DeterministicMaterialCoverage = async (
       })
       .map((asset) => ({
         material_id: asset.material_id,
+        file_id: asset.file_id,
+        uri: asset.uri,
         label: asset.label,
         model_label: asset.model_label,
         duration_seconds: asset.duration_seconds,
+        usable_duration_seconds: asset.usable_duration_seconds,
         duration_status: asset.duration_status,
         candidate_slot_types: asset.candidate_slot_types,
         candidate_segments: asJsonObjectArray(asset.material_segments)
@@ -2627,8 +2758,17 @@ export const buildV2DeterministicMaterialCoverage = async (
           )
           .map((segment) => ({
             segment_id: segment.segment_id,
+            material_id: asset.material_id,
+            source_material_id: asset.material_id,
+            file_id: asset.file_id,
+            uri: asset.uri,
             time_range: segment.time_range,
+            start_seconds: segment.start_seconds,
+            end_seconds: segment.end_seconds,
+            source_in_seconds: segment.start_seconds,
+            source_out_seconds: segment.end_seconds,
             duration_seconds: segment.duration_seconds,
+            usable_duration_seconds: segment.duration_seconds,
             visual_description: segment.visual_description,
             recommended_usage: segment.recommended_usage
           })),
@@ -2661,6 +2801,10 @@ export const buildV2DeterministicMaterialCoverage = async (
             continue;
           }
 
+          if (!isMaterialSegmentRangeAvailable(materialId, segment, usedSegmentRangesByMaterialId)) {
+            continue;
+          }
+
           if (requiredRemaining <= 0) {
             continue;
           }
@@ -2668,9 +2812,12 @@ export const buildV2DeterministicMaterialCoverage = async (
           const allocatedDuration = Number(
             Math.min(requiredRemaining, remainingSegmentDuration).toFixed(3)
           );
-          remainingSegmentDurations.set(
-            segmentKey,
-            Number((remainingSegmentDuration - allocatedDuration).toFixed(3))
+          remainingSegmentDurations.set(segmentKey, 0);
+          markMaterialSegmentRangeUsed(
+            materialId,
+            slotId,
+            segment,
+            usedSegmentRangesByMaterialId
           );
           requiredRemaining = Number((requiredRemaining - allocatedDuration).toFixed(3));
           matches.push({
@@ -2811,6 +2958,7 @@ export const buildV2DeterministicMaterialCoverage = async (
     );
     const directVideoReferenceMaterials = directReferenceMaterialSource.map((material) => ({
       material_id: material.material_id,
+      file_id: material.file_id,
       label: material.label,
       uri: material.uri,
       duration_seconds: material.duration_seconds,
@@ -2833,6 +2981,9 @@ export const buildV2DeterministicMaterialCoverage = async (
       normalizeOptionalString(slot.subtitle_or_vo_direction) ||
       normalizeOptionalString(slot.narration_direction) ||
       normalizeOptionalString(slot.caption_direction);
+    const displayCopyDirection =
+      copyDirection ||
+      getFallbackSlotCopyDirection(normalized, slotType, slotName, visualGoal);
     const frontendCoverageLabel = getFrontendCoverageLabel(frontendCoverageStatus);
     const frontendMaterialSummary = formatFrontendMaterialSummary(
       matches,
@@ -2851,7 +3002,7 @@ export const buildV2DeterministicMaterialCoverage = async (
       slot_type: slotType,
       slot_name: slotName,
       visual_goal: visualGoal,
-      copy_direction: copyDirection,
+      copy_direction: displayCopyDirection,
       packaging_suggestions: normalizeOptionalString(slot.packaging_suggestions),
       source_reference_indices: sourceReferenceIndices,
       source_reference_superscript: sourceReferenceSuperscript,
@@ -2864,7 +3015,7 @@ export const buildV2DeterministicMaterialCoverage = async (
       frontend_display: {
         migration_result_title: slotName || slotType,
         migration_result_description:
-          visualGoal || copyDirection || gapReason || "根据当前广告结构补足该槽位画面。",
+          visualGoal || displayCopyDirection || gapReason || "根据当前广告结构补足该槽位画面。",
         duration_text: formatFrontendSeconds(requiredDuration),
         shot_description: visualGoal || "待补充分镜描述",
         ...(sourceReferenceIndices.length > 0
@@ -2874,7 +3025,7 @@ export const buildV2DeterministicMaterialCoverage = async (
             }
           : {}),
         material_summary: frontendMaterialSummary,
-        copy: copyDirection || "待生成文案",
+        copy: displayCopyDirection,
         material_status: frontendCoverageLabel,
         add_material_button: {
           visible: true,
@@ -3465,9 +3616,9 @@ const callReferenceAnalysisWithFrameRetry = async (
     );
     const retryError = getV2ProviderErrorMessage(output);
 
-    if (isErroredV2ReferenceAnalysisOutput(output)) {
+    if (!hasV2ReferenceAnalysisContent(output)) {
       throw new V2ProviderExecutionError(
-        `reference video analysis failed after frames-only retry: ${retryError || reason}`
+        `reference video analysis returned no timeline after frames-only retry: ${retryError || reason}`
       );
     }
 
@@ -3499,11 +3650,11 @@ const callReferenceAnalysisWithFrameRetry = async (
       )
     );
 
-    if (!isErroredV2ReferenceAnalysisOutput(output)) {
+    if (hasV2ReferenceAnalysisContent(output) && !isErroredV2ReferenceAnalysisOutput(output)) {
       return { output };
     }
 
-    const reason = getV2ProviderErrorMessage(output) || "provider returned error output";
+    const reason = getV2ProviderErrorMessage(output) || "provider returned no reference timeline";
     return { output: await callFramesOnly(reason) };
   } catch (error) {
     const originalReason = sanitizeFallbackReason(error);

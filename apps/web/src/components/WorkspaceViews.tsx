@@ -1659,6 +1659,7 @@ const GapFillView = ({
     <div className="gap-fill-page">
       <VideoBlockCanvas
         blocks={blocks}
+        canvasSession={canvasSession}
         canvasSessionId={canvasSession?.canvas_session_id}
         onBack={() => onStepChange("migration")}
         onCanvasSessionChange={(nextCanvasSession) =>

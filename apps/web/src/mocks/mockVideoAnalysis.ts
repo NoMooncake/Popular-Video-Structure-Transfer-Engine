@@ -458,7 +458,11 @@ export const mockScriptSession: V2ScriptSession = {
     locked_fields: ["shot_description", "visual", "packaging", "migration_result"],
     materials:
       slot.assigned_materials?.map((material) => ({
-        material_id: material.material_id,
+        material_id:
+          material.material_id ??
+          material.source_material_id ??
+          material.file_id ??
+          `${slot.slot_id}_material`,
         uri: slot.direct_video_reference_materials?.[0]?.uri ?? keyframes[index % keyframes.length],
         label: material.label,
         role: "user_material" as const,

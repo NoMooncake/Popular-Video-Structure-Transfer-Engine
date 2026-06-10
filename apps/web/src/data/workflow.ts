@@ -47,6 +47,71 @@ const formatTimeRange = (timeRange: CanvasBlock["slot"]["time_range"]): string =
   return `${timeRange.start_seconds}-${timeRange.end_seconds}s`;
 };
 
+const v2SlotLabelByType: Record<string, string> = {
+  strong_hook: "强 Hook",
+  hook: "强 Hook",
+  pain_point_scene: "痛点场景",
+  product_hero: "产品亮相",
+  product_intro: "产品亮相",
+  usage_process: "使用动作",
+  usage_action: "使用动作",
+  selling_point_proof: "卖点证明",
+  proof: "卖点证明",
+  effect_comparison: "效果对比",
+  comparison: "效果对比",
+  cta: "行动引导"
+};
+
+const getV2SlotLabel = (slot: V2MaterialCoverageSlot): string =>
+  slot.slot_name ||
+  v2SlotLabelByType[slot.slot_type.toLowerCase().replace(/[^a-z0-9]+/gu, "_")] ||
+  slot.slot_type;
+
+const getV2DisplayTitle = (slot: V2MaterialCoverageSlot): string => {
+  const rawTitle = slot.frontend_display?.migration_result_title;
+  const mappedTitle = rawTitle
+    ? v2SlotLabelByType[rawTitle.toLowerCase().replace(/[^a-z0-9]+/gu, "_")]
+    : undefined;
+
+  return mappedTitle || getV2SlotLabel(slot);
+};
+
+const getV2AssignedMaterials = (slot: V2MaterialCoverageSlot) => {
+  const seen = new Set<string>();
+  return [
+    ...(slot.assigned_segments ?? []),
+    ...(slot.matched_material_segments ?? []),
+    ...(slot.assigned_materials ?? [])
+  ].filter((material) => {
+    const key = [
+      material.segment_id,
+      material.material_id,
+      material.source_material_id,
+      material.file_id,
+      material.uri,
+      material.source_in_seconds,
+      material.source_out_seconds
+    ].join(":");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+const hasV2AssignedSegment = (slot: V2MaterialCoverageSlot): boolean =>
+  getV2AssignedMaterials(slot).some((material) => {
+    const start = material.source_in_seconds ?? material.start_seconds;
+    const end = material.source_out_seconds ?? material.end_seconds;
+    return (
+      Boolean(material.time_range) ||
+      (typeof start === "number" && typeof end === "number" && end > start) ||
+      (typeof material.matched_material_duration === "number" &&
+        material.matched_material_duration > 0)
+    );
+  });
+
 export const createCanvasBlocks = (blueprint: StructureBlueprint): CanvasBlock[] => blueprint.slots.map((slot) => ({
   id: slot.slot_id,
   label: slot.slot_type,
@@ -63,6 +128,10 @@ export const createCanvasBlocks = (blueprint: StructureBlueprint): CanvasBlock[]
 const toV2MatchStatus = (slot: V2MaterialCoverageSlot): MatchStatus => {
   if (slot.frontend_coverage_status === "fully_matched" || slot.coverage_status === "covered") {
     return "matched";
+  }
+
+  if (hasV2AssignedSegment(slot)) {
+    return "partial";
   }
 
   if (
@@ -86,11 +155,43 @@ const formatV2Duration = (slot: V2MaterialCoverageSlot): string => {
   return Number.isFinite(duration) ? `${duration}s` : "0s";
 };
 
+const normalizeV2Copy = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed || trimmed === "待生成文案") {
+    return undefined;
+  }
+
+  return trimmed;
+};
+
+const getV2FallbackCopy = (slot: V2MaterialCoverageSlot): string => {
+  const focus =
+    slot.frontend_display?.shot_description ||
+    slot.visual_goal ||
+    slot.frontend_display?.migration_result_description ||
+    getV2SlotLabel(slot);
+
+  if (/hook/iu.test(slot.slot_type)) {
+    return "先用一句话抓住注意力，突出产品最直接的吸引点。";
+  }
+
+  if (/cta|action/iu.test(slot.slot_type)) {
+    return "收束核心卖点，引导观众继续了解产品。";
+  }
+
+  return `突出${focus}，让观众快速理解这一段的产品卖点。`;
+};
+
+const getV2Copy = (slot: V2MaterialCoverageSlot): string =>
+  normalizeV2Copy(slot.frontend_display?.copy) ||
+  normalizeV2Copy(slot.copy_direction) ||
+  getV2FallbackCopy(slot);
+
 const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] => ({
   slot_id: slot.slot_id,
   slot_type: slot.slot_type,
   time_range: formatV2Duration(slot),
-  content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? slot.slot_name ?? slot.slot_type,
+  content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? getV2SlotLabel(slot),
   rhythm: "medium",
   required_materials: [
     {
@@ -104,8 +205,7 @@ const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] =>
     slot.frontend_display?.migration_result_description ??
     slot.frontend_display?.shot_description ??
     slot.visual_goal ??
-    slot.slot_name ??
-    slot.slot_type,
+    getV2SlotLabel(slot),
   source_evidence: [
     slot.frontend_display?.material_status,
     slot.frontend_coverage_label,
@@ -156,23 +256,27 @@ const toV2TimelineItem = (
   slot: V2MaterialCoverageSlot,
   timeRange: string,
   gap?: GapItem
-): TimelineItem => ({
-  item_id: `tl_${slot.slot_id}`,
-  slot_id: slot.slot_id,
-  time_range: timeRange,
-  slot_type: slot.slot_type,
-  content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? slot.slot_name ?? slot.slot_type,
-  visual_source: slot.assigned_materials?.length ? "user_material" : "generated_graphic",
-  visual_description:
-    slot.frontend_display?.material_summary ??
-    slot.recommended_video_prompt?.prompt_description ??
-    slot.recommended_aigc_prompt?.prompt_description ??
-    "",
-  subtitle: slot.frontend_display?.copy ?? slot.copy_direction ?? "",
-  voiceover: slot.frontend_display?.copy ?? slot.copy_direction ?? "",
-  gap_ref: gap?.gap_id,
-  transition: "none"
-});
+): TimelineItem => {
+  const copy = getV2Copy(slot);
+
+  return {
+    item_id: `tl_${slot.slot_id}`,
+    slot_id: slot.slot_id,
+    time_range: timeRange,
+    slot_type: slot.slot_type,
+    content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? getV2SlotLabel(slot),
+    visual_source: hasV2AssignedSegment(slot) ? "user_material" : "generated_graphic",
+    visual_description:
+      slot.frontend_display?.material_summary ??
+      slot.recommended_video_prompt?.prompt_description ??
+      slot.recommended_aigc_prompt?.prompt_description ??
+      "",
+    subtitle: copy,
+    voiceover: copy,
+    gap_ref: gap?.gap_id,
+    transition: "none"
+  };
+};
 
 export const createCanvasBlocksFromV2Coverage = (
   slots: V2MaterialCoverageSlot[],
@@ -186,10 +290,7 @@ export const createCanvasBlocksFromV2Coverage = (
 
     return {
       id: slot.slot_id,
-      label:
-        slot.frontend_display?.migration_result_title ??
-        slot.slot_name ??
-        slot.slot_type,
+      label: getV2DisplayTitle(slot),
       timeRange,
       status: toV2MatchStatus(slot),
       migrationResult: structureSlot.migration_rule,

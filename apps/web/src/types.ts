@@ -166,6 +166,39 @@ export type TimelinePlan = {
   timeline: TimelineItem[];
 };
 
+export type V2MaterialAssignment = {
+  material_id?: string;
+  source_material_id?: string;
+  file_id?: string;
+  uri?: string;
+  label?: string;
+  segment_id?: string;
+  time_range?: string;
+  start_seconds?: number;
+  end_seconds?: number;
+  final_source_in_seconds?: number;
+  final_source_out_seconds?: number;
+  source_in_seconds?: number;
+  source_out_seconds?: number;
+  matched_material_duration?: number;
+  duration_seconds?: number;
+  usable_duration_seconds?: number;
+  visual_description?: string;
+  recommended_usage?: string;
+  content_summary?: string;
+  frames?: Array<{
+    frame_id?: string;
+    time_seconds?: number;
+    uri?: string;
+    image_uri?: string;
+    public_uri?: string;
+    media?: {
+      uri?: string;
+      mime_type?: string;
+    };
+  }>;
+};
+
 export type CanvasBlock = {
   id: string;
   label: string;
@@ -179,6 +212,9 @@ export type CanvasBlock = {
   timeline?: TimelineItem;
   v2?: {
     coverageSlot?: V2MaterialCoverageSlot;
+    canvasNodeId?: string;
+    displayKind?: "slot" | "material_segment" | "missing_material";
+    parentSlotId?: string;
     sourcePipelineId?: string;
   };
 };
@@ -205,6 +241,12 @@ export type V2ReferenceAnalysisTable = {
   sample_index?: number;
   file_id?: string;
   source_label?: string;
+  frames?: Array<{
+    frame_id?: string;
+    time_seconds?: number;
+    uri?: string;
+    source_label?: string;
+  }>;
   rows?: V2ReferenceAnalysisTableRow[];
 };
 
@@ -235,16 +277,19 @@ export type V2MaterialCoverageSlot = {
   gap_reason?: string;
   available_user_actions?: string[];
   available_generation_paths?: string[];
-  assigned_materials?: Array<{
-    material_id: string;
-    label?: string;
-    matched_material_duration?: number;
-  }>;
+  assigned_materials?: V2MaterialAssignment[];
+  assigned_segments?: V2MaterialAssignment[];
+  matched_material_segments?: V2MaterialAssignment[];
+  candidate_material_segments?: V2MaterialAssignment[];
   candidate_materials?: Array<{
     material_id: string;
     label?: string;
+    model_label?: string;
     duration_seconds?: number;
+    duration_status?: string;
     fit_reason?: string;
+    quality?: string;
+    candidate_segments?: V2MaterialAssignment[];
   }>;
   direct_video_reference_materials?: Array<{
     material_id: string;

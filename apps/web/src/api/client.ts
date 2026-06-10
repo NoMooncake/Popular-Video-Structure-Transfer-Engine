@@ -438,6 +438,7 @@ export const generateV2CanvasImageCandidates = async (
   canvasSessionId: string,
   payload: {
     slot_id: string;
+    missing_node_id?: string;
     prompt?: string;
     count?: number;
     allow_fallback?: boolean;
@@ -459,6 +460,7 @@ export const generateV2CanvasGapVideo = async (
   canvasSessionId: string,
   payload: {
     slot_id: string;
+    missing_node_id?: string;
     approved_image_uri?: string;
     video_prompt?: string;
     duration_seconds?: number;

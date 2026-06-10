@@ -2646,6 +2646,15 @@ input {
   user-select: none;
 }
 
+.figma-card-frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+  object-fit: cover;
+  pointer-events: none;
+}
+
 .figma-play-overlay {
   position: absolute;
   z-index: 5;
@@ -3225,6 +3234,14 @@ input {
   text-align: center;
 }
 
+.figma-video-player {
+  display: block;
+  width: 100%;
+  max-height: min(68vh, 620px);
+  border-radius: 12px;
+  background: #0a0a0a;
+}
+
 .figma-video-placeholder span {
   width: 0;
   height: 0;
@@ -3743,6 +3760,12 @@ input {
   box-shadow: 0 4px 16px rgba(254, 44, 85, 0.45);
 }
 
+.migration-nav-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
 .migration-nav-button:active {
   transform: scale(0.96);
 }
@@ -3757,6 +3780,21 @@ input {
   line-height: 1;
   transform: translateY(-1px);
   width: 24px;
+}
+
+.migration-canvas-status {
+  position: absolute;
+  left: 50%;
+  top: 66px;
+  transform: translateX(-50%);
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.migration-canvas-status.error {
+  color: var(--theme);
 }
 
 /* Horizontal scroll for the fixed-width matrix */
@@ -3900,6 +3938,7 @@ input {
 .col-desc {
   flex: 0 0 300px;
   padding: 0 4px;
+  overflow: hidden;
 }
 
 .col-material {
@@ -3954,8 +3993,12 @@ input {
   font-size: 20px;
   font-weight: 400;
   line-height: 30px;
+  max-height: 168px;
   min-height: 90px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
   resize: none;
+  scrollbar-width: none;
   text-align: center;
   width: 100%;
 }
@@ -3964,12 +4007,18 @@ input {
   outline: none;
 }
 
+.migration-voiceover-input::-webkit-scrollbar {
+  display: none;
+}
+
 /* 分镜描述 (read-only) */
 .desc-tag {
   align-items: flex-start;
   display: flex;
+  flex-shrink: 0;
   gap: 4px;
   justify-content: center;
+  max-width: 100%;
 }
 
 .desc-tag-name {
@@ -3991,6 +4040,16 @@ input {
   font-size: 20px;
   font-weight: 400;
   line-height: 30px;
+  max-height: 168px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 0 4px;
+  scrollbar-width: none;
+  width: 100%;
+}
+
+.desc-body::-webkit-scrollbar {
+  display: none;
 }
 
 /* 我的素材: scroll inside the cell when overflowing, hide scrollbar */
@@ -4003,6 +4062,10 @@ input {
 
 .material-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.material-item + .material-item {
+  margin-top: 10px;
 }
 
 .material-name,

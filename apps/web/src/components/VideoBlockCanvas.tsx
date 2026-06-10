@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  generateVideoAnalysisGapVideo,
-  generateVideoAnalysisImageCandidates
-} from "../api/videoAnalysisApi";
-import type { V2CanvasSession } from "../api/client";
-import type { CanvasBlock } from "../types";
+  generateV2CanvasGapVideo,
+  generateV2CanvasImageCandidates
+} from "../api/client";
+import type { V2CanvasNode, V2CanvasSession } from "../api/client";
+import type { CanvasBlock, V2MaterialAssignment, V2MaterialCoverageSlot } from "../types";
 
 type VideoBlockCanvasProps = {
   blocks: CanvasBlock[];
+  canvasSession?: V2CanvasSession;
   canvasSessionId?: string;
   selectedBlockId: string;
   onCanvasSessionChange?: (canvasSession: V2CanvasSession) => void;
@@ -45,17 +46,6 @@ const cardImages = [
   "https://www.figma.com/api/mcp/asset/27f882c5-4b54-4e3e-b9b7-811c7dfe6429"
 ];
 
-const aiCandidateImages = [
-  "https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1522335789203-aabd1fc54bc9?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1512496015851-a90fb38ba796?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1512207128881-1baee87126fb?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1541643600914-78b084683601?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1505577058444-a3dab90d4253?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1586495777744-4413f21062fa?auto=format&fit=crop&w=1000&q=80",
-  "https://images.unsplash.com/photo-1556228720-195a672e8a03?auto=format&fit=crop&w=1000&q=80"
-];
-
 const figmaLabels = ["Hook", "产品介入", "感官特写", "使用动作", "使用动作", "行动引导"];
 
 const fallbackPositions = (blocks: CanvasBlock[]) =>
@@ -73,6 +63,97 @@ const labelForBlock = (block: CanvasBlock, index: number) =>
 const imageForBlock = (block: CanvasBlock, index: number) =>
   block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri ??
   cardImages[index % cardImages.length];
+
+const getBlockMaterialAssignments = (block: CanvasBlock): V2MaterialAssignment[] => {
+  const slot = block.v2?.coverageSlot;
+  if (!slot) {
+    return [];
+  }
+
+  const seen = new Set<string>();
+  return [
+    ...(slot.assigned_segments ?? []),
+    ...(slot.matched_material_segments ?? []),
+    ...(slot.assigned_materials ?? [])
+  ].filter((material) => {
+    const key = [
+      material.segment_id,
+      material.material_id,
+      material.source_material_id,
+      material.file_id,
+      material.uri,
+      material.source_in_seconds,
+      material.source_out_seconds
+    ].join(":");
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+const hasMaterialSegment = (block: CanvasBlock) =>
+  getBlockMaterialAssignments(block).some((material) => {
+    const start = material.source_in_seconds ?? material.start_seconds;
+    const end = material.source_out_seconds ?? material.end_seconds;
+    return (
+      Boolean(material.time_range) ||
+      (typeof start === "number" && typeof end === "number" && end > start) ||
+      (typeof material.matched_material_duration === "number" &&
+        material.matched_material_duration > 0)
+    );
+  });
+
+const frameUriFromMaterial = (material: V2MaterialAssignment): string | undefined => {
+  const frames = material.frames ?? [];
+  for (const frame of frames) {
+    const uri = frame.uri || frame.image_uri || frame.public_uri || frame.media?.uri;
+    if (uri) {
+      return uri;
+    }
+  }
+
+  return undefined;
+};
+
+const materialImageForBlock = (block: CanvasBlock): string | undefined => {
+  for (const material of getBlockMaterialAssignments(block)) {
+    const frameUri = frameUriFromMaterial(material);
+    if (frameUri) {
+      return frameUri;
+    }
+  }
+
+  return undefined;
+};
+
+const browserPlayableUri = (uri: string | undefined): string | undefined => {
+  if (!uri) {
+    return undefined;
+  }
+
+  if (/^(?:https?:|blob:|data:)/iu.test(uri) || uri.startsWith("/api/")) {
+    return uri;
+  }
+
+  return undefined;
+};
+
+const materialVideoForBlock = (block: CanvasBlock): string | undefined => {
+  for (const material of getBlockMaterialAssignments(block)) {
+    const uri = browserPlayableUri(material.uri);
+    if (uri) {
+      return uri;
+    }
+
+    if (material.file_id) {
+      return `/api/upload/files/${encodeURIComponent(material.file_id)}`;
+    }
+  }
+
+  return undefined;
+};
 
 const portColorByStatus: Record<CanvasStatus, "matched" | "missing"> = {
   matched: "matched",
@@ -96,9 +177,6 @@ const defaultVideoPromptFor = (block: CanvasBlock, index: number) =>
         block,
         index
       )}”的重要性。我们的产品具有清晰的卖点和自然的使用场景，画面需要承接前后镜头，突出产品如何提升用户体验，并保持广告整体节奏连贯。`;
-
-const rotateCandidates = (seed: number) =>
-  Array.from({ length: 4 }, (_, index) => aiCandidateImages[(seed + index) % aiCandidateImages.length]);
 
 const formatSeconds = (value?: number) => {
   const seconds = Number(value ?? 0);
@@ -126,6 +204,31 @@ const getStringField = (record: Record<string, unknown>, fields: string[]) => {
   }
 
   return undefined;
+};
+
+const getNumberField = (
+  record: Record<string, unknown> | undefined,
+  fields: string[],
+  fallback = 0
+) => {
+  if (!record) {
+    return fallback;
+  }
+
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return fallback;
 };
 
 const extractImageCandidateUris = (response: unknown): string[] => {
@@ -166,8 +269,269 @@ const getVideoGenerationPayload = (response: unknown): unknown => {
   return record.generation_result ?? response;
 };
 
+const getBackendSlotId = (block: CanvasBlock): string =>
+  block.v2?.coverageSlot?.slot_id || block.v2?.parentSlotId || block.slot.slot_id || block.id;
+
+const getMissingNodeId = (block: CanvasBlock): string | undefined =>
+  block.v2?.displayKind === "missing_material" ? block.v2.canvasNodeId : undefined;
+
+const toMaterialAssignment = (node: V2CanvasNode): V2MaterialAssignment => {
+  const data = node.data as V2MaterialAssignment;
+  return {
+    ...data,
+    segment_id: data.segment_id || node.segment_id,
+    source_material_id: data.source_material_id || data.material_id,
+    label: data.label || node.segment_id || node.node_id
+  };
+};
+
+const compareCanvasNodes = (first: V2CanvasNode, second: V2CanvasNode): number => {
+  const firstOrder = getNumberField(first.data, ["display_order", "order"], first.display_order ?? 0);
+  const secondOrder = getNumberField(second.data, ["display_order", "order"], second.display_order ?? 0);
+  if (firstOrder !== secondOrder) {
+    return firstOrder - secondOrder;
+  }
+
+  const firstStart = getNumberField(first.data, [
+    "slot_start_seconds",
+    "target_start_seconds",
+    "start_seconds"
+  ]);
+  const secondStart = getNumberField(second.data, [
+    "slot_start_seconds",
+    "target_start_seconds",
+    "start_seconds"
+  ]);
+  if (firstStart !== secondStart) {
+    return firstStart - secondStart;
+  }
+
+  if (first.node_type !== second.node_type) {
+    return first.node_type === "material_segment" ? -1 : 1;
+  }
+
+  const firstSourceStart = getNumberField(first.data, [
+    "source_in_seconds",
+    "final_source_in_seconds"
+  ]);
+  const secondSourceStart = getNumberField(second.data, [
+    "source_in_seconds",
+    "final_source_in_seconds"
+  ]);
+  if (firstSourceStart !== secondSourceStart) {
+    return firstSourceStart - secondSourceStart;
+  }
+
+  return first.node_id.localeCompare(second.node_id);
+};
+
+const withMaterialOnlyCoverage = (
+  coverageSlot: V2MaterialCoverageSlot | undefined,
+  material: V2MaterialAssignment
+): V2MaterialCoverageSlot | undefined => {
+  if (!coverageSlot) {
+    return undefined;
+  }
+
+  const duration =
+    material.matched_material_duration ??
+    material.duration_seconds ??
+    material.usable_duration_seconds ??
+    coverageSlot.matched_material_duration;
+
+  return {
+    ...coverageSlot,
+    ai_completion_required_duration: 0,
+    assigned_materials: [material],
+    assigned_segments: [material],
+    coverage_status: "covered",
+    frontend_coverage_status: "fully_matched",
+    matched_material_duration: duration,
+    matched_material_segments: [material],
+    missing_duration: 0,
+    needs_ai_completion: false
+  };
+};
+
+const withMissingOnlyCoverage = (
+  coverageSlot: V2MaterialCoverageSlot | undefined,
+  missingNode: V2CanvasNode
+): V2MaterialCoverageSlot | undefined => {
+  if (!coverageSlot) {
+    return undefined;
+  }
+
+  const missingDuration = getNumberField(
+    missingNode.data,
+    ["missing_duration", "missing_duration_seconds", "required_duration"],
+    coverageSlot.missing_duration || coverageSlot.ai_completion_required_duration || coverageSlot.required_duration
+  );
+
+  return {
+    ...coverageSlot,
+    ai_completion_required_duration: missingDuration,
+    assigned_materials: [],
+    assigned_segments: [],
+    coverage_status: "missing",
+    direct_video_reference_materials:
+      (missingNode.data.direct_video_reference_materials as V2MaterialCoverageSlot["direct_video_reference_materials"]) ??
+      coverageSlot.direct_video_reference_materials,
+    frontend_coverage_status: "material_insufficient",
+    gap_reason:
+      getStringField(missingNode.data, ["gap_reason", "missing", "reason"]) ||
+      coverageSlot.gap_reason,
+    matched_material_duration: 0,
+    matched_material_segments: [],
+    missing_duration: missingDuration,
+    needs_ai_completion: true,
+    recommended_aigc_prompt:
+      (missingNode.data.recommended_aigc_prompt as V2MaterialCoverageSlot["recommended_aigc_prompt"]) ??
+      coverageSlot.recommended_aigc_prompt,
+    recommended_video_prompt:
+      (missingNode.data.recommended_video_prompt as V2MaterialCoverageSlot["recommended_video_prompt"]) ??
+      coverageSlot.recommended_video_prompt
+  };
+};
+
+const materialBlockFromNode = (
+  baseBlock: CanvasBlock,
+  node: V2CanvasNode,
+  slotId: string
+): CanvasBlock => {
+  const material = toMaterialAssignment(node);
+  const coverageSlot = withMaterialOnlyCoverage(baseBlock.v2?.coverageSlot, material);
+
+  return {
+    ...baseBlock,
+    id: node.node_id,
+    materialSummary:
+      material.visual_description ||
+      material.content_summary ||
+      baseBlock.materialSummary,
+    status: "matched",
+    v2: {
+      ...baseBlock.v2,
+      canvasNodeId: node.node_id,
+      coverageSlot,
+      displayKind: "material_segment",
+      parentSlotId: slotId
+    }
+  };
+};
+
+const missingBlockFromNode = (
+  baseBlock: CanvasBlock,
+  node: V2CanvasNode,
+  slotId: string
+): CanvasBlock => {
+  const coverageSlot = withMissingOnlyCoverage(baseBlock.v2?.coverageSlot, node);
+  const missing =
+    coverageSlot?.gap_reason ||
+    getStringField(node.data, ["missing", "gap_reason", "reason"]) ||
+    baseBlock.gap?.missing ||
+    baseBlock.materialSummary;
+
+  return {
+    ...baseBlock,
+    id: node.node_id,
+    gap: {
+      gap_id: `${slotId}_${node.node_id}_gap`,
+      slot_id: slotId,
+      slot_type: baseBlock.slot.slot_type,
+      missing,
+      impact: coverageSlot?.recommended_video_prompt?.prompt_description || baseBlock.gap?.impact || missing,
+      severity: "high",
+      strategy:
+        coverageSlot?.recommended_video_prompt?.prompt ||
+        coverageSlot?.recommended_aigc_prompt?.prompt ||
+        baseBlock.gap?.strategy ||
+        missing,
+      fill_options: baseBlock.gap?.fill_options ?? []
+    },
+    materialSummary: missing,
+    status: "missing",
+    v2: {
+      ...baseBlock.v2,
+      canvasNodeId: node.node_id,
+      coverageSlot,
+      displayKind: "missing_material",
+      parentSlotId: slotId
+    }
+  };
+};
+
+const createCanvasDisplayBlocks = (
+  blocks: CanvasBlock[],
+  canvasSession?: V2CanvasSession
+): CanvasBlock[] => {
+  if (!canvasSession?.nodes?.length) {
+    return blocks;
+  }
+
+  const nodesById = new Map(canvasSession.nodes.map((node) => [node.node_id, node]));
+  const blocksBySlotId = new Map(blocks.map((block) => [getBackendSlotId(block), block]));
+  const slotNodes = canvasSession.nodes
+    .filter((node) => node.node_type === "script_slot")
+    .sort(compareCanvasNodes);
+
+  if (!slotNodes.length) {
+    return blocks;
+  }
+
+  const displayBlocks: CanvasBlock[] = [];
+  const consumedSlotIds = new Set<string>();
+
+  for (const slotNode of slotNodes) {
+    const slotId = slotNode.slot_id || getStringField(slotNode.data, ["slot_id"]);
+    if (!slotId) {
+      continue;
+    }
+
+    const baseBlock = blocksBySlotId.get(slotId);
+    if (!baseBlock) {
+      continue;
+    }
+
+    consumedSlotIds.add(slotId);
+    const materialNodes = canvasSession.edges
+      .filter(
+        (edge) => edge.edge_type === "fills_slot" && edge.target_node_id === slotNode.node_id
+      )
+      .map((edge) => nodesById.get(edge.source_node_id))
+      .filter((node): node is V2CanvasNode => node?.node_type === "material_segment")
+      .sort(compareCanvasNodes);
+    const missingNodes = canvasSession.edges
+      .filter(
+        (edge) => edge.edge_type === "has_gap" && edge.source_node_id === slotNode.node_id
+      )
+      .map((edge) => nodesById.get(edge.target_node_id))
+      .filter((node): node is V2CanvasNode => node?.node_type === "missing_material")
+      .sort(compareCanvasNodes);
+
+    const childBlocks = [
+      ...materialNodes.map((node) => materialBlockFromNode(baseBlock, node, slotId)),
+      ...missingNodes.map((node) => missingBlockFromNode(baseBlock, node, slotId))
+    ].sort((first, second) => {
+      const firstNode = first.v2?.canvasNodeId ? nodesById.get(first.v2.canvasNodeId) : undefined;
+      const secondNode = second.v2?.canvasNodeId ? nodesById.get(second.v2.canvasNodeId) : undefined;
+      return firstNode && secondNode ? compareCanvasNodes(firstNode, secondNode) : 0;
+    });
+
+    displayBlocks.push(...(childBlocks.length ? childBlocks : [baseBlock]));
+  }
+
+  for (const block of blocks) {
+    if (!consumedSlotIds.has(getBackendSlotId(block))) {
+      displayBlocks.push(block);
+    }
+  }
+
+  return displayBlocks.length ? displayBlocks : blocks;
+};
+
 export const VideoBlockCanvas = ({
   blocks,
+  canvasSession,
   canvasSessionId,
   selectedBlockId,
   onCanvasSessionChange,
@@ -178,7 +542,11 @@ export const VideoBlockCanvas = ({
   onHome,
   projectName = "口红广告"
 }: VideoBlockCanvasProps) => {
-  const basePositions = useMemo(() => fallbackPositions(blocks), [blocks]);
+  const displayBlocks = useMemo(
+    () => createCanvasDisplayBlocks(blocks, canvasSession),
+    [blocks, canvasSession]
+  );
+  const basePositions = useMemo(() => fallbackPositions(displayBlocks), [displayBlocks]);
   const [positions, setPositions] = useState<Record<string, CanvasPosition>>(basePositions);
   const [isDragging, setIsDragging] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -196,8 +564,9 @@ export const VideoBlockCanvas = ({
   const [keyframeCandidates, setKeyframeCandidates] = useState<Record<string, string[]>>({});
   const [selectedKeyframes, setSelectedKeyframes] = useState<Record<string, string>>({});
   const [generatedVideoThumbs, setGeneratedVideoThumbs] = useState<Record<string, string>>({});
-  const [candidateSeeds, setCandidateSeeds] = useState<Record<string, number>>({});
-  const blockOrderKey = useMemo(() => blocks.map((block) => block.id).join("|"), [blocks]);
+  const [generatedVideoUris, setGeneratedVideoUris] = useState<Record<string, string>>({});
+  const [selectedCanvasBlockId, setSelectedCanvasBlockId] = useState<string | null>(null);
+  const blockOrderKey = useMemo(() => displayBlocks.map((block) => block.id).join("|"), [displayBlocks]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
@@ -217,24 +586,41 @@ export const VideoBlockCanvas = ({
   } | null>(null);
 
   useEffect(() => {
-    setPositions(fallbackPositions(blocks));
+    setPositions(fallbackPositions(displayBlocks));
     setActiveEditorBlockId(null);
     onSelectBlock("");
   }, [blockOrderKey]);
 
-  const selectedBlock = blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
+  const selectedBlock =
+    displayBlocks.find((block) => block.id === selectedCanvasBlockId) ??
+    displayBlocks.find((block) => block.id === selectedBlockId) ??
+    displayBlocks.find((block) => getBackendSlotId(block) === selectedBlockId) ??
+    displayBlocks[0];
+
+  useEffect(() => {
+    if (!selectedCanvasBlockId) {
+      return;
+    }
+    if (!displayBlocks.some((block) => block.id === selectedCanvasBlockId)) {
+      setSelectedCanvasBlockId(null);
+    }
+  }, [displayBlocks, selectedCanvasBlockId]);
 
   const getCanvasStatus = (block: CanvasBlock, index: number): CanvasStatus => {
     if (generatingVideoBlockId === block.id) {
       return "generating";
     }
 
-    if (generatedVideoThumbs[block.id]) {
+    if (generatedVideoUris[block.id] || generatedVideoThumbs[block.id]) {
       return "matched";
     }
 
     if (block.status === "matched") {
       return "matched";
+    }
+
+    if (block.status === "partial" || hasMaterialSegment(block)) {
+      return "duration_insufficient";
     }
 
     return "missing";
@@ -392,7 +778,9 @@ export const VideoBlockCanvas = ({
     }
 
     event.stopPropagation();
-    onSelectBlock(blockId);
+    const block = displayBlocks.find((item) => item.id === blockId);
+    setSelectedCanvasBlockId(blockId);
+    onSelectBlock(block ? getBackendSlotId(block) : blockId);
 
     const current = positions[blockId] ?? basePositions[blockId] ?? { x: 0, y: 0 };
     dragRef.current = {
@@ -452,15 +840,16 @@ export const VideoBlockCanvas = ({
       return;
     }
 
-    onSelectBlock(blockId);
+    const blockIndex = displayBlocks.findIndex((item) => item.id === blockId);
+    const block = displayBlocks[blockIndex];
+    setSelectedCanvasBlockId(blockId);
+    onSelectBlock(block ? getBackendSlotId(block) : blockId);
     if (startedOnPlay) {
       setActiveEditorBlockId(null);
       setPlaybackBlockId(blockId);
       return;
     }
 
-    const blockIndex = blocks.findIndex((block) => block.id === blockId);
-    const block = blocks[blockIndex];
     const status = block ? getCanvasStatus(block, blockIndex) : null;
     const canEdit =
       block &&
@@ -475,8 +864,8 @@ export const VideoBlockCanvas = ({
     setKeyframeLoadingBlockId(blockId);
     setSelectedCandidateUrl(null);
 
-    const blockIndex = blocks.findIndex((block) => block.id === blockId);
-    const block = blocks[blockIndex];
+    const blockIndex = displayBlocks.findIndex((block) => block.id === blockId);
+    const block = displayBlocks[blockIndex];
     if (!block) {
       setKeyframeLoadingBlockId(null);
       return;
@@ -486,31 +875,25 @@ export const VideoBlockCanvas = ({
       const prompt =
         block.v2?.coverageSlot?.recommended_aigc_prompt?.prompt ??
         getKeyframePrompt(block, blockIndex);
-      const response: unknown = await generateVideoAnalysisImageCandidates({
-        canvasSessionId,
-        slotId: block.id,
+      if (!canvasSessionId) {
+        throw new Error("V2 canvas session is required for image generation.");
+      }
+
+      const response: unknown = await generateV2CanvasImageCandidates(canvasSessionId, {
+        slot_id: getBackendSlotId(block),
+        missing_node_id: getMissingNodeId(block),
         prompt,
         count: 4,
-        referenceVideoUris:
-          block.v2?.coverageSlot?.direct_video_reference_materials
-            ?.map((material) => material.uri)
-            .filter((uri): uri is string => Boolean(uri)) ?? []
+        allow_fallback: false
       });
       if (hasCanvasSession(response)) {
         onCanvasSessionChange?.(response.canvas_session);
       }
       const generatedUris = extractImageCandidateUris(getImageGenerationPayload(response));
-      setCandidateSeeds((current) => {
-        const nextSeed = (current[blockId] ?? 0) + 1;
-        setKeyframeCandidates((candidateMap) => ({
-          ...candidateMap,
-          [blockId]: generatedUris.length > 0 ? generatedUris : rotateCandidates(nextSeed)
-        }));
-        return {
-          ...current,
-          [blockId]: nextSeed
-        };
-      });
+      setKeyframeCandidates((candidateMap) => ({
+        ...candidateMap,
+        [blockId]: generatedUris
+      }));
       setSelectedKeyframes((current) => {
         const next = { ...current };
         delete next[blockId];
@@ -551,7 +934,8 @@ export const VideoBlockCanvas = ({
     }
 
     const sourceVideoUri = block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri;
-    const fallbackImage = keyframeCandidates[block.id]?.[0] ?? imageForBlock(block, index);
+    const fallbackImage =
+      keyframeCandidates[block.id]?.[0] ?? materialImageForBlock(block) ?? imageForBlock(block, index);
     const payload: VideoGenerationPayload = {
       keyframe_image: selectedKeyframes[block.id] ?? (sourceVideoUri ? undefined : fallbackImage),
       source_video_uri: sourceVideoUri,
@@ -566,24 +950,35 @@ export const VideoBlockCanvas = ({
         block.v2?.coverageSlot?.ai_completion_required_duration ??
         block.v2?.coverageSlot?.required_duration ??
         5;
-      const response: unknown = await generateVideoAnalysisGapVideo({
-        approvedImageUri: payload.keyframe_image,
-        canvasSessionId,
-        durationSeconds,
-        sourceVideoUri: payload.source_video_uri,
-        slotDescription: block.migrationResult,
-        slotId: block.id,
-        slotType: block.slot.slot_type,
-        videoPrompt: payload.video_prompt
+      if (!canvasSessionId) {
+        throw new Error("V2 canvas session is required for video generation.");
+      }
+
+      const response: unknown = await generateV2CanvasGapVideo(canvasSessionId, {
+        approved_image_uri: payload.keyframe_image,
+        duration_seconds: durationSeconds,
+        slot_id: getBackendSlotId(block),
+        missing_node_id: getMissingNodeId(block),
+        video_prompt: payload.video_prompt,
+        allow_fallback: false
       });
       if (hasCanvasSession(response)) {
         onCanvasSessionChange?.(response.canvas_session);
       }
+      const generatedVideoUri = extractGeneratedVideoUri(getVideoGenerationPayload(response));
+      if (!generatedVideoUri) {
+        throw new Error("V2 video generation did not return a video URI.");
+      }
       const generatedThumbnail =
-        extractGeneratedVideoUri(getVideoGenerationPayload(response)) ??
         payload.keyframe_image ??
+        materialImageForBlock(block) ??
         keyframeCandidates[block.id]?.[0] ??
         imageForBlock(block, index);
+
+      setGeneratedVideoUris((current) => ({
+        ...current,
+        [block.id]: generatedVideoUri
+      }));
 
       setGeneratedVideoThumbs((current) => ({
         ...current,
@@ -611,9 +1006,9 @@ export const VideoBlockCanvas = ({
   };
 
   const editorBlock = activeEditorBlockId
-    ? blocks.find((block) => block.id === activeEditorBlockId)
+    ? displayBlocks.find((block) => block.id === activeEditorBlockId)
     : null;
-  const editorIndex = editorBlock ? blocks.findIndex((block) => block.id === editorBlock.id) : -1;
+  const editorIndex = editorBlock ? displayBlocks.findIndex((block) => block.id === editorBlock.id) : -1;
   const editorStatus = editorBlock ? getCanvasStatus(editorBlock, editorIndex) : null;
   const editorCanOpen =
     editorBlock &&
@@ -626,13 +1021,13 @@ export const VideoBlockCanvas = ({
       : null;
 
   const selectorBlock = selectorBlockId
-    ? blocks.find((block) => block.id === selectorBlockId)
+    ? displayBlocks.find((block) => block.id === selectorBlockId)
     : null;
   const selectorIndex = selectorBlock
-    ? blocks.findIndex((block) => block.id === selectorBlock.id)
+    ? displayBlocks.findIndex((block) => block.id === selectorBlock.id)
     : -1;
   const selectorCandidates = selectorBlockId
-    ? keyframeCandidates[selectorBlockId] ?? rotateCandidates(candidateSeeds[selectorBlockId] ?? 0)
+    ? keyframeCandidates[selectorBlockId] ?? []
     : [];
 
   return (
@@ -694,8 +1089,8 @@ export const VideoBlockCanvas = ({
           >
             {!isDragging ? (
               <svg className="figma-canvas-lines" aria-hidden="true">
-                {blocks.slice(0, -1).map((block, index) => {
-                  const nextBlock = blocks[index + 1];
+                {displayBlocks.slice(0, -1).map((block, index) => {
+                  const nextBlock = displayBlocks[index + 1];
                   const from = positions[block.id] ?? basePositions[block.id];
                   const to = positions[nextBlock.id] ?? basePositions[nextBlock.id];
                   const solid =
@@ -720,15 +1115,19 @@ export const VideoBlockCanvas = ({
               </svg>
             ) : null}
 
-            {blocks.map((block, index) => {
+            {displayBlocks.map((block, index) => {
               const pos = positions[block.id] ?? basePositions[block.id] ?? { x: 0, y: 0 };
-              const selected = selectedBlockId === block.id;
-              const image = generatedVideoThumbs[block.id] ?? imageForBlock(block, index);
+              const selected = selectedBlock?.id === block.id;
+              const image =
+                generatedVideoThumbs[block.id] ??
+                materialImageForBlock(block) ??
+                imageForBlock(block, index);
+              const cardVideo = generatedVideoUris[block.id] ?? materialVideoForBlock(block);
               const canvasStatus = getCanvasStatus(block, index);
               const gap = needsCompletion(block, index);
               const portTone = portColorByStatus[canvasStatus];
-              const aiCompleted = Boolean(generatedVideoThumbs[block.id]);
-              const playable = canvasStatus === "matched";
+              const aiCompleted = Boolean(generatedVideoUris[block.id] || generatedVideoThumbs[block.id]);
+              const playable = Boolean(cardVideo) || canvasStatus === "matched";
               const isGeneratingVideo = canvasStatus === "generating";
               const coverage = block.v2?.coverageSlot;
               const suggestions = suggestionsForBlock(block);
@@ -802,6 +1201,27 @@ export const VideoBlockCanvas = ({
                           试试AI补齐吧！
                         </p>
                       </div>
+                    ) : cardVideo ? (
+                      <>
+                        <video muted playsInline preload="metadata" src={cardVideo} />
+                        <button
+                          type="button"
+                          className="figma-play-overlay"
+                          onClick={(event) => event.stopPropagation()}
+                          onKeyDown={(event) => {
+                            if (event.key !== "Enter" && event.key !== " ") {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setPlaybackBlockId(block.id);
+                          }}
+                          title="播放视频"
+                        >
+                          <span aria-hidden="true" />
+                        </button>
+                        {aiCompleted ? <em className="figma-ai-complete-tag">AI</em> : null}
+                      </>
                     ) : (
                       <>
                         <img alt={labelForBlock(block, index)} draggable={false} src={image} />
@@ -1037,25 +1457,39 @@ export const VideoBlockCanvas = ({
       {playbackBlockId ? (
         <div className="figma-playback-modal" role="dialog" aria-modal="true" aria-label="视频播放预览">
           <div className="figma-playback-panel">
-            <div className="figma-ai-modal-head">
-              <div>
-                <span>视频预览</span>
-                <h2>
-                  {labelForBlock(
-                    blocks.find((block) => block.id === playbackBlockId) ?? blocks[0],
-                    blocks.findIndex((block) => block.id === playbackBlockId)
+            {(() => {
+              const playbackBlock =
+                displayBlocks.find((block) => block.id === playbackBlockId) ?? displayBlocks[0];
+              const playbackIndex = displayBlocks.findIndex((block) => block.id === playbackBlockId);
+              const videoSrc =
+                generatedVideoUris[playbackBlockId] ?? materialVideoForBlock(playbackBlock);
+              const poster =
+                generatedVideoThumbs[playbackBlockId] ??
+                materialImageForBlock(playbackBlock);
+
+              return (
+                <>
+                  <div className="figma-ai-modal-head">
+                    <div>
+                      <span>视频预览</span>
+                      <h2>{labelForBlock(playbackBlock, playbackIndex)}</h2>
+                    </div>
+                    <button type="button" onClick={() => setPlaybackBlockId(null)} aria-label="关闭">
+                      ×
+                    </button>
+                  </div>
+                  {videoSrc ? (
+                    <video className="figma-video-player" controls poster={poster} src={videoSrc} />
+                  ) : (
+                    <div className="figma-video-placeholder">
+                      <span aria-hidden="true" />
+                      <strong>播放接口待接入</strong>
+                      <p>这里预留后端视频 URL 接入点；拿到生成结果后可替换为真实 video 播放。</p>
+                    </div>
                   )}
-                </h2>
-              </div>
-              <button type="button" onClick={() => setPlaybackBlockId(null)} aria-label="关闭">
-                ×
-              </button>
-            </div>
-            <div className="figma-video-placeholder">
-              <span aria-hidden="true" />
-              <strong>播放接口待接入</strong>
-              <p>这里预留后端视频 URL 接入点；拿到生成结果后可替换为真实 video 播放。</p>
-            </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       ) : null}
@@ -1063,12 +1497,12 @@ export const VideoBlockCanvas = ({
       {selectedBlock ? (
         <div className="figma-canvas-status" aria-live="polite">
           {(() => {
-            const index = blocks.findIndex((block) => block.id === selectedBlock.id);
+            const index = displayBlocks.findIndex((block) => block.id === selectedBlock.id);
             const status = getCanvasStatus(selectedBlock, index);
             return (
               <>
                 <span>{labelForBlock(selectedBlock, index)}</span>
-                <strong>{statusTextFor(status, Boolean(generatedVideoThumbs[selectedBlock.id]))}</strong>
+                <strong>{statusTextFor(status, Boolean(generatedVideoUris[selectedBlock.id] || generatedVideoThumbs[selectedBlock.id]))}</strong>
               </>
             );
           })()}
