@@ -1,13 +1,14 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   generateV2CanvasGapVideo,
   generateV2CanvasImageCandidates
 } from "../api/client";
-import type { V2CanvasSession } from "../api/client";
-import type { CanvasBlock, V2MaterialAssignment } from "../types";
+import type { V2CanvasNode, V2CanvasSession } from "../api/client";
+import type { CanvasBlock, V2MaterialAssignment, V2MaterialCoverageSlot } from "../types";
 
 type VideoBlockCanvasProps = {
   blocks: CanvasBlock[];
+  canvasSession?: V2CanvasSession;
   canvasSessionId?: string;
   selectedBlockId: string;
   onCanvasSessionChange?: (canvasSession: V2CanvasSession) => void;
@@ -199,6 +200,31 @@ const getStringField = (record: Record<string, unknown>, fields: string[]) => {
   return undefined;
 };
 
+const getNumberField = (
+  record: Record<string, unknown> | undefined,
+  fields: string[],
+  fallback = 0
+) => {
+  if (!record) {
+    return fallback;
+  }
+
+  for (const field of fields) {
+    const value = record[field];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return fallback;
+};
+
 const extractImageCandidateUris = (response: unknown): string[] => {
   const record = asRecord(response);
   const items = Array.isArray(record.data)
@@ -237,8 +263,269 @@ const getVideoGenerationPayload = (response: unknown): unknown => {
   return record.generation_result ?? response;
 };
 
+const getBackendSlotId = (block: CanvasBlock): string =>
+  block.v2?.coverageSlot?.slot_id || block.v2?.parentSlotId || block.slot.slot_id || block.id;
+
+const getMissingNodeId = (block: CanvasBlock): string | undefined =>
+  block.v2?.displayKind === "missing_material" ? block.v2.canvasNodeId : undefined;
+
+const toMaterialAssignment = (node: V2CanvasNode): V2MaterialAssignment => {
+  const data = node.data as V2MaterialAssignment;
+  return {
+    ...data,
+    segment_id: data.segment_id || node.segment_id,
+    source_material_id: data.source_material_id || data.material_id,
+    label: data.label || node.segment_id || node.node_id
+  };
+};
+
+const compareCanvasNodes = (first: V2CanvasNode, second: V2CanvasNode): number => {
+  const firstOrder = getNumberField(first.data, ["display_order", "order"], first.display_order ?? 0);
+  const secondOrder = getNumberField(second.data, ["display_order", "order"], second.display_order ?? 0);
+  if (firstOrder !== secondOrder) {
+    return firstOrder - secondOrder;
+  }
+
+  const firstStart = getNumberField(first.data, [
+    "slot_start_seconds",
+    "target_start_seconds",
+    "start_seconds"
+  ]);
+  const secondStart = getNumberField(second.data, [
+    "slot_start_seconds",
+    "target_start_seconds",
+    "start_seconds"
+  ]);
+  if (firstStart !== secondStart) {
+    return firstStart - secondStart;
+  }
+
+  if (first.node_type !== second.node_type) {
+    return first.node_type === "material_segment" ? -1 : 1;
+  }
+
+  const firstSourceStart = getNumberField(first.data, [
+    "source_in_seconds",
+    "final_source_in_seconds"
+  ]);
+  const secondSourceStart = getNumberField(second.data, [
+    "source_in_seconds",
+    "final_source_in_seconds"
+  ]);
+  if (firstSourceStart !== secondSourceStart) {
+    return firstSourceStart - secondSourceStart;
+  }
+
+  return first.node_id.localeCompare(second.node_id);
+};
+
+const withMaterialOnlyCoverage = (
+  coverageSlot: V2MaterialCoverageSlot | undefined,
+  material: V2MaterialAssignment
+): V2MaterialCoverageSlot | undefined => {
+  if (!coverageSlot) {
+    return undefined;
+  }
+
+  const duration =
+    material.matched_material_duration ??
+    material.duration_seconds ??
+    material.usable_duration_seconds ??
+    coverageSlot.matched_material_duration;
+
+  return {
+    ...coverageSlot,
+    ai_completion_required_duration: 0,
+    assigned_materials: [material],
+    assigned_segments: [material],
+    coverage_status: "covered",
+    frontend_coverage_status: "fully_matched",
+    matched_material_duration: duration,
+    matched_material_segments: [material],
+    missing_duration: 0,
+    needs_ai_completion: false
+  };
+};
+
+const withMissingOnlyCoverage = (
+  coverageSlot: V2MaterialCoverageSlot | undefined,
+  missingNode: V2CanvasNode
+): V2MaterialCoverageSlot | undefined => {
+  if (!coverageSlot) {
+    return undefined;
+  }
+
+  const missingDuration = getNumberField(
+    missingNode.data,
+    ["missing_duration", "missing_duration_seconds", "required_duration"],
+    coverageSlot.missing_duration || coverageSlot.ai_completion_required_duration || coverageSlot.required_duration
+  );
+
+  return {
+    ...coverageSlot,
+    ai_completion_required_duration: missingDuration,
+    assigned_materials: [],
+    assigned_segments: [],
+    coverage_status: "missing",
+    direct_video_reference_materials:
+      (missingNode.data.direct_video_reference_materials as V2MaterialCoverageSlot["direct_video_reference_materials"]) ??
+      coverageSlot.direct_video_reference_materials,
+    frontend_coverage_status: "material_insufficient",
+    gap_reason:
+      getStringField(missingNode.data, ["gap_reason", "missing", "reason"]) ||
+      coverageSlot.gap_reason,
+    matched_material_duration: 0,
+    matched_material_segments: [],
+    missing_duration: missingDuration,
+    needs_ai_completion: true,
+    recommended_aigc_prompt:
+      (missingNode.data.recommended_aigc_prompt as V2MaterialCoverageSlot["recommended_aigc_prompt"]) ??
+      coverageSlot.recommended_aigc_prompt,
+    recommended_video_prompt:
+      (missingNode.data.recommended_video_prompt as V2MaterialCoverageSlot["recommended_video_prompt"]) ??
+      coverageSlot.recommended_video_prompt
+  };
+};
+
+const materialBlockFromNode = (
+  baseBlock: CanvasBlock,
+  node: V2CanvasNode,
+  slotId: string
+): CanvasBlock => {
+  const material = toMaterialAssignment(node);
+  const coverageSlot = withMaterialOnlyCoverage(baseBlock.v2?.coverageSlot, material);
+
+  return {
+    ...baseBlock,
+    id: node.node_id,
+    materialSummary:
+      material.visual_description ||
+      material.content_summary ||
+      baseBlock.materialSummary,
+    status: "matched",
+    v2: {
+      ...baseBlock.v2,
+      canvasNodeId: node.node_id,
+      coverageSlot,
+      displayKind: "material_segment",
+      parentSlotId: slotId
+    }
+  };
+};
+
+const missingBlockFromNode = (
+  baseBlock: CanvasBlock,
+  node: V2CanvasNode,
+  slotId: string
+): CanvasBlock => {
+  const coverageSlot = withMissingOnlyCoverage(baseBlock.v2?.coverageSlot, node);
+  const missing =
+    coverageSlot?.gap_reason ||
+    getStringField(node.data, ["missing", "gap_reason", "reason"]) ||
+    baseBlock.gap?.missing ||
+    baseBlock.materialSummary;
+
+  return {
+    ...baseBlock,
+    id: node.node_id,
+    gap: {
+      gap_id: `${slotId}_${node.node_id}_gap`,
+      slot_id: slotId,
+      slot_type: baseBlock.slot.slot_type,
+      missing,
+      impact: coverageSlot?.recommended_video_prompt?.prompt_description || baseBlock.gap?.impact || missing,
+      severity: "high",
+      strategy:
+        coverageSlot?.recommended_video_prompt?.prompt ||
+        coverageSlot?.recommended_aigc_prompt?.prompt ||
+        baseBlock.gap?.strategy ||
+        missing,
+      fill_options: baseBlock.gap?.fill_options ?? []
+    },
+    materialSummary: missing,
+    status: "missing",
+    v2: {
+      ...baseBlock.v2,
+      canvasNodeId: node.node_id,
+      coverageSlot,
+      displayKind: "missing_material",
+      parentSlotId: slotId
+    }
+  };
+};
+
+const createCanvasDisplayBlocks = (
+  blocks: CanvasBlock[],
+  canvasSession?: V2CanvasSession
+): CanvasBlock[] => {
+  if (!canvasSession?.nodes?.length) {
+    return blocks;
+  }
+
+  const nodesById = new Map(canvasSession.nodes.map((node) => [node.node_id, node]));
+  const blocksBySlotId = new Map(blocks.map((block) => [getBackendSlotId(block), block]));
+  const slotNodes = canvasSession.nodes
+    .filter((node) => node.node_type === "script_slot")
+    .sort(compareCanvasNodes);
+
+  if (!slotNodes.length) {
+    return blocks;
+  }
+
+  const displayBlocks: CanvasBlock[] = [];
+  const consumedSlotIds = new Set<string>();
+
+  for (const slotNode of slotNodes) {
+    const slotId = slotNode.slot_id || getStringField(slotNode.data, ["slot_id"]);
+    if (!slotId) {
+      continue;
+    }
+
+    const baseBlock = blocksBySlotId.get(slotId);
+    if (!baseBlock) {
+      continue;
+    }
+
+    consumedSlotIds.add(slotId);
+    const materialNodes = canvasSession.edges
+      .filter(
+        (edge) => edge.edge_type === "fills_slot" && edge.target_node_id === slotNode.node_id
+      )
+      .map((edge) => nodesById.get(edge.source_node_id))
+      .filter((node): node is V2CanvasNode => node?.node_type === "material_segment")
+      .sort(compareCanvasNodes);
+    const missingNodes = canvasSession.edges
+      .filter(
+        (edge) => edge.edge_type === "has_gap" && edge.source_node_id === slotNode.node_id
+      )
+      .map((edge) => nodesById.get(edge.target_node_id))
+      .filter((node): node is V2CanvasNode => node?.node_type === "missing_material")
+      .sort(compareCanvasNodes);
+
+    const childBlocks = [
+      ...materialNodes.map((node) => materialBlockFromNode(baseBlock, node, slotId)),
+      ...missingNodes.map((node) => missingBlockFromNode(baseBlock, node, slotId))
+    ].sort((first, second) => {
+      const firstNode = first.v2?.canvasNodeId ? nodesById.get(first.v2.canvasNodeId) : undefined;
+      const secondNode = second.v2?.canvasNodeId ? nodesById.get(second.v2.canvasNodeId) : undefined;
+      return firstNode && secondNode ? compareCanvasNodes(firstNode, secondNode) : 0;
+    });
+
+    displayBlocks.push(...(childBlocks.length ? childBlocks : [baseBlock]));
+  }
+
+  for (const block of blocks) {
+    if (!consumedSlotIds.has(getBackendSlotId(block))) {
+      displayBlocks.push(block);
+    }
+  }
+
+  return displayBlocks.length ? displayBlocks : blocks;
+};
+
 export const VideoBlockCanvas = ({
   blocks,
+  canvasSession,
   canvasSessionId,
   selectedBlockId,
   onCanvasSessionChange,
@@ -248,7 +535,11 @@ export const VideoBlockCanvas = ({
   onExport,
   projectName = "口红广告"
 }: VideoBlockCanvasProps) => {
-  const basePositions = useMemo(() => fallbackPositions(blocks), [blocks]);
+  const displayBlocks = useMemo(
+    () => createCanvasDisplayBlocks(blocks, canvasSession),
+    [blocks, canvasSession]
+  );
+  const basePositions = useMemo(() => fallbackPositions(displayBlocks), [displayBlocks]);
   const [positions, setPositions] = useState<Record<string, CanvasPosition>>(basePositions);
   const [isDragging, setIsDragging] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
@@ -267,6 +558,7 @@ export const VideoBlockCanvas = ({
   const [selectedKeyframes, setSelectedKeyframes] = useState<Record<string, string>>({});
   const [generatedVideoThumbs, setGeneratedVideoThumbs] = useState<Record<string, string>>({});
   const [generatedVideoUris, setGeneratedVideoUris] = useState<Record<string, string>>({});
+  const [selectedCanvasBlockId, setSelectedCanvasBlockId] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
@@ -285,7 +577,32 @@ export const VideoBlockCanvas = ({
     scrollTop: number;
   } | null>(null);
 
-  const selectedBlock = blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
+  useEffect(() => {
+    setPositions((current) => {
+      const next = { ...basePositions };
+      for (const block of displayBlocks) {
+        if (current[block.id]) {
+          next[block.id] = current[block.id];
+        }
+      }
+      return next;
+    });
+  }, [basePositions, displayBlocks]);
+
+  const selectedBlock =
+    displayBlocks.find((block) => block.id === selectedCanvasBlockId) ??
+    displayBlocks.find((block) => block.id === selectedBlockId) ??
+    displayBlocks.find((block) => getBackendSlotId(block) === selectedBlockId) ??
+    displayBlocks[0];
+
+  useEffect(() => {
+    if (!selectedCanvasBlockId) {
+      return;
+    }
+    if (!displayBlocks.some((block) => block.id === selectedCanvasBlockId)) {
+      setSelectedCanvasBlockId(null);
+    }
+  }, [displayBlocks, selectedCanvasBlockId]);
 
   const getCanvasStatus = (block: CanvasBlock): CanvasStatus => {
     if (generatingVideoBlockId === block.id) {
@@ -462,7 +779,9 @@ export const VideoBlockCanvas = ({
     }
 
     event.stopPropagation();
-    onSelectBlock(blockId);
+    const block = displayBlocks.find((item) => item.id === blockId);
+    setSelectedCanvasBlockId(blockId);
+    onSelectBlock(block ? getBackendSlotId(block) : blockId);
 
     const current = positions[blockId] ?? basePositions[blockId] ?? { x: 0, y: 0 };
     dragRef.current = {
@@ -522,15 +841,15 @@ export const VideoBlockCanvas = ({
       return;
     }
 
-    onSelectBlock(blockId);
+    const block = displayBlocks.find((item) => item.id === blockId);
+    setSelectedCanvasBlockId(blockId);
+    onSelectBlock(block ? getBackendSlotId(block) : blockId);
     if (startedOnPlay) {
       setActiveEditorBlockId(null);
       setPlaybackBlockId(blockId);
       return;
     }
 
-    const blockIndex = blocks.findIndex((block) => block.id === blockId);
-    const block = blocks[blockIndex];
     const status = block ? getCanvasStatus(block) : null;
     const canEdit =
       block &&
@@ -545,8 +864,8 @@ export const VideoBlockCanvas = ({
     setKeyframeLoadingBlockId(blockId);
     setSelectedCandidateUrl(null);
 
-    const blockIndex = blocks.findIndex((block) => block.id === blockId);
-    const block = blocks[blockIndex];
+    const blockIndex = displayBlocks.findIndex((block) => block.id === blockId);
+    const block = displayBlocks[blockIndex];
     if (!block) {
       setKeyframeLoadingBlockId(null);
       return;
@@ -561,7 +880,8 @@ export const VideoBlockCanvas = ({
       }
 
       const response: unknown = await generateV2CanvasImageCandidates(canvasSessionId, {
-        slot_id: block.id,
+        slot_id: getBackendSlotId(block),
+        missing_node_id: getMissingNodeId(block),
         prompt,
         count: 4,
         allow_fallback: false
@@ -637,7 +957,8 @@ export const VideoBlockCanvas = ({
       const response: unknown = await generateV2CanvasGapVideo(canvasSessionId, {
         approved_image_uri: payload.keyframe_image,
         duration_seconds: durationSeconds,
-        slot_id: block.id,
+        slot_id: getBackendSlotId(block),
+        missing_node_id: getMissingNodeId(block),
         video_prompt: payload.video_prompt,
         allow_fallback: false
       });
@@ -684,9 +1005,9 @@ export const VideoBlockCanvas = ({
   };
 
   const editorBlock = activeEditorBlockId
-    ? blocks.find((block) => block.id === activeEditorBlockId)
+    ? displayBlocks.find((block) => block.id === activeEditorBlockId)
     : null;
-  const editorIndex = editorBlock ? blocks.findIndex((block) => block.id === editorBlock.id) : -1;
+  const editorIndex = editorBlock ? displayBlocks.findIndex((block) => block.id === editorBlock.id) : -1;
   const editorStatus = editorBlock ? getCanvasStatus(editorBlock) : null;
   const editorCanOpen =
     editorBlock &&
@@ -699,10 +1020,10 @@ export const VideoBlockCanvas = ({
       : null;
 
   const selectorBlock = selectorBlockId
-    ? blocks.find((block) => block.id === selectorBlockId)
+    ? displayBlocks.find((block) => block.id === selectorBlockId)
     : null;
   const selectorIndex = selectorBlock
-    ? blocks.findIndex((block) => block.id === selectorBlock.id)
+    ? displayBlocks.findIndex((block) => block.id === selectorBlock.id)
     : -1;
   const selectorCandidates = selectorBlockId
     ? keyframeCandidates[selectorBlockId] ?? []
@@ -767,8 +1088,8 @@ export const VideoBlockCanvas = ({
           >
             {!isDragging ? (
               <svg className="figma-canvas-lines" aria-hidden="true">
-                {blocks.slice(0, -1).map((block, index) => {
-                  const nextBlock = blocks[index + 1];
+                {displayBlocks.slice(0, -1).map((block, index) => {
+                  const nextBlock = displayBlocks[index + 1];
                   const from = positions[block.id] ?? basePositions[block.id];
                   const to = positions[nextBlock.id] ?? basePositions[nextBlock.id];
                   const solid =
@@ -793,9 +1114,9 @@ export const VideoBlockCanvas = ({
               </svg>
             ) : null}
 
-            {blocks.map((block, index) => {
+            {displayBlocks.map((block, index) => {
               const pos = positions[block.id] ?? basePositions[block.id] ?? { x: 0, y: 0 };
-              const selected = selectedBlockId === block.id;
+              const selected = selectedBlock?.id === block.id;
               const hasAssignedMaterial = hasMaterialSegment(block);
               const image =
                 generatedVideoThumbs[block.id] ??
@@ -1089,8 +1410,8 @@ export const VideoBlockCanvas = ({
           <div className="figma-playback-panel">
             {(() => {
               const playbackBlock =
-                blocks.find((block) => block.id === playbackBlockId) ?? blocks[0];
-              const playbackIndex = blocks.findIndex((block) => block.id === playbackBlockId);
+                displayBlocks.find((block) => block.id === playbackBlockId) ?? displayBlocks[0];
+              const playbackIndex = displayBlocks.findIndex((block) => block.id === playbackBlockId);
               const videoSrc =
                 generatedVideoUris[playbackBlockId] ?? materialVideoForBlock(playbackBlock);
               const poster =
@@ -1129,7 +1450,7 @@ export const VideoBlockCanvas = ({
       {selectedBlock ? (
         <div className="figma-canvas-status" aria-live="polite">
           {(() => {
-            const index = blocks.findIndex((block) => block.id === selectedBlock.id);
+            const index = displayBlocks.findIndex((block) => block.id === selectedBlock.id);
             const status = getCanvasStatus(selectedBlock);
             return (
               <>

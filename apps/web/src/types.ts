@@ -212,6 +212,9 @@ export type CanvasBlock = {
   timeline?: TimelineItem;
   v2?: {
     coverageSlot?: V2MaterialCoverageSlot;
+    canvasNodeId?: string;
+    displayKind?: "slot" | "material_segment" | "missing_material";
+    parentSlotId?: string;
     sourcePipelineId?: string;
   };
 };
