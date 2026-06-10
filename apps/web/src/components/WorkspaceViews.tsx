@@ -97,6 +97,17 @@ const steps: Array<{
 ];
 
 const slotLabelByType: Record<string, string> = {
+  strong_hook: "强 Hook",
+  hook: "强 Hook",
+  pain_point_scene: "痛点场景",
+  product_hero: "产品亮相",
+  product_intro: "产品亮相",
+  usage_process: "使用动作",
+  usage_action: "使用动作",
+  selling_point_proof: "卖点证明",
+  proof: "卖点证明",
+  effect_comparison: "效果对比",
+  comparison: "效果对比",
   risk_or_pain_hook: "风险 Hook",
   pain_desire: "需求拆解",
   product_reveal: "产品露出",
@@ -156,7 +167,13 @@ const visualSourceText: Record<string, string> = {
 
 const sourceMarks = ["¹", "²", "³", "⁴", "⁵", "⁶"];
 
-const readableSlot = (block: CanvasBlock) => slotLabelByType[block.slot.slot_type] ?? block.label;
+const normalizeSlotType = (value: string | undefined): string =>
+  (value ?? "").toLowerCase().replace(/[^a-z0-9]+/gu, "_");
+
+const readableSlot = (block: CanvasBlock) =>
+  slotLabelByType[normalizeSlotType(block.slot.slot_type)] ??
+  slotLabelByType[normalizeSlotType(block.label)] ??
+  block.label;
 
 const readableGoal = (block: CanvasBlock) => {
   return slotGoalByType[block.slot.slot_type] ?? block.slot.content_goal;
@@ -238,8 +255,14 @@ const getAssignedMaterialRange = (material: AssignedMaterial): string | undefine
     return material.time_range;
   }
 
-  const start = material.source_in_seconds ?? material.start_seconds;
-  const end = material.source_out_seconds ?? material.end_seconds;
+  const start =
+    material.final_source_in_seconds ??
+    material.source_in_seconds ??
+    material.start_seconds;
+  const end =
+    material.final_source_out_seconds ??
+    material.source_out_seconds ??
+    material.end_seconds;
   const startText = formatMaterialSeconds(start);
   const endText = formatMaterialSeconds(end);
 
@@ -247,19 +270,78 @@ const getAssignedMaterialRange = (material: AssignedMaterial): string | undefine
     return `${startText} - ${endText}`;
   }
 
-  const durationText = formatMaterialSeconds(material.matched_material_duration);
+  const durationText = formatMaterialSeconds(
+    material.matched_material_duration ??
+    material.duration_seconds ??
+    material.usable_duration_seconds
+  );
   return durationText ? `匹配 ${durationText}` : undefined;
 };
 
 const isAssignedMaterialSegment = (material: AssignedMaterial): boolean => {
-  const start = material.source_in_seconds ?? material.start_seconds;
-  const end = material.source_out_seconds ?? material.end_seconds;
+  const start =
+    material.final_source_in_seconds ??
+    material.source_in_seconds ??
+    material.start_seconds;
+  const end =
+    material.final_source_out_seconds ??
+    material.source_out_seconds ??
+    material.end_seconds;
   return (
     Boolean(material.time_range) ||
     (typeof start === "number" && typeof end === "number" && end > start) ||
     (typeof material.matched_material_duration === "number" &&
-      material.matched_material_duration > 0)
+      material.matched_material_duration > 0) ||
+    (typeof material.duration_seconds === "number" && material.duration_seconds > 0) ||
+    (typeof material.usable_duration_seconds === "number" &&
+      material.usable_duration_seconds > 0)
   );
+};
+
+const getCandidateMaterialItems = (
+  slot: V2MaterialCoverageSlot | undefined
+): Array<{ name: string; note?: string }> => {
+  if (!slot) {
+    return [];
+  }
+
+  const segmentItems = (slot.candidate_materials ?? []).flatMap((material) =>
+    (material.candidate_segments ?? []).map((segment, index) => ({
+      name:
+        material.label ||
+        material.model_label ||
+        material.material_id ||
+        segment.segment_id ||
+        `匹配片段 ${index + 1}`,
+      note:
+        getAssignedMaterialRange(segment) ||
+        segment.visual_description ||
+        segment.recommended_usage ||
+        segment.content_summary ||
+        material.fit_reason
+    }))
+  );
+
+  if (segmentItems.length > 0) {
+    return segmentItems;
+  }
+
+  const candidateItems = (slot.candidate_materials ?? []).map((material) => ({
+    name: material.label || material.model_label || material.material_id,
+    note:
+      formatMaterialSeconds(material.duration_seconds) ||
+      material.fit_reason ||
+      material.quality
+  }));
+
+  if (candidateItems.length > 0) {
+    return candidateItems;
+  }
+
+  return (slot.direct_video_reference_materials ?? []).map((material) => ({
+    name: material.label || material.material_id,
+    note: formatMaterialSeconds(material.duration_seconds)
+  }));
 };
 
 const getMigrationMaterialItems = (
@@ -287,6 +369,11 @@ const getMigrationMaterialItems = (
 
   if (assignedItems.length > 0) {
     return [...assignedItems, ...localItems];
+  }
+
+  const candidateItems = getCandidateMaterialItems(block.v2?.coverageSlot);
+  if (candidateItems.length > 0) {
+    return [...candidateItems, ...localItems];
   }
 
   const fallbackItems = block.v2?.coverageSlot

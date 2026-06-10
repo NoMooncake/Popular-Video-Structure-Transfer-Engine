@@ -176,9 +176,13 @@ export type V2MaterialAssignment = {
   time_range?: string;
   start_seconds?: number;
   end_seconds?: number;
+  final_source_in_seconds?: number;
+  final_source_out_seconds?: number;
   source_in_seconds?: number;
   source_out_seconds?: number;
   matched_material_duration?: number;
+  duration_seconds?: number;
+  usable_duration_seconds?: number;
   visual_description?: string;
   recommended_usage?: string;
   content_summary?: string;
@@ -277,8 +281,12 @@ export type V2MaterialCoverageSlot = {
   candidate_materials?: Array<{
     material_id: string;
     label?: string;
+    model_label?: string;
     duration_seconds?: number;
+    duration_status?: string;
     fit_reason?: string;
+    quality?: string;
+    candidate_segments?: V2MaterialAssignment[];
   }>;
   direct_video_reference_materials?: Array<{
     material_id: string;

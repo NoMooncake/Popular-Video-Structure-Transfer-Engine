@@ -47,6 +47,35 @@ const formatTimeRange = (timeRange: CanvasBlock["slot"]["time_range"]): string =
   return `${timeRange.start_seconds}-${timeRange.end_seconds}s`;
 };
 
+const v2SlotLabelByType: Record<string, string> = {
+  strong_hook: "强 Hook",
+  hook: "强 Hook",
+  pain_point_scene: "痛点场景",
+  product_hero: "产品亮相",
+  product_intro: "产品亮相",
+  usage_process: "使用动作",
+  usage_action: "使用动作",
+  selling_point_proof: "卖点证明",
+  proof: "卖点证明",
+  effect_comparison: "效果对比",
+  comparison: "效果对比",
+  cta: "行动引导"
+};
+
+const getV2SlotLabel = (slot: V2MaterialCoverageSlot): string =>
+  slot.slot_name ||
+  v2SlotLabelByType[slot.slot_type.toLowerCase().replace(/[^a-z0-9]+/gu, "_")] ||
+  slot.slot_type;
+
+const getV2DisplayTitle = (slot: V2MaterialCoverageSlot): string => {
+  const rawTitle = slot.frontend_display?.migration_result_title;
+  const mappedTitle = rawTitle
+    ? v2SlotLabelByType[rawTitle.toLowerCase().replace(/[^a-z0-9]+/gu, "_")]
+    : undefined;
+
+  return mappedTitle || getV2SlotLabel(slot);
+};
+
 const getV2AssignedMaterials = (slot: V2MaterialCoverageSlot) => {
   const seen = new Set<string>();
   return [
@@ -140,8 +169,7 @@ const getV2FallbackCopy = (slot: V2MaterialCoverageSlot): string => {
     slot.frontend_display?.shot_description ||
     slot.visual_goal ||
     slot.frontend_display?.migration_result_description ||
-    slot.slot_name ||
-    slot.slot_type;
+    getV2SlotLabel(slot);
 
   if (/hook/iu.test(slot.slot_type)) {
     return "先用一句话抓住注意力，突出产品最直接的吸引点。";
@@ -163,7 +191,7 @@ const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] =>
   slot_id: slot.slot_id,
   slot_type: slot.slot_type,
   time_range: formatV2Duration(slot),
-  content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? slot.slot_name ?? slot.slot_type,
+  content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? getV2SlotLabel(slot),
   rhythm: "medium",
   required_materials: [
     {
@@ -177,8 +205,7 @@ const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] =>
     slot.frontend_display?.migration_result_description ??
     slot.frontend_display?.shot_description ??
     slot.visual_goal ??
-    slot.slot_name ??
-    slot.slot_type,
+    getV2SlotLabel(slot),
   source_evidence: [
     slot.frontend_display?.material_status,
     slot.frontend_coverage_label,
@@ -237,7 +264,7 @@ const toV2TimelineItem = (
     slot_id: slot.slot_id,
     time_range: timeRange,
     slot_type: slot.slot_type,
-    content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? slot.slot_name ?? slot.slot_type,
+    content_goal: slot.visual_goal ?? slot.frontend_display?.shot_description ?? getV2SlotLabel(slot),
     visual_source: hasV2AssignedSegment(slot) ? "user_material" : "generated_graphic",
     visual_description:
       slot.frontend_display?.material_summary ??
@@ -263,10 +290,7 @@ export const createCanvasBlocksFromV2Coverage = (
 
     return {
       id: slot.slot_id,
-      label:
-        slot.frontend_display?.migration_result_title ??
-        slot.slot_name ??
-        slot.slot_type,
+      label: getV2DisplayTitle(slot),
       timeRange,
       status: toV2MatchStatus(slot),
       migrationResult: structureSlot.migration_rule,
