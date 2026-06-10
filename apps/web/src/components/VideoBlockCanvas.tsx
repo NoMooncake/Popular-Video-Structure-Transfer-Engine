@@ -97,6 +97,17 @@ const getBlockMaterialAssignments = (block: CanvasBlock): V2MaterialAssignment[]
   });
 };
 
+const getPhysicalMaterialKey = (node: V2CanvasNode): string =>
+  [
+    node.data.file_id,
+    node.data.uri,
+    node.data.source_material_id,
+    node.data.material_id,
+    node.segment_id
+  ]
+    .map((value) => (typeof value === "string" ? value.trim() : ""))
+    .find(Boolean) ?? node.node_id;
+
 const hasMaterialSegment = (block: CanvasBlock) =>
   getBlockMaterialAssignments(block).some((material) => {
     const start = material.source_in_seconds ?? material.start_seconds;
@@ -486,6 +497,7 @@ const createCanvasDisplayBlocks = (
 
   const displayBlocks: CanvasBlock[] = [];
   const consumedSlotIds = new Set<string>();
+  const consumedMaterialKeys = new Set<string>();
 
   for (const slotNode of slotNodes) {
     const slotId = slotNode.slot_id || getStringField(slotNode.data, ["slot_id"]);
@@ -514,8 +526,33 @@ const createCanvasDisplayBlocks = (
       .filter((node): node is V2CanvasNode => node?.node_type === "missing_material")
       .sort(compareCanvasNodes);
 
+    const uniqueMaterialNodes = materialNodes.filter((node) => {
+      const materialKey = getPhysicalMaterialKey(node);
+      if (consumedMaterialKeys.has(materialKey)) {
+        return false;
+      }
+      consumedMaterialKeys.add(materialKey);
+      return true;
+    });
+    const duplicateMaterialOnly = materialNodes.length > 0 && uniqueMaterialNodes.length === 0;
+    const duplicateMissingNode: V2CanvasNode | undefined = duplicateMaterialOnly
+      ? {
+          node_id: `${slotNode.node_id}_duplicate_material_hidden`,
+          node_type: "missing_material",
+          slot_id: slotId,
+          display_order: slotNode.display_order,
+          data: {
+            slot_id: slotId,
+            slot_type: baseBlock.slot.slot_type,
+            missing_duration: baseBlock.v2?.coverageSlot?.missing_duration ?? 0,
+            gap_reason: "素材已用于前面的分镜，等待补充素材或 AI 补全。"
+          }
+        }
+      : undefined;
+
     const childBlocks = [
-      ...materialNodes.slice(0, 1).map((node) => materialBlockFromNode(baseBlock, node, slotId)),
+      ...uniqueMaterialNodes.slice(0, 1).map((node) => materialBlockFromNode(baseBlock, node, slotId)),
+      ...(duplicateMissingNode ? [missingBlockFromNode(baseBlock, duplicateMissingNode, slotId)] : []),
       ...missingNodes.map((node) => missingBlockFromNode(baseBlock, node, slotId))
     ].sort((first, second) => {
       const firstNode = first.v2?.canvasNodeId ? nodesById.get(first.v2.canvasNodeId) : undefined;

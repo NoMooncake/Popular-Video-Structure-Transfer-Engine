@@ -987,6 +987,10 @@ const findAvailableSegmentRange = (
   requestedDuration: number
 ): MaterialRange | undefined => {
   const materialKey = getSegmentPhysicalMaterialKey(segment);
+  if (allocationState.usedRangesByKey.has(materialKey)) {
+    return undefined;
+  }
+
   const segmentRange = getSegmentFinalRange(segment);
   if (requestedDuration <= 0 || segmentRange.duration_seconds <= 0) {
     return undefined;
@@ -1404,7 +1408,7 @@ const buildSegmentAwareMaterialCoverage = (
       ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
       minimum_ai_completion_gap_seconds: minimumAiCompletionGapSeconds,
       material_reuse_policy: {
-        mode: "single_primary_non_overlapping_source_range",
+        mode: "single_primary_source_video_per_canvas",
         physical_material_keys_seen_so_far: Array.from(allocationState.usedRangesByKey.keys())
       },
       ai_completion_required_duration:
