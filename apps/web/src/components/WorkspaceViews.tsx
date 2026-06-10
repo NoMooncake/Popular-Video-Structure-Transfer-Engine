@@ -2145,7 +2145,7 @@ const DemoView = ({
             fps: 24,
             background_color: "black",
             allow_loop_short_clips: true,
-            generate_bgm: false
+            generate_bgm: true
           });
           exportedUrl = result.final_video_url;
           onWorkflowPatch({
