@@ -3754,6 +3754,12 @@ input {
   box-shadow: 0 4px 16px rgba(254, 44, 85, 0.45);
 }
 
+.migration-nav-button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+  transform: none;
+}
+
 .migration-nav-button:active {
   transform: scale(0.96);
 }
@@ -3768,6 +3774,21 @@ input {
   line-height: 1;
   transform: translateY(-1px);
   width: 24px;
+}
+
+.migration-canvas-status {
+  position: absolute;
+  left: 50%;
+  top: 66px;
+  transform: translateX(-50%);
+  color: var(--text-strong);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.migration-canvas-status.error {
+  color: var(--theme);
 }
 
 /* Horizontal scroll for the fixed-width matrix */

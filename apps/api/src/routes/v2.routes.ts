@@ -339,10 +339,33 @@ v2Routes.post(
 );
 
 v2Routes.post("/canvas/revalidate", async (req, res) => {
+  const startedAt = Date.now();
+  const sessionId =
+    typeof req.body?.session_id === "string"
+      ? req.body.session_id
+      : typeof req.body?.script_session_id === "string"
+        ? req.body.script_session_id
+        : "inline_script_session";
+  console.info(`[v2 canvas revalidate] start session=${sessionId}`);
   try {
     const result = await revalidateV2CanvasFromScript(req.body ?? {});
+    const materialCoverage =
+      result.material_coverage && typeof result.material_coverage === "object"
+        ? (result.material_coverage as Record<string, unknown>)
+        : {};
+    const slotCoverage = materialCoverage.slot_coverage;
+    const slotCount = Array.isArray(slotCoverage)
+      ? slotCoverage.length
+      : 0;
+    console.info(
+      `[v2 canvas revalidate] done session=${sessionId} canvas=${result.canvas_session_id || "none"} slots=${slotCount} duration_ms=${Date.now() - startedAt}`
+    );
     res.json(result);
   } catch (error) {
+    console.error(
+      `[v2 canvas revalidate] failed session=${sessionId} duration_ms=${Date.now() - startedAt}`,
+      error
+    );
     if (error instanceof V2PipelineInputError) {
       res.status(error.statusCode).json({
         error: {

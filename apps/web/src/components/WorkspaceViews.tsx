@@ -1430,6 +1430,8 @@ const StructureMigrationView = ({
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [canvasRevalidateError, setCanvasRevalidateError] = useState("");
+  const [isEnteringCanvas, setIsEnteringCanvas] = useState(false);
   const [localMaterials, setLocalMaterials] = useState<Record<string, string[]>>({});
   const [pendingMaterialBlockId, setPendingMaterialBlockId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState(projectName ?? "");
@@ -1520,11 +1522,17 @@ const StructureMigrationView = ({
   };
 
   const enterCanvas = async () => {
+    if (isEnteringCanvas) {
+      return;
+    }
+
     if (!scriptSession) {
       onStepChange("gap-fill");
       return;
     }
 
+    setCanvasRevalidateError("");
+    setIsEnteringCanvas(true);
     try {
       const revalidateResult = await revalidateV2Canvas({
         session_id: scriptSession.session_id,
@@ -1534,10 +1542,15 @@ const StructureMigrationView = ({
         canvasRevalidateResult: revalidateResult,
         canvasSession: revalidateResult.canvas_session
       });
+      onStepChange("gap-fill");
     } catch (error) {
       console.warn("V2 canvas revalidate failed.", error);
+      setCanvasRevalidateError(
+        error instanceof Error ? error.message : "进入画布失败，请稍后再试。"
+      );
+    } finally {
+      setIsEnteringCanvas(false);
     }
-    onStepChange("gap-fill");
   };
 
   const stopDrag = (event: { stopPropagation: () => void }) => event.stopPropagation();
@@ -1607,12 +1620,18 @@ const StructureMigrationView = ({
           <button
             type="button"
             className="migration-nav-button migration-nav-forward"
+            disabled={isEnteringCanvas}
             onClick={enterCanvas}
           >
-            <span>进入画布</span>
+            <span>{isEnteringCanvas ? "进入中" : "进入画布"}</span>
             <span aria-hidden="true">›</span>
           </button>
         </div>
+        {isEnteringCanvas || canvasRevalidateError ? (
+          <div className={`migration-canvas-status ${canvasRevalidateError ? "error" : ""}`}>
+            {isEnteringCanvas ? "正在重新审核素材和时长..." : canvasRevalidateError}
+          </div>
+        ) : null}
       </section>
 
       <div className="migration-scroll">
