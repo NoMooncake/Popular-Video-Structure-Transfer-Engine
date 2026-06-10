@@ -35,6 +35,10 @@ type VideoGenerationPayload = {
 
 const BASE_CANVAS_WIDTH = 2360;
 const BASE_CANVAS_HEIGHT = 980;
+const CANVAS_CARD_WIDTH = 288;
+const CANVAS_CARD_HEIGHT = 244;
+const CANVAS_RIGHT_SAFE_PADDING = 920;
+const CANVAS_BOTTOM_SAFE_PADDING = 420;
 const MIN_ZOOM = 25;
 const MAX_ZOOM = 200;
 const ZOOM_STEP = 10;
@@ -569,6 +573,24 @@ export const VideoBlockCanvas = ({
   const [generatedVideoUris, setGeneratedVideoUris] = useState<Record<string, string>>({});
   const [selectedCanvasBlockId, setSelectedCanvasBlockId] = useState<string | null>(null);
   const blockOrderKey = useMemo(() => displayBlocks.map((block) => block.id).join("|"), [displayBlocks]);
+  const canvasBounds = useMemo(() => {
+    const activePositions = displayBlocks
+      .map((block) => positions[block.id] ?? basePositions[block.id])
+      .filter((position): position is CanvasPosition => Boolean(position));
+    const maxRight = activePositions.reduce(
+      (right, position) => Math.max(right, position.x + CANVAS_CARD_WIDTH),
+      0
+    );
+    const maxBottom = activePositions.reduce(
+      (bottom, position) => Math.max(bottom, position.y + CANVAS_CARD_HEIGHT),
+      0
+    );
+
+    return {
+      width: Math.max(BASE_CANVAS_WIDTH, maxRight + CANVAS_RIGHT_SAFE_PADDING),
+      height: Math.max(BASE_CANVAS_HEIGHT, maxBottom + CANVAS_BOTTOM_SAFE_PADDING)
+    };
+  }, [basePositions, displayBlocks, positions]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
@@ -1084,16 +1106,16 @@ export const VideoBlockCanvas = ({
         <div
           className="figma-canvas-scale-shell"
           style={{
-            height: BASE_CANVAS_HEIGHT * (zoom / 100),
-            width: BASE_CANVAS_WIDTH * (zoom / 100)
+            height: canvasBounds.height * (zoom / 100),
+            width: canvasBounds.width * (zoom / 100)
           }}
         >
           <div
             className="figma-canvas-stage"
             style={{
-              height: BASE_CANVAS_HEIGHT,
+              height: canvasBounds.height,
               transform: `scale(${zoom / 100})`,
-              width: BASE_CANVAS_WIDTH
+              width: canvasBounds.width
             }}
           >
             {!isDragging ? (

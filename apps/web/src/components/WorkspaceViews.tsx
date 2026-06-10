@@ -1345,6 +1345,9 @@ const StructureMigrationView = ({
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [localMaterials, setLocalMaterials] = useState<Record<string, string[]>>({});
   const [pendingMaterialBlockId, setPendingMaterialBlockId] = useState<string | null>(null);
+  const [canvasRevalidateStatus, setCanvasRevalidateStatus] = useState<
+    "idle" | "matching" | "error"
+  >("idle");
   const [tempTitle, setTempTitle] = useState(projectName ?? "");
   const materialInputRef = useRef<HTMLInputElement>(null);
 
@@ -1438,16 +1441,20 @@ const StructureMigrationView = ({
       return;
     }
 
+    setCanvasRevalidateStatus("matching");
     try {
       const revalidateResult = await revalidateVideoAnalysisCanvas(scriptSession.session_id);
       onWorkflowPatch({
         canvasRevalidateResult: revalidateResult,
         canvasSession: revalidateResult.canvas_session
       });
+      setCanvasRevalidateStatus("idle");
+      onStepChange("gap-fill");
     } catch (error) {
       console.warn("V2 canvas revalidate failed.", error);
+      setCanvasRevalidateStatus("error");
+      onStepChange("gap-fill");
     }
-    onStepChange("gap-fill");
   };
 
   const stopDrag = (event: { stopPropagation: () => void }) => event.stopPropagation();
@@ -1517,12 +1524,25 @@ const StructureMigrationView = ({
           <button
             type="button"
             className="migration-nav-button migration-nav-forward"
+            disabled={canvasRevalidateStatus === "matching"}
             onClick={enterCanvas}
           >
-            <span>进入画布</span>
+            <span>{canvasRevalidateStatus === "matching" ? "匹配中" : "进入画布"}</span>
             <span aria-hidden="true">›</span>
           </button>
         </div>
+        {canvasRevalidateStatus !== "idle" ? (
+          <div
+            className={`migration-canvas-status ${
+              canvasRevalidateStatus === "error" ? "error" : ""
+            }`}
+            role="status"
+          >
+            {canvasRevalidateStatus === "matching"
+              ? "正在重新匹配素材并生成画布，请稍候..."
+              : "素材重新匹配失败，已进入画布，可稍后返回重试。"}
+          </div>
+        ) : null}
       </section>
 
       <div className="migration-scroll">
