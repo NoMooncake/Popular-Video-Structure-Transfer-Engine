@@ -3,16 +3,19 @@ import type { ChangeEvent, KeyboardEvent } from "react";
 
 import type { WorkflowRunResult } from "../App";
 import {
-  assembleV2CanvasFinalVideo,
   analyzeV2Pipeline,
   assembleV2FinalVideo,
   createV2ScriptSession,
-  revalidateV2Canvas,
   reorderV2ScriptSlots,
   updateV2ScriptSlot,
   uploadMaterialFiles,
   uploadSampleVideos
 } from "../api/client";
+import {
+  assembleVideoAnalysisFinalVideo,
+  revalidateVideoAnalysisCanvas,
+  runVideoAnalysisWorkflow
+} from "../api/videoAnalysisApi";
 import type {
   V2CanvasSession,
   V2ScriptSession
@@ -32,7 +35,6 @@ import type {
   StructureBlueprint,
   V2CanvasFinalVideoResult,
   V2FinalAssemblySlot,
-  V2MaterialCoverageSlot,
   UploadedVideoFile,
   V2PipelineResult,
   V2ReferenceAnalysisTable
@@ -97,17 +99,6 @@ const steps: Array<{
 ];
 
 const slotLabelByType: Record<string, string> = {
-  strong_hook: "强 Hook",
-  hook: "强 Hook",
-  pain_point_scene: "痛点场景",
-  product_hero: "产品亮相",
-  product_intro: "产品亮相",
-  usage_process: "使用动作",
-  usage_action: "使用动作",
-  selling_point_proof: "卖点证明",
-  proof: "卖点证明",
-  effect_comparison: "效果对比",
-  comparison: "效果对比",
   risk_or_pain_hook: "风险 Hook",
   pain_desire: "需求拆解",
   product_reveal: "产品露出",
@@ -167,13 +158,7 @@ const visualSourceText: Record<string, string> = {
 
 const sourceMarks = ["¹", "²", "³", "⁴", "⁵", "⁶"];
 
-const normalizeSlotType = (value: string | undefined): string =>
-  (value ?? "").toLowerCase().replace(/[^a-z0-9]+/gu, "_");
-
-const readableSlot = (block: CanvasBlock) =>
-  slotLabelByType[normalizeSlotType(block.slot.slot_type)] ??
-  slotLabelByType[normalizeSlotType(block.label)] ??
-  block.label;
+const readableSlot = (block: CanvasBlock) => slotLabelByType[block.slot.slot_type] ?? block.label;
 
 const readableGoal = (block: CanvasBlock) => {
   return slotGoalByType[block.slot.slot_type] ?? block.slot.content_goal;
@@ -208,186 +193,6 @@ const sourceReferenceMarks = (block: CanvasBlock, fallbackIndex: number) => {
     .slice(0, 3)
     .map((_, index) => sourceMarks[index] ?? String(index + 1))
     .join("");
-};
-
-const formatMaterialSeconds = (value: number | undefined): string | undefined => {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return undefined;
-  }
-
-  return `${Number(value.toFixed(3))}s`;
-};
-
-type AssignedMaterial = NonNullable<V2MaterialCoverageSlot["assigned_materials"]>[number];
-
-const getAssignedMaterials = (
-  slot: V2MaterialCoverageSlot | undefined
-): AssignedMaterial[] => {
-  if (!slot) {
-    return [];
-  }
-
-  const seen = new Set<string>();
-  return [
-    ...(slot.assigned_segments ?? []),
-    ...(slot.matched_material_segments ?? []),
-    ...(slot.assigned_materials ?? [])
-  ].filter((material) => {
-    const key = [
-      material.segment_id,
-      material.material_id,
-      material.source_material_id,
-      material.file_id,
-      material.uri,
-      material.source_in_seconds,
-      material.source_out_seconds
-    ].join(":");
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-};
-
-const getAssignedMaterialRange = (material: AssignedMaterial): string | undefined => {
-  if (material.time_range) {
-    return material.time_range;
-  }
-
-  const start =
-    material.final_source_in_seconds ??
-    material.source_in_seconds ??
-    material.start_seconds;
-  const end =
-    material.final_source_out_seconds ??
-    material.source_out_seconds ??
-    material.end_seconds;
-  const startText = formatMaterialSeconds(start);
-  const endText = formatMaterialSeconds(end);
-
-  if (startText && endText) {
-    return `${startText} - ${endText}`;
-  }
-
-  const durationText = formatMaterialSeconds(
-    material.matched_material_duration ??
-    material.duration_seconds ??
-    material.usable_duration_seconds
-  );
-  return durationText ? `匹配 ${durationText}` : undefined;
-};
-
-const isAssignedMaterialSegment = (material: AssignedMaterial): boolean => {
-  const start =
-    material.final_source_in_seconds ??
-    material.source_in_seconds ??
-    material.start_seconds;
-  const end =
-    material.final_source_out_seconds ??
-    material.source_out_seconds ??
-    material.end_seconds;
-  return (
-    Boolean(material.time_range) ||
-    (typeof start === "number" && typeof end === "number" && end > start) ||
-    (typeof material.matched_material_duration === "number" &&
-      material.matched_material_duration > 0) ||
-    (typeof material.duration_seconds === "number" && material.duration_seconds > 0) ||
-    (typeof material.usable_duration_seconds === "number" &&
-      material.usable_duration_seconds > 0)
-  );
-};
-
-const getCandidateMaterialItems = (
-  slot: V2MaterialCoverageSlot | undefined
-): Array<{ name: string; note?: string }> => {
-  if (!slot) {
-    return [];
-  }
-
-  const segmentItems = (slot.candidate_materials ?? []).flatMap((material) =>
-    (material.candidate_segments ?? []).map((segment, index) => ({
-      name:
-        material.label ||
-        material.model_label ||
-        material.material_id ||
-        segment.segment_id ||
-        `匹配片段 ${index + 1}`,
-      note:
-        getAssignedMaterialRange(segment) ||
-        segment.visual_description ||
-        segment.recommended_usage ||
-        segment.content_summary ||
-        material.fit_reason
-    }))
-  );
-
-  if (segmentItems.length > 0) {
-    return segmentItems;
-  }
-
-  const candidateItems = (slot.candidate_materials ?? []).map((material) => ({
-    name: material.label || material.model_label || material.material_id,
-    note:
-      formatMaterialSeconds(material.duration_seconds) ||
-      material.fit_reason ||
-      material.quality
-  }));
-
-  if (candidateItems.length > 0) {
-    return candidateItems;
-  }
-
-  return (slot.direct_video_reference_materials ?? []).map((material) => ({
-    name: material.label || material.material_id,
-    note: formatMaterialSeconds(material.duration_seconds)
-  }));
-};
-
-const getMigrationMaterialItems = (
-  block: CanvasBlock,
-  fallbackFile: UploadedVideoFile | undefined,
-  localMaterialNames: string[]
-): Array<{ name: string; note?: string }> => {
-  const assignedMaterials = getAssignedMaterials(block.v2?.coverageSlot)
-    .filter(isAssignedMaterialSegment);
-  const assignedItems = assignedMaterials.map((material, index) => ({
-    name:
-      material.label ||
-      material.material_id ||
-      material.source_material_id ||
-      material.file_id ||
-      material.segment_id ||
-      `匹配片段 ${index + 1}`,
-    note:
-      getAssignedMaterialRange(material) ||
-      material.visual_description ||
-      material.recommended_usage ||
-      material.content_summary
-  }));
-  const localItems = localMaterialNames.map((name) => ({ name }));
-
-  if (assignedItems.length > 0) {
-    return [...assignedItems, ...localItems];
-  }
-
-  const candidateItems = getCandidateMaterialItems(block.v2?.coverageSlot);
-  if (candidateItems.length > 0) {
-    return [...candidateItems, ...localItems];
-  }
-
-  const fallbackItems = block.v2?.coverageSlot
-    ? [{ name: "空" }]
-    : fallbackFile
-    ? [{ name: fallbackFile.original_filename }]
-    : [{ name: "空" }];
-
-  return [...fallbackItems, ...localItems];
-};
-
-const getEditableVoiceoverText = (block: CanvasBlock): string => {
-  const value = (block.timeline?.voiceover || block.copy || "").trim();
-  return value === "待生成文案" ? "" : value;
 };
 
 const toBackendCategory = (value: string) => {
@@ -472,9 +277,15 @@ export const WorkspaceViews = ({
   if (activeStep === "input") {
     return (
       <InputView
+        hasExistingCanvas={Boolean(
+          workflowResult?.canvasSession ||
+            workflowResult?.canvasSessionId ||
+            workflowResult?.canvasRevalidateResult
+        )}
         onNext={() => onStepChange("analysis")}
         onStepChange={onStepChange}
         onWorkflowReady={onWorkflowReady}
+        projectName={projectName}
       />
     );
   }
@@ -602,13 +413,17 @@ const CanvasTopBar = ({
 };
 
 const InputView = ({
+  hasExistingCanvas,
   onNext,
   onStepChange,
-  onWorkflowReady
+  onWorkflowReady,
+  projectName
 }: {
+  hasExistingCanvas: boolean;
   onNext: () => void;
   onStepChange: (step: StepKey) => void;
   onWorkflowReady: (result: WorkflowRunResult) => void;
+  projectName: string;
 }) => {
   const [brief, setBrief] = useState(
     "开始一次分镜迁移：我想基于几条爆款样例，生成一条“新手养猫怎么选猫粮”的 20 秒短视频。"
@@ -617,12 +432,12 @@ const InputView = ({
   const [pipelineError, setPipelineError] = useState("");
   const [pipelineNote, setPipelineNote] = useState("等待上传样例视频");
   const [pipelineStatus, setPipelineStatus] = useState<
-    "idle" | "uploading" | "analyzing" | "extracting" | "success" | "error"
+    "idle" | "uploading" | "analyzing" | "extracting" | "generating" | "success" | "error"
   >("idle");
   const [sampleFiles, setSampleFiles] = useState<File[]>([]);
   const [showModal, setShowModal] = useState(false);
 
-  const isRunning = ["uploading", "analyzing", "extracting"].includes(pipelineStatus);
+  const isRunning = ["uploading", "analyzing", "extracting", "generating"].includes(pipelineStatus);
 
   const updateSampleFiles = (event: ChangeEvent<HTMLInputElement>) => {
     setSampleFiles(Array.from(event.target.files ?? []));
@@ -643,6 +458,36 @@ const InputView = ({
       setPipelineStatus("error");
       setPipelineError("请先上传至少一个样例视频。");
       setShowModal(true);
+      return;
+    }
+
+    try {
+      setShowModal(true);
+      setPipelineError("");
+      setPipelineStatus("uploading");
+      setPipelineNote("正在准备上传和解析");
+      const result = await runVideoAnalysisWorkflow({
+        brief,
+        materialFiles,
+        sampleFiles,
+        onProgress: (progress) => {
+          setPipelineStatus(progress.stage);
+          setPipelineNote(progress.note);
+        }
+      });
+
+      setPipelineStatus("success");
+      setPipelineNote("分析完成");
+      setShowModal(false);
+      onWorkflowReady(result);
+      onNext();
+      return;
+    } catch (error) {
+      console.warn("Video analysis workflow failed.", error);
+      setPipelineStatus("error");
+      setPipelineNote("接口连接失败");
+      setPipelineError(getErrorMessage(error));
+      setShowModal(false);
       return;
     }
 
@@ -721,7 +566,9 @@ const InputView = ({
   return (
     <div className="page-shell input-page-redesign">
       <header className="simple-top-bar">
-        <div className="brand-mark">ShotSwift</div>
+        <button className="home-brand-button" onClick={() => onStepChange("input")} type="button">
+          迁镜
+        </button>
         <div className="figma-avatar">F</div>
       </header>
 
@@ -754,6 +601,11 @@ const InputView = ({
                <div className="status-content">
                  <p className="status-note">{pipelineNote}</p>
                  {pipelineError && <p className="error-text">{pipelineError}</p>}
+                 {pipelineStatus === "error" ? (
+                   <button className="pipeline-retry-button" onClick={runPipeline} type="button">
+                     重试
+                   </button>
+                 ) : null}
                </div>
              </div>
           )}
@@ -817,20 +669,43 @@ const InputView = ({
           </div>
         </section>
 
+        {hasExistingCanvas ? (
         <section className="canvas-section">
           <h3>画布初始</h3>
           <div className="existing-canvases-scroll">
-            {figmaSampleImages.map((src, i) => (
-              <div className="canvas-card" key={i}>
+            {figmaSampleImages.slice(0, 3).map((src, i) => (
+              <button className="canvas-card" key={i} onClick={() => onStepChange("gap-fill")} type="button">
                 <img src={src} alt="Canvas placeholder" />
-                <div className="canvas-card-title">未命名项目 {i + 1}</div>
-              </div>
+                <div className="canvas-card-title">
+                  {i === 0 ? projectName || "未命名项目" : ["Vlog", "TF口红", "Canvas广告"][i - 1] ?? `画布 ${i + 1}`}
+                </div>
+              </button>
             ))}
           </div>
         </section>
+        ) : null}
       </main>
 
-      {showModal && (
+      {isRunning ? (
+        <div className="modal-overlay loading-overlay" aria-live="polite">
+          <div className="modal-content loading-modal-content">
+            <div className="loading-modal-icon" aria-hidden="true">
+              <span />
+            </div>
+            <div className="loading-modal-copy">
+              <h3>{pipelineStatus === "generating" ? "正在生成迁移结果" : "正在解析素材"}</h3>
+              <p>{pipelineNote}</p>
+            </div>
+            <div className="loading-modal-steps">
+              <span className={pipelineStatus === "uploading" ? "active" : ""}>上传</span>
+              <span className={pipelineStatus === "extracting" ? "active" : ""}>拆解</span>
+              <span className={pipelineStatus === "generating" ? "active" : ""}>匹配</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showModal && !isRunning && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
@@ -913,37 +788,13 @@ const buildBackendSampleRows = (
 };
 
 const buildV2SampleRows = (table: V2ReferenceAnalysisTable): SampleAnalysisRow[] => {
-  const rows = (table.rows ?? []).map((row, index) => ({
+  return (table.rows ?? []).map((row, index) => ({
       duration: row.duration ?? "",
       image: row.sample_video?.media?.uri ?? "",
       shotTitle: row.shot_description?.title ?? `分镜 ${index + 1}`,
       shotDescription: row.shot_description?.description ?? "",
       migrationPossibility: row.migration_possibility ?? ""
     }));
-
-  if (rows.length > 0) {
-    return rows;
-  }
-
-  return (table.frames ?? []).map((frame, index, frames) => {
-    const nextFrame = frames[index + 1];
-    const startSeconds =
-      typeof frame.time_seconds === "number" && Number.isFinite(frame.time_seconds)
-        ? frame.time_seconds
-        : index;
-    const endSeconds =
-      typeof nextFrame?.time_seconds === "number" && nextFrame.time_seconds > startSeconds
-        ? nextFrame.time_seconds
-        : startSeconds + 1;
-
-    return {
-      duration: `${Number(startSeconds.toFixed(3))} - ${Number(endSeconds.toFixed(3))}s`,
-      image: frame.uri ?? "",
-      shotTitle: `分镜 ${index + 1}`,
-      shotDescription: "根据样例关键帧提取可迁移的画面节奏、构图和产品展示方式。",
-      migrationPossibility: "可迁移为新视频中相同结构位置的画面、节奏和商业说服表达。"
-    };
-  });
 };
 
 const sampleAnalysisTables: Record<number, SampleAnalysisRow[]> = {
@@ -1430,8 +1281,6 @@ const StructureMigrationView = ({
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [canvasRevalidateError, setCanvasRevalidateError] = useState("");
-  const [isEnteringCanvas, setIsEnteringCanvas] = useState(false);
   const [localMaterials, setLocalMaterials] = useState<Record<string, string[]>>({});
   const [pendingMaterialBlockId, setPendingMaterialBlockId] = useState<string | null>(null);
   const [tempTitle, setTempTitle] = useState(projectName ?? "");
@@ -1522,35 +1371,21 @@ const StructureMigrationView = ({
   };
 
   const enterCanvas = async () => {
-    if (isEnteringCanvas) {
-      return;
-    }
-
     if (!scriptSession) {
       onStepChange("gap-fill");
       return;
     }
 
-    setCanvasRevalidateError("");
-    setIsEnteringCanvas(true);
     try {
-      const revalidateResult = await revalidateV2Canvas({
-        session_id: scriptSession.session_id,
-        persist_canvas_session: true
-      });
+      const revalidateResult = await revalidateVideoAnalysisCanvas(scriptSession.session_id);
       onWorkflowPatch({
         canvasRevalidateResult: revalidateResult,
         canvasSession: revalidateResult.canvas_session
       });
-      onStepChange("gap-fill");
     } catch (error) {
       console.warn("V2 canvas revalidate failed.", error);
-      setCanvasRevalidateError(
-        error instanceof Error ? error.message : "进入画布失败，请稍后再试。"
-      );
-    } finally {
-      setIsEnteringCanvas(false);
     }
+    onStepChange("gap-fill");
   };
 
   const stopDrag = (event: { stopPropagation: () => void }) => event.stopPropagation();
@@ -1620,18 +1455,12 @@ const StructureMigrationView = ({
           <button
             type="button"
             className="migration-nav-button migration-nav-forward"
-            disabled={isEnteringCanvas}
             onClick={enterCanvas}
           >
-            <span>{isEnteringCanvas ? "进入中" : "进入画布"}</span>
+            <span>进入画布</span>
             <span aria-hidden="true">›</span>
           </button>
         </div>
-        {isEnteringCanvas || canvasRevalidateError ? (
-          <div className={`migration-canvas-status ${canvasRevalidateError ? "error" : ""}`}>
-            {isEnteringCanvas ? "正在重新审核素材和时长..." : canvasRevalidateError}
-          </div>
-        ) : null}
       </section>
 
       <div className="migration-scroll">
@@ -1648,12 +1477,10 @@ const StructureMigrationView = ({
             <div className="migration-rows">
               {blocks.map((block, index) => {
                 const isSelected = selectedRowId === block.id;
-                const voiceoverText = getEditableVoiceoverText(block);
-                const materialItems = getMigrationMaterialItems(
-                  block,
-                  materialFiles[index],
-                  localMaterials[block.id] ?? []
-                );
+                const voiceoverText = block.timeline?.voiceover ?? "";
+                const baseMaterialName = materialFiles[index]?.original_filename ?? `素材 ${index + 1}`;
+                const materialNames = [baseMaterialName, ...(localMaterials[block.id] ?? [])];
+                const materialNote = block.timeline?.visual_description || "00:00-00:03 裁切 + 加标题字";
                 const rowClass = [
                   "migration-row",
                   isSelected ? "selected" : "",
@@ -1750,17 +1577,12 @@ const StructureMigrationView = ({
                     {/* 我的素材: 只读，过多时框内滚动 */}
                     <div className="migration-col col-material">
                       <div className="material-scroll">
-                        {materialItems.map((material, materialIndex) => (
-                          <div
-                            className="material-item"
-                            key={`${block.id}-${material.name}-${materialIndex}`}
-                          >
-                            <div className="material-name">{material.name}</div>
-                            {material.note ? (
-                              <div className="material-note">{material.note}</div>
-                            ) : null}
+                        {materialNames.map((materialName) => (
+                          <div className="material-name" key={`${block.id}-${materialName}`}>
+                            {materialName}
                           </div>
                         ))}
+                        <div className="material-note">{materialNote}</div>
                       </div>
                     </div>
 
@@ -1814,29 +1636,23 @@ const GapFillView = ({
 }) => {
   const exportFinalVideo = async () => {
     if (!canvasSession) {
+      onStepChange("demo");
       return;
     }
 
     try {
-      const finalVideo = await assembleV2CanvasFinalVideo(
-        canvasSession.canvas_session_id,
-        {
-          generate_bgm: true
-        }
-      );
-      if (!finalVideo.final_assembly?.final_video_url) {
-        throw new Error("V2 final assembly did not return a final video URL.");
-      }
+      const finalVideo = await assembleVideoAnalysisFinalVideo(canvasSession.canvas_session_id);
+      const nextCanvasSession = finalVideo.canvas_session as V2CanvasSession | undefined;
       onWorkflowPatch({
-        canvasSession: finalVideo.canvas_session,
-        canvasSessionId: finalVideo.canvas_session?.canvas_session_id,
+        canvasSession: nextCanvasSession,
+        canvasSessionId: nextCanvasSession?.canvas_session_id,
         finalAssembly: finalVideo.final_assembly,
         finalVideo
       });
-      onStepChange("demo");
     } catch (error) {
       console.warn("V2 final assembly failed.", error);
     }
+    onStepChange("demo");
   };
 
   return (
@@ -1850,6 +1666,7 @@ const GapFillView = ({
           onWorkflowPatch({ canvasSession: nextCanvasSession })
         }
         onExport={exportFinalVideo}
+        onHome={() => onStepChange("input")}
         onSelectBlock={onSelectBlock}
         onUpdateBlock={onUpdateBlock}
         projectName={projectName}
@@ -2120,13 +1937,7 @@ const DemoView = ({
       let exportedUrl = finalVideoUrl;
 
       if (canvasSessionId) {
-        const result = await assembleV2CanvasFinalVideo(canvasSessionId, {
-          resolution: "1280x720",
-          fps: 24,
-          background_color: "black",
-          allow_loop_short_clips: true,
-          generate_bgm: true
-        });
+        const result = await assembleVideoAnalysisFinalVideo(canvasSessionId);
         exportedUrl = result.final_assembly?.final_video_url;
       } else {
         const slots: V2FinalAssemblySlot[] = segments
