@@ -203,7 +203,18 @@ const formatMaterialTimeRange = (material: V2MaterialAssignment): string => {
     : "";
 };
 
+const hasMaterialTimeRange = (material: V2MaterialAssignment): boolean => {
+  const start = material.source_in_seconds ?? material.start_seconds;
+  const end = material.source_out_seconds ?? material.end_seconds;
+
+  return (
+    (typeof start === "number" && typeof end === "number" && end > start) ||
+    Boolean(material.time_range?.trim())
+  );
+};
+
 const isDisplayableMaterial = (material: V2MaterialAssignment): boolean =>
+  hasMaterialTimeRange(material) &&
   Boolean(
     material.label ||
       material.material_id ||
@@ -1576,7 +1587,7 @@ const StructureMigrationView = ({
                             </div>
                           ))
                         ) : (
-                          <div className="material-name">空</div>
+                          <div className="material-name">待节选</div>
                         )}
                       </div>
                     </div>
