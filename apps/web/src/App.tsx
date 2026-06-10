@@ -72,7 +72,7 @@ export const App = () => {
   ]);
 
   useEffect(() => {
-    if (!blocks.some((block) => block.id === selectedBlockId)) {
+    if (selectedBlockId && !blocks.some((block) => block.id === selectedBlockId)) {
       setSelectedBlockId(blocks[0]?.id ?? "");
     }
   }, [blocks, selectedBlockId]);

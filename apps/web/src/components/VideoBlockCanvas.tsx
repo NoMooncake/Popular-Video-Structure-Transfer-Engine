@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   generateVideoAnalysisGapVideo,
   generateVideoAnalysisImageCandidates
@@ -15,6 +15,7 @@ type VideoBlockCanvasProps = {
   onUpdateBlock: (updatedBlock: CanvasBlock) => void;
   onBack?: () => void;
   onExport?: () => void;
+  onHome?: () => void;
   projectName?: string;
 };
 
@@ -57,20 +58,11 @@ const aiCandidateImages = [
 
 const figmaLabels = ["Hook", "产品介入", "感官特写", "使用动作", "使用动作", "行动引导"];
 
-const initialPositions: Record<string, CanvasPosition> = {
-  slot_01: { x: 204, y: 263 },
-  slot_02: { x: 566, y: 263 },
-  slot_03: { x: 928, y: 263 },
-  slot_04: { x: 1290, y: 263 },
-  slot_05: { x: 1652, y: 263 },
-  slot_06: { x: 2014, y: 263 }
-};
-
 const fallbackPositions = (blocks: CanvasBlock[]) =>
   blocks.reduce<Record<string, CanvasPosition>>((positions, block, index) => {
-    positions[block.id] = initialPositions[block.id] ?? {
+    positions[block.id] = {
       x: 204 + index * 362,
-      y: 263
+      y: 341
     };
     return positions;
   }, {});
@@ -82,10 +74,10 @@ const imageForBlock = (block: CanvasBlock, index: number) =>
   block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri ??
   cardImages[index % cardImages.length];
 
-const portColorByStatus: Record<CanvasStatus, "matched" | "missing" | "partial"> = {
+const portColorByStatus: Record<CanvasStatus, "matched" | "missing"> = {
   matched: "matched",
   missing: "missing",
-  duration_insufficient: "partial",
+  duration_insufficient: "missing",
   generating: "missing"
 };
 
@@ -183,6 +175,7 @@ export const VideoBlockCanvas = ({
   onUpdateBlock,
   onBack,
   onExport,
+  onHome,
   projectName = "口红广告"
 }: VideoBlockCanvasProps) => {
   const basePositions = useMemo(() => fallbackPositions(blocks), [blocks]);
@@ -204,6 +197,7 @@ export const VideoBlockCanvas = ({
   const [selectedKeyframes, setSelectedKeyframes] = useState<Record<string, string>>({});
   const [generatedVideoThumbs, setGeneratedVideoThumbs] = useState<Record<string, string>>({});
   const [candidateSeeds, setCandidateSeeds] = useState<Record<string, number>>({});
+  const blockOrderKey = useMemo(() => blocks.map((block) => block.id).join("|"), [blocks]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{
@@ -222,6 +216,12 @@ export const VideoBlockCanvas = ({
     scrollTop: number;
   } | null>(null);
 
+  useEffect(() => {
+    setPositions(fallbackPositions(blocks));
+    setActiveEditorBlockId(null);
+    onSelectBlock("");
+  }, [blockOrderKey]);
+
   const selectedBlock = blocks.find((block) => block.id === selectedBlockId) ?? blocks[0];
 
   const getCanvasStatus = (block: CanvasBlock, index: number): CanvasStatus => {
@@ -235,13 +235,6 @@ export const VideoBlockCanvas = ({
 
     if (block.status === "matched") {
       return "matched";
-    }
-
-    if (
-      block.status === "partial" ||
-      block.v2?.coverageSlot?.frontend_coverage_status === "structure_complete_duration_short"
-    ) {
-      return "duration_insufficient";
     }
 
     return "missing";
@@ -354,6 +347,7 @@ export const VideoBlockCanvas = ({
     }
 
     setActiveEditorBlockId(null);
+    onSelectBlock("");
     const container = scrollRef.current;
     if (!container) {
       return;
@@ -644,7 +638,7 @@ export const VideoBlockCanvas = ({
   return (
     <section className="figma-canvas-page" aria-label="生成视频">
       <header className="figma-canvas-topbar">
-        <button className="figma-canvas-brand" type="button" onClick={onBack}>
+        <button className="figma-canvas-brand" type="button" onClick={onHome ?? onBack}>
           <span>迁镜</span>
           <strong>{projectName}</strong>
           <i aria-hidden="true">✎</i>
@@ -716,10 +710,10 @@ export const VideoBlockCanvas = ({
                     <line
                       className={solid ? "solid" : "dashed"}
                       key={`${block.id}-${nextBlock.id}`}
-                      x1={from.x + 283}
+                      x1={from.x + 285}
                       x2={to.x + 3}
-                      y1={from.y + 130}
-                      y2={to.y + 130}
+                      y1={from.y + 134}
+                      y2={to.y + 134}
                     />
                   );
                 })}
@@ -756,20 +750,27 @@ export const VideoBlockCanvas = ({
                 >
                   <div className="figma-card-label">
                     <span aria-hidden="true" />
-                    <strong>{labelForBlock(block, index)}</strong>
+                    <strong className="figma-card-dynamic-label">{labelForBlock(block, index)}</strong>
+                    <strong>真实素材</strong>
                   </div>
                   <div className="figma-card-frame">
                     <i className={`figma-port top ${portTone}`} aria-hidden="true" />
                     <i className={`figma-port left ${portTone}`} aria-hidden="true" />
                     <i className={`figma-port right ${portTone}`} aria-hidden="true" />
+                    <i className="figma-port bottom" aria-hidden="true" />
                     {isGeneratingVideo ? (
                       <div className="figma-generating-state">
                         <span aria-hidden="true" />
                         <strong>Generating</strong>
                       </div>
                     ) : gap ? (
-                      <div className={`figma-gap-card ${canvasStatus === "duration_insufficient" ? "duration-short" : "missing-material"}`}>
-                        {canvasStatus === "duration_insufficient" ? (
+                      <div className="figma-gap-card missing-material">
+                        <p className="figma-gap-card-copy">
+                          缺少必要素材，
+                          <br />
+                          试试AI补齐吧！
+                        </p>
+                        {false ? (
                           <>
                             <strong>结构完整但时长不足</strong>
                             <dl>

@@ -2604,6 +2604,10 @@ input {
   letter-spacing: -0.132px;
 }
 
+.figma-card-label strong:not(.figma-card-dynamic-label) {
+  display: none;
+}
+
 .figma-card-frame {
   position: relative;
   width: 280px;
@@ -3859,7 +3863,11 @@ input {
 }
 
 .migration-row.dragging {
-  opacity: 0.45;
+  background: rgba(93, 95, 97, 0.5);
+  border-color: #717375;
+  border-radius: 36px;
+  opacity: 0.96;
+  transform: translateY(-1px);
 }
 
 .migration-row.drop-target {
@@ -4131,8 +4139,8 @@ input {
   justify-content: center;
   gap: 4px;
   min-width: 120px;
-  height: 40px;
-  padding: 0 16px 2px;
+  height: 48px;
+  padding: 0 18px 2px;
   border: 0;
   border-radius: 999px;
   color: #ffffff;
@@ -4747,8 +4755,12 @@ input {
 }
 
 .preview-action-row {
-  left: 48px;
-  right: max(48px, calc((100vw - 1632px) / 2 + 48px));
+  left: 0;
+  right: 0;
+  top: 106px;
+  height: 48px;
+  justify-content: space-between;
+  padding: 0 48px;
 }
 
 .input-page-redesign {
@@ -5352,7 +5364,21 @@ body,
 }
 
 .figma-gap-card.missing-material {
-  background: rgba(254, 44, 85, 0.14);
+  background: #18181b;
+}
+
+.figma-gap-card.missing-material > :not(.figma-gap-card-copy) {
+  display: none;
+}
+
+.figma-gap-card-copy {
+  margin: 0;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-align: center;
 }
 
 .figma-gap-card.duration-short {
@@ -5391,4 +5417,94 @@ body,
   .figma-canvas-brand span::before {
     font-size: 30px;
   }
+}
+
+/* Canvas initial state refinements from Figma frame 451:2076. */
+.input-page-redesign .canvas-card {
+  appearance: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: inherit;
+}
+
+.input-page-redesign .canvas-card:focus-visible {
+  outline: 2px solid #fe2c55;
+  outline-offset: 6px;
+}
+
+.figma-structure-card .figma-card-frame,
+.figma-structure-card.status-matched .figma-card-frame,
+.figma-structure-card.status-missing .figma-card-frame,
+.figma-structure-card.status-generating .figma-card-frame,
+.figma-structure-card.ai-completed .figma-card-frame,
+.figma-structure-card.status-duration_insufficient .figma-card-frame {
+  border-color: #fafafa;
+  box-shadow: none;
+}
+
+.figma-structure-card.gap .figma-card-frame,
+.figma-structure-card.status-missing .figma-card-frame,
+.figma-structure-card.status-generating .figma-card-frame {
+  border-color: #fe2c55;
+}
+
+.figma-structure-card.status-matched:not(.selected) .figma-card-frame,
+.figma-structure-card.ai-completed:not(.selected) .figma-card-frame {
+  border-color: #fafafa;
+}
+
+.figma-structure-card.selected .figma-card-frame {
+  border-color: #fe2c55;
+  box-shadow: none;
+}
+
+.figma-port.left,
+.figma-port.right,
+.figma-port.left.matched,
+.figma-port.right.matched,
+.figma-port.left.missing,
+.figma-port.right.missing,
+.figma-port.left.partial,
+.figma-port.right.partial {
+  background: #fafafa;
+}
+
+.figma-port.top.matched {
+  background: #34b77a;
+}
+
+.figma-port.top.missing,
+.figma-port.top.partial {
+  background: #fe2c55;
+}
+
+.figma-port.bottom {
+  display: none;
+}
+
+.figma-structure-card.selected .figma-port.bottom {
+  left: 134px;
+  bottom: -7px;
+  display: block;
+  width: 12px;
+  height: 12px;
+  background: #fe2c55;
+}
+
+.figma-canvas-lines line {
+  stroke: #fafafa;
+  stroke-dasharray: 6 8;
+}
+
+.figma-canvas-lines line.solid {
+  stroke: #34b77a;
+  stroke-dasharray: none;
+}
+
+.figma-canvas-lines line.dashed {
+  stroke: #fafafa;
+  stroke-dasharray: 6 8;
 }

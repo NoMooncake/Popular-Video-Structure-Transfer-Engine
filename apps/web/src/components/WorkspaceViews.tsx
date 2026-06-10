@@ -674,12 +674,12 @@ const InputView = ({
           <h3>画布初始</h3>
           <div className="existing-canvases-scroll">
             {figmaSampleImages.slice(0, 3).map((src, i) => (
-              <div className="canvas-card" key={i}>
+              <button className="canvas-card" key={i} onClick={() => onStepChange("gap-fill")} type="button">
                 <img src={src} alt="Canvas placeholder" />
                 <div className="canvas-card-title">
                   {i === 0 ? projectName || "未命名项目" : ["Vlog", "TF口红", "Canvas广告"][i - 1] ?? `画布 ${i + 1}`}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         </section>
@@ -1660,11 +1660,12 @@ const GapFillView = ({
       <VideoBlockCanvas
         blocks={blocks}
         canvasSessionId={canvasSession?.canvas_session_id}
-        onBack={() => onStepChange("input")}
+        onBack={() => onStepChange("migration")}
         onCanvasSessionChange={(nextCanvasSession) =>
           onWorkflowPatch({ canvasSession: nextCanvasSession })
         }
         onExport={exportFinalVideo}
+        onHome={() => onStepChange("input")}
         onSelectBlock={onSelectBlock}
         onUpdateBlock={onUpdateBlock}
         projectName={projectName}
