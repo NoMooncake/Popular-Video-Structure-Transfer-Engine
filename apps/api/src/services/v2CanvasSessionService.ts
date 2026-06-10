@@ -173,6 +173,10 @@ const buildInitialCanvasNodes = (
           raw_missing_duration: coverage.raw_missing_duration,
           ignored_missing_duration: coverage.ignored_missing_duration,
           coverage_status: coverage.frontend_coverage_status,
+          shot_description:
+            coverage.shot_description ||
+            asJsonObject(coverage.frontend_display).shot_description ||
+            asJsonObject(coverage.frontend_display).migration_result_description,
           gap_display: coverage.gap_display || {
             visible: true,
             title: "缺少必要素材，试试AI补齐吧！",
@@ -402,6 +406,170 @@ const getPromptNodeForGap = (
   return undefined;
 };
 
+const getSlotNodeForMissingNode = (
+  session: V2CanvasSession,
+  missingNode: V2CanvasNode
+): V2CanvasNode | undefined => {
+  const gapEdge = session.edges.find(
+    (edge) => edge.target_node_id === missingNode.node_id && edge.edge_type === "has_gap"
+  );
+  if (gapEdge) {
+    return session.nodes.find(
+      (node) => node.node_id === gapEdge.source_node_id && node.node_type === "script_slot"
+    );
+  }
+
+  return session.nodes.find(
+    (node) => node.node_type === "script_slot" && node.slot_id === missingNode.slot_id
+  );
+};
+
+const getVideoUriFromNode = (node: V2CanvasNode): string | undefined =>
+  normalizeOptionalString(node.data.uri) ||
+  normalizeOptionalString(node.data.usable_video_uri) ||
+  normalizeOptionalString(node.data.video_uri) ||
+  normalizeOptionalString(node.data.video_url) ||
+  normalizeOptionalString(node.data.url);
+
+const getCanvasNodeVideoRef = (
+  node: V2CanvasNode,
+  label: string
+): JsonObject | undefined => {
+  const uri = getVideoUriFromNode(node);
+  const fileId = normalizeOptionalString(node.data.file_id);
+  if (!uri && !fileId) {
+    return undefined;
+  }
+
+  return {
+    file_id: fileId,
+    uri: uri || (fileId ? `/api/upload/files/${fileId}` : undefined),
+    role: "user_material",
+    label
+  };
+};
+
+const getSlotMaterialNodes = (
+  session: V2CanvasSession,
+  slotNode: V2CanvasNode
+): V2CanvasNode[] =>
+  session.edges
+    .filter((edge) => edge.target_node_id === slotNode.node_id && edge.edge_type === "fills_slot")
+    .map((edge) =>
+      session.nodes.find(
+        (node) => node.node_id === edge.source_node_id && node.node_type === "material_segment"
+      )
+    )
+    .filter((node): node is V2CanvasNode => Boolean(node));
+
+const getSlotGeneratedVideoNodes = (
+  session: V2CanvasSession,
+  slotNode: V2CanvasNode
+): V2CanvasNode[] => {
+  const missingNodeIds = new Set(
+    session.edges
+      .filter((edge) => edge.source_node_id === slotNode.node_id && edge.edge_type === "has_gap")
+      .map((edge) => edge.target_node_id)
+  );
+
+  return session.edges
+    .filter(
+      (edge) =>
+        missingNodeIds.has(edge.target_node_id) && edge.edge_type === "generated_video_to_gap"
+    )
+    .map((edge) =>
+      session.nodes.find(
+        (node) => node.node_id === edge.source_node_id && node.node_type === "generated_video"
+      )
+    )
+    .filter((node): node is V2CanvasNode => Boolean(node));
+};
+
+const getAdjacentSlotNodes = (
+  session: V2CanvasSession,
+  slotNode: V2CanvasNode
+): { previous?: V2CanvasNode; next?: V2CanvasNode } => {
+  const orderedSlots = getOrderedSlotNodes(session);
+  const slotIndex = orderedSlots.findIndex((node) => node.node_id === slotNode.node_id);
+  if (slotIndex < 0) {
+    return {};
+  }
+
+  return {
+    previous: orderedSlots[slotIndex - 1],
+    next: orderedSlots[slotIndex + 1]
+  };
+};
+
+const buildGapContinuityContext = (
+  session: V2CanvasSession,
+  missingNode: V2CanvasNode
+): {
+  referenceVideos: JsonObject[];
+  promptSuffix: string;
+} => {
+  const slotNode = getSlotNodeForMissingNode(session, missingNode);
+  if (!slotNode) {
+    return {
+      referenceVideos: [],
+      promptSuffix: ""
+    };
+  }
+
+  const adjacentSlots = getAdjacentSlotNodes(session, slotNode);
+  const contextItems = [
+    { label: "前一镜头", slot: adjacentSlots.previous },
+    { label: "后一镜头", slot: adjacentSlots.next }
+  ];
+  const referenceVideos: JsonObject[] = [];
+  const promptLines: string[] = [];
+
+  for (const item of contextItems) {
+    if (!item.slot) {
+      continue;
+    }
+
+    const materialNode = getSlotMaterialNodes(session, item.slot)[0];
+    const generatedVideoNode = getSlotGeneratedVideoNodes(session, item.slot)[0];
+    const referenceNode = materialNode || generatedVideoNode;
+    const slotType = normalizeOptionalString(item.slot.data.slot_type) || item.slot.slot_id;
+    const shotDescription =
+      normalizeOptionalString(item.slot.data.shot_description) ||
+      normalizeOptionalString(asJsonObject(item.slot.data.frontend_display).shot_description) ||
+      normalizeOptionalString(asJsonObject(item.slot.data.frontend_display).migration_result_description);
+
+    promptLines.push(
+      `${item.label}是 ${slotType || "相邻分镜"}${shotDescription ? `：${shotDescription}` : ""}。`
+    );
+    if (referenceNode) {
+      const videoRef = getCanvasNodeVideoRef(referenceNode, item.label);
+      if (videoRef) {
+        referenceVideos.push(videoRef);
+      }
+      const summary =
+        normalizeOptionalString(referenceNode.data.content_summary) ||
+        normalizeOptionalString(referenceNode.data.label) ||
+        normalizeOptionalString(referenceNode.data.source_material_id);
+      if (summary) {
+        promptLines.push(`${item.label}参考素材：${summary}。`);
+      }
+    }
+  }
+
+  const promptSuffix = promptLines.length
+    ? [
+        "",
+        "连续性约束：必须参考前后镜头的产品、人物、场景、光线、色调、构图和字幕安全区，生成能自然插入中间的关键帧/视频；不要改变产品包装、品牌、主色调或场景氛围。",
+        ...promptLines
+      ].join("\n")
+    : "";
+
+  return {
+    referenceVideos,
+    promptSuffix
+  };
+};
+
 export const generateV2CanvasImageCandidates = async (
   canvasSessionId: string,
   payload: JsonObject
@@ -417,9 +585,19 @@ export const generateV2CanvasImageCandidates = async (
     throw new V2PipelineInputError("image prompt is required");
   }
 
+  const continuityContext = buildGapContinuityContext(session, missingNode);
+  const contextualPrompt = `${prompt}${continuityContext.promptSuffix}`;
   const result = await generateV2ImageCandidates({
-    prompt,
+    prompt: contextualPrompt,
     count: getNumber(payload.count, 4),
+    reference_videos: [
+      ...continuityContext.referenceVideos,
+      ...(Array.isArray(payload.reference_videos) ? payload.reference_videos : [])
+    ],
+    reference_video_uris: Array.isArray(payload.reference_video_uris)
+      ? payload.reference_video_uris
+      : undefined,
+    reference_images: Array.isArray(payload.reference_images) ? payload.reference_images : undefined,
     allow_fallback: payload.allow_fallback === true,
     use_image_provider: payload.use_image_provider !== false
   });
@@ -441,7 +619,9 @@ export const generateV2CanvasImageCandidates = async (
       display_order: missingNode.display_order,
       data: {
         ...record,
-        prompt,
+        prompt: contextualPrompt,
+        base_prompt: prompt,
+        continuity_context: continuityContext,
         selected: false
       }
     });
@@ -606,8 +786,10 @@ export const generateV2CanvasGapVideo = async (
     normalizeOptionalString(missingNode.data.slot_description) ||
     normalizeOptionalString(missingNode.data.visual_description) ||
     normalizeOptionalString(missingNode.data.description);
+  const continuityContext = buildGapContinuityContext(session, missingNode);
+  const contextualVideoPrompt = `${videoPrompt}${continuityContext.promptSuffix}`;
   const submittedGenerationResult = await generateV2ImageToVideo({
-    video_prompt: videoPrompt,
+    video_prompt: contextualVideoPrompt,
     approved_image_uri: imageUri,
     source_video_uri: sourceVideoUri,
     duration_seconds: gapDurationSeconds,
@@ -632,7 +814,9 @@ export const generateV2CanvasGapVideo = async (
     slot_id: missingNode.slot_id,
     display_order: missingNode.display_order,
     data: {
-      video_prompt: videoPrompt,
+      video_prompt: contextualVideoPrompt,
+      base_video_prompt: videoPrompt,
+      continuity_context: continuityContext,
       generation_mode: imageUri ? "generated_image" : "direct_from_material_frame",
       source_image_node_id: imageCandidateNode?.node_id,
       video_prompt_node_id: videoPromptNode?.node_id,

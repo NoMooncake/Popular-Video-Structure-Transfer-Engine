@@ -2843,6 +2843,109 @@ test("v2 script session localizes English slot headings and keeps superscripts",
 });
 
 test(
+  "v2 canvas image generation includes neighboring material continuity context",
+  { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
+  async () => {
+    const hookFileId = createUploadedTestVideo(1);
+    const ctaFileId = createUploadedTestVideo(1);
+
+    const createResponse = await fetch(`${baseUrl}/api/v2/script-sessions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        user_request: {
+          goal: "冰红茶宣传片",
+          product_name: "冰红茶"
+        },
+        target_duration_seconds: 3,
+        slots: [
+          {
+            slot_id: "slot_01",
+            slot_type: "strong_hook",
+            duration_seconds: 1,
+            shot_description: "冰红茶瓶身开场特写。",
+            materials: [
+              {
+                material_id: "hook_clip",
+                file_id: hookFileId,
+                uri: `/api/upload/files/${hookFileId}`,
+                label: "hook_clip.mp4"
+              }
+            ]
+          },
+          {
+            slot_id: "slot_02",
+            slot_type: "product_hero",
+            duration_seconds: 1,
+            shot_description: "补一张能承接前后镜头的产品关键帧。"
+          },
+          {
+            slot_id: "slot_03",
+            slot_type: "cta",
+            duration_seconds: 1,
+            shot_description: "结尾饮用动作。",
+            materials: [
+              {
+                material_id: "cta_clip",
+                file_id: ctaFileId,
+                uri: `/api/upload/files/${ctaFileId}`,
+                label: "cta_clip.mp4"
+              }
+            ]
+          }
+        ]
+      })
+    });
+    const created = (await createResponse.json()) as { session_id: string };
+    assert.equal(createResponse.status, 201);
+
+    const revalidateResponse = await fetch(`${baseUrl}/api/v2/canvas/revalidate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        session_id: created.session_id,
+        use_multimodal_provider: false
+      })
+    });
+    const revalidated = (await revalidateResponse.json()) as {
+      canvas_session_id: string;
+    };
+    assert.equal(revalidateResponse.status, 200);
+
+    const imageCandidatesResponse = await fetch(
+      `${baseUrl}/api/v2/canvas-sessions/${revalidated.canvas_session_id}/image-candidates`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          slot_id: "slot_02",
+          count: 1,
+          use_image_provider: false,
+          allow_fallback: true
+        })
+      }
+    );
+    const imageCandidates = (await imageCandidatesResponse.json()) as {
+      image_candidate_nodes: Array<Record<string, unknown>>;
+    };
+    assert.equal(imageCandidatesResponse.status, 201);
+    const candidateData = asRecord(imageCandidates.image_candidate_nodes[0]?.data);
+    const continuityContext = asRecord(candidateData.continuity_context);
+    const referenceVideos = asRecordArray(continuityContext.referenceVideos);
+
+    assert.match(String(candidateData.prompt), /连续性约束/);
+    assert.ok(referenceVideos.some((video) => video.file_id === hookFileId));
+    assert.ok(referenceVideos.some((video) => video.file_id === ctaFileId));
+  }
+);
+
+test(
   "v2 script slot order is persisted before canvas revalidation",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
   async () => {
