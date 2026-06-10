@@ -453,6 +453,7 @@ export const WorkspaceViews = ({
   return (
     <DemoView
       blocks={blocks}
+      onWorkflowPatch={onWorkflowPatch}
       onStepChange={onStepChange}
       projectName={projectName}
       workflowResult={workflowResult}
@@ -1757,8 +1758,6 @@ const previewImages = [
   "https://www.figma.com/api/mcp/asset/27f882c5-4b54-4e3e-b9b7-811c7dfe6429"
 ];
 
-const coverImageAsset = "/cover-coffee.png";
-
 const parseRangeDuration = (value: string) => {
   const matches = value.match(/(\d+(?:\.\d+)?)/g)?.map(Number) ?? [];
   if (matches.length >= 2 && matches[1] > matches[0]) {
@@ -1771,6 +1770,17 @@ const getRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 
 const getString = (value: unknown) => (typeof value === "string" ? value : undefined);
+
+const getArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
+const firstString = (...values: unknown[]) => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return undefined;
+};
 
 const getCanvasSessionId = (result?: WorkflowRunResult | null) => {
   if (!result) {
@@ -1788,6 +1798,79 @@ const getFinalVideoUrl = (result?: WorkflowRunResult | null) => {
   );
 };
 
+const getCoverPlan = (result?: WorkflowRunResult | null): Record<string, unknown> => {
+  const canvasSource = getRecord(getRecord(result?.canvasSession).source);
+  const plans = [
+    getRecord(result?.finalVideo?.cover_plan) ||
+      {},
+    getRecord(result?.canvasRevalidateResult?.cover_plan),
+    getRecord(canvasSource.cover_plan)
+  ];
+  return plans.find((plan) => Object.keys(plan).length > 0) ?? {};
+};
+
+const getFrameUri = (value: unknown): string | undefined => {
+  const frame = getRecord(value);
+  return firstString(
+    frame.uri,
+    frame.image_uri,
+    frame.public_uri,
+    getRecord(frame.media).uri
+  );
+};
+
+const getMaterialFrameUri = (material: V2MaterialAssignment): string | undefined => {
+  const frames = getArray(material.frames);
+  if (frames.length === 0) {
+    return undefined;
+  }
+
+  return getFrameUri(frames[Math.floor(frames.length / 2)]) || getFrameUri(frames[0]);
+};
+
+const getBlockThumbnail = (block: CanvasBlock, index: number): string => {
+  const slot = block.v2?.coverageSlot;
+  const materialFrame = [
+    ...(slot?.assigned_segments ?? []),
+    ...(slot?.matched_material_segments ?? []),
+    ...(slot?.assigned_materials ?? [])
+  ]
+    .map(getMaterialFrameUri)
+    .find(Boolean);
+
+  return (
+    materialFrame ||
+    firstString(
+      getRecord(slot?.frontend_display).thumbnail_url
+    ) ||
+    previewImages[index % previewImages.length]
+  );
+};
+
+const getCoverPreviewImage = (
+  coverPlan: Record<string, unknown>,
+  segments: PreviewSegment[]
+): string => {
+  return (
+    firstString(
+      coverPlan.cover_preview_image_uri,
+      coverPlan.cover_image_uri,
+      getRecord(coverPlan.recommended_source).frame_uri
+    ) ||
+    segments.find((segment) => segment.thumbnail)?.thumbnail ||
+    previewImages[0]
+  );
+};
+
+const getCoverPromptText = (coverPlan: Record<string, unknown>) => {
+  const prompt = getRecord(coverPlan.cover_image_prompt).prompt;
+  return (
+    getString(prompt) ||
+    getString(coverPlan.visual_direction) ||
+    "从现有成片或素材中抽取一帧作为封面，保持横版 16:9、主体清晰、适合视频首帧预览。"
+  );
+};
+
 const downloadUrl = (url: string, filename: string) => {
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -1799,7 +1882,14 @@ const downloadUrl = (url: string, filename: string) => {
 
 const buildPreviewSegments = (blocks: CanvasBlock[], workflowResult?: WorkflowRunResult | null) => {
   const finalAssembly = workflowResult?.finalAssembly ?? workflowResult?.finalVideo?.final_assembly;
-  const assemblySlots = Array.isArray(finalAssembly?.slots) ? finalAssembly.slots : [];
+  const canvasAssemblySlots = Array.isArray(workflowResult?.finalVideo?.assembly_slots)
+    ? workflowResult.finalVideo.assembly_slots
+    : [];
+  const assemblySlots = canvasAssemblySlots.length > 0
+    ? canvasAssemblySlots
+    : Array.isArray(finalAssembly?.slots)
+      ? finalAssembly.slots
+      : [];
   let cursor = 0;
 
   return blocks.map((block, index): PreviewSegment => {
@@ -1819,7 +1909,7 @@ const buildPreviewSegments = (blocks: CanvasBlock[], workflowResult?: WorkflowRu
     return {
       id: block.id,
       label: readableSlot(block),
-      thumbnail: getString(slotRecord.thumbnail_url) || previewImages[index % previewImages.length],
+      thumbnail: getString(slotRecord.thumbnail_url) || getBlockThumbnail(block, index),
       videoUrl,
       start,
       duration,
@@ -1864,11 +1954,13 @@ const ChevronRightIcon = () => (
 
 const DemoView = ({
   blocks,
+  onWorkflowPatch,
   onStepChange,
   projectName,
   workflowResult
 }: {
   blocks: CanvasBlock[];
+  onWorkflowPatch: (patch: Partial<WorkflowRunResult>) => void;
   onStepChange: (step: StepKey) => void;
   projectName?: string;
   workflowResult?: WorkflowRunResult | null;
@@ -1876,6 +1968,12 @@ const DemoView = ({
   const segments = useMemo(
     () => buildPreviewSegments(blocks, workflowResult),
     [blocks, workflowResult]
+  );
+  const coverPlan = useMemo(() => getCoverPlan(workflowResult), [workflowResult]);
+  const coverPrompt = useMemo(() => getCoverPromptText(coverPlan), [coverPlan]);
+  const bestCoverImage = useMemo(
+    () => getCoverPreviewImage(coverPlan, segments),
+    [coverPlan, segments]
   );
   const totalDuration = segments.at(-1)?.end ?? 0;
   const [activeIndex, setActiveIndex] = useState(0);
@@ -1886,8 +1984,13 @@ const DemoView = ({
   const [isPreparing, setIsPreparing] = useState(true);
   const [playhead, setPlayhead] = useState(0);
   const [previewHovered, setPreviewHovered] = useState(false);
-  const [coverTitle, setCoverTitle] = useState(projectName || "一杯好咖啡 开启美好一天");
-  const [coverIntro, setCoverIntro] = useState("精选咖啡豆，匠心烘焙，香醇顺滑，回味悠长。");
+  const [coverTitle, setCoverTitle] = useState(
+    getString(coverPlan.cover_title) || projectName || "视频封面"
+  );
+  const [coverIntro, setCoverIntro] = useState(
+    getString(coverPlan.cover_subtitle) || "已从真实素材中选择一帧作为封面预览。"
+  );
+  const [coverImage, setCoverImage] = useState(bestCoverImage);
   const currentSegment = segments[activeIndex] ?? segments[0];
   const finalVideoUrl = getFinalVideoUrl(workflowResult);
   const finalVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -1896,6 +1999,14 @@ const DemoView = ({
     const timer = window.setTimeout(() => setIsPreparing(false), 760);
     return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    setCoverTitle(getString(coverPlan.cover_title) || projectName || "视频封面");
+    setCoverIntro(
+      getString(coverPlan.cover_subtitle) || "已从真实素材中选择一帧作为封面预览。"
+    );
+    setCoverImage(bestCoverImage);
+  }, [bestCoverImage, coverPlan, projectName]);
 
   useEffect(() => {
     if (finalVideoUrl || !isPlaying || totalDuration <= 0) {
@@ -1982,8 +2093,17 @@ const DemoView = ({
   };
 
   const handleGenerateCoverCopy = () => {
-    setCoverTitle(projectName ? `${projectName}，一眼心动` : "一杯好咖啡 开启美好一天");
-    setCoverIntro("用高光画面抓住第一眼，把产品卖点压缩成一句能传播的标题。");
+    const options = getArray(coverPlan.cover_copy_options).map(getString).filter(Boolean);
+    setCoverTitle(options[0] || getString(coverPlan.cover_title) || projectName || "视频封面");
+    setCoverIntro(
+      getString(coverPlan.cover_subtitle) ||
+        getArray(coverPlan.video_description_recommendations).map(getString).find(Boolean) ||
+        "用高光画面抓住第一眼，把产品卖点压缩成一句能传播的标题。"
+    );
+  };
+
+  const handleGenerateCoverImage = () => {
+    setCoverImage(bestCoverImage);
   };
 
   const handleExport = async () => {
@@ -2001,6 +2121,12 @@ const DemoView = ({
       if (canvasSessionId) {
         const result = await assembleVideoAnalysisFinalVideo(canvasSessionId);
         exportedUrl = result.final_assembly?.final_video_url;
+        onWorkflowPatch({
+          canvasSession: result.canvas_session as V2CanvasSession | undefined,
+          canvasSessionId: (result.canvas_session as V2CanvasSession | undefined)?.canvas_session_id,
+          finalAssembly: result.final_assembly,
+          finalVideo: result
+        });
       } else {
         const slots: V2FinalAssemblySlot[] = segments
           .filter((segment) => segment.videoUrl)
@@ -2019,11 +2145,14 @@ const DemoView = ({
             fps: 24,
             background_color: "black",
             allow_loop_short_clips: true,
-            generate_bgm: true
+            generate_bgm: false
           });
           exportedUrl = result.final_video_url;
+          onWorkflowPatch({
+            finalAssembly: result
+          });
         } else {
-          await new Promise((resolve) => window.setTimeout(resolve, 1100));
+          throw new Error("没有可导出的真实视频片段，请先从画布进入最终预览。");
         }
       }
 
@@ -2140,7 +2269,7 @@ const DemoView = ({
           <p className="preview-status">
             {finalVideoUrl
               ? "已连接最终视频结果。"
-              : "当前使用 mock 串播预览；后端返回最终视频后会自动切换为真实视频导出。"}
+              : "当前使用真实片段缩略图预览；点击导出会调用最终合成接口。"}
           </p>
         </section>
       </main>
@@ -2160,16 +2289,15 @@ const DemoView = ({
               <aside className="cover-prompts" aria-label="封面提示词">
                 <section className="cover-prompt-card">
                   <p>
-                    请你扮演一位专业广告文案策划，为一款咖啡产品生成广告标题和简介。产品信息如下：
-                    品牌名：晨野咖啡。咖啡类型：低糖冷萃咖啡。目标人群：上班族、学生。
+                    {getArray(coverPlan.video_title_recommendations).map(getString).filter(Boolean).join(" / ") ||
+                      getString(coverPlan.cover_title) ||
+                      "基于当前视频内容生成封面标题和简介。"}
                   </p>
                   <button type="button" onClick={handleGenerateCoverCopy}>生成标题简介</button>
                 </section>
                 <section className="cover-prompt-card cover-prompt-card-tall">
-                  <p>
-                    请生成一张高质感咖啡广告封面图。画面主体是一杯“晨野咖啡”低糖冷萃咖啡，放置在干净的办公桌或木质桌面上，旁边有笔记本电脑、书本、阳光洒落的窗边场景，营造清晨灵感和工作效率均衡的氛围。画面风格：高级感、清爽、自然、治愈。色调：浅棕色、奶油白、暖阳金。少量深咖色。
-                  </p>
-                  <button type="button">生成封面</button>
+                  <p>{coverPrompt}</p>
+                  <button type="button" onClick={handleGenerateCoverImage}>生成封面</button>
                 </section>
               </aside>
 
@@ -2179,7 +2307,7 @@ const DemoView = ({
                   <p>{coverIntro}</p>
                 </div>
                 <div className="cover-art">
-                  <img alt="封面预览" src={coverImageAsset} />
+                  <img alt="封面预览" src={coverImage} />
                 </div>
               </section>
             </main>

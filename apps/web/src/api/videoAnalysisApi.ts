@@ -196,7 +196,7 @@ export const assembleVideoAnalysisFinalVideo = async (
   }
 
   return assembleV2CanvasFinalVideo(canvasSessionId, {
-    generate_bgm: true
+    generate_bgm: false
   });
 };
 

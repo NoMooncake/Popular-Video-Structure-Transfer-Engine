@@ -1629,7 +1629,7 @@ const buildV2CoverPlan = (
     video_title_recommendations: videoTitleRecommendations,
     video_description_recommendations: videoDescriptionRecommendations,
     bgm_plan: bgmPlan,
-    visual_direction: `${coverHeroSentence}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为竖屏封面，顶部或中部预留标题空间。`,
+    visual_direction: `${coverHeroSentence}。画面应选择最能代表广告卖点的一帧，主体清晰，适合作为横版 16:9 封面，顶部或中部预留标题空间。`,
     recommended_source: coverSegment
       ? {
           type: "material_segment",
@@ -1646,9 +1646,9 @@ const buildV2CoverPlan = (
       prompt_ref: "cover_image_prompt",
       prompt_source: "deterministic_canvas_cover_plan",
       prompt: [
-        `竖屏商业广告封面，主题是${productName}。`,
+        `横版 16:9 商业广告封面，主题是${productName}。`,
         `核心画面：${coverHeroSentence}。`,
-        "要求主体清晰、强视觉冲击、干净高对比、适合手机首屏浏览。",
+        "要求主体清晰、强视觉冲击、干净高对比、适合横版视频预览。",
         `封面主标题文案：${coverTitle}。`,
         "画面需要给标题文字预留空间，不要出现无关品牌、无关人物或杂乱背景。"
       ].join("\n")
