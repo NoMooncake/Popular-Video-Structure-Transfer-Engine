@@ -489,6 +489,66 @@ test(
   }
 );
 
+test("v2 material coverage does not use reference copywriting as target voiceover", async () => {
+  const normalized = {
+    reference_videos: [],
+    reference_file_ids: [],
+    user_materials: [],
+    user_material_file_ids: [],
+    text_assets: [],
+    user_request: {
+      goal: "生成定妆产品广告",
+      product_name: "液体吸油神器"
+    },
+    options: {
+      image_candidate_count: 4,
+      generate_image_candidates: false,
+      target_duration_seconds: 3,
+      allow_fallback: true
+    }
+  } satisfies Required<V2PipelineRequest>;
+
+  const coverage = await buildV2DeterministicMaterialCoverage(
+    normalized,
+    {
+      slots: [
+        {
+          slot_id: "slot_01",
+          slot_type: "product_hero",
+          slot_name: "产品亮相",
+          duration_seconds: 3,
+          visual_direction: "产品主视觉亮相",
+          source_reference_indices: [1]
+        }
+      ]
+    },
+    {
+      material_analysis: {
+        material_segments: []
+      }
+    },
+    [
+      {
+        sample_index: 1,
+        rows: [
+          {
+            source_slot_type: "product_hero",
+            copywriting: "样例视频原始旁白"
+          }
+        ]
+      }
+    ]
+  );
+
+  const firstSlot = asRecord(coverage.slot_coverage[0]);
+  const frontendDisplay = asRecord(firstSlot.frontend_display);
+
+  assert.equal(firstSlot.voiceover_text, "液体吸油神器，这一段重点看产品主视觉亮相。");
+  assert.equal(frontendDisplay.copy, "液体吸油神器，这一段重点看产品主视觉亮相。");
+  assert.notEqual(firstSlot.voiceover_text, "样例视频原始旁白");
+  assert.notEqual(frontendDisplay.copy, "样例视频原始旁白");
+});
+
 test(
   "v2 material coverage converts nested model fit slots into table-ready assignments",
   { skip: hasFFmpegAndFFprobe() ? false : "ffmpeg and ffprobe are required" },
@@ -577,11 +637,11 @@ test(
     assert.equal(coverage.slot_coverage[0]?.frontend_coverage_label, "完全匹配");
     assert.deepEqual(asRecord(coverage.slot_coverage[0]?.frontend_display), {
       migration_result_title: "强视觉开场",
-      migration_result_description: "根据当前广告结构补足该槽位画面。",
+      migration_result_description: "先用一句话抓住注意力，突出生成 10 秒广告最直接的吸引点。",
       duration_text: "3s",
       shot_description: "待补充分镜描述",
       material_summary: "ice_tea_material_01 3s",
-      copy: "待生成文案",
+      copy: "生成 10 秒广告，开场先把最想解决的问题说出来。",
       material_status: "完全匹配",
       add_material_button: {
         visible: true,

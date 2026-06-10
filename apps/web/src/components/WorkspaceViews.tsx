@@ -35,6 +35,7 @@ import type {
   StructureBlueprint,
   V2CanvasFinalVideoResult,
   V2FinalAssemblySlot,
+  V2MaterialAssignment,
   UploadedVideoFile,
   V2PipelineResult,
   V2ReferenceAnalysisTable
@@ -182,6 +183,67 @@ const readableSource = (source?: string) => {
   }
 
   return visualSourceText[source] ?? source;
+};
+
+const formatMaterialTimeRange = (material: V2MaterialAssignment): string => {
+  const start = material.source_in_seconds ?? material.start_seconds;
+  const end = material.source_out_seconds ?? material.end_seconds;
+  if (typeof start === "number" && typeof end === "number" && end > start) {
+    const format = (value: number) => Number(value.toFixed(3)).toString();
+    return `${format(start)} - ${format(end)}s`;
+  }
+
+  if (material.time_range?.trim()) {
+    return material.time_range.trim();
+  }
+
+  const duration = material.matched_material_duration ?? material.duration_seconds;
+  return typeof duration === "number" && duration > 0
+    ? `${Number(duration.toFixed(3)).toString()}s`
+    : "";
+};
+
+const isDisplayableMaterialSegment = (material: V2MaterialAssignment): boolean => {
+  const start = material.source_in_seconds ?? material.start_seconds;
+  const end = material.source_out_seconds ?? material.end_seconds;
+  const hasTimeRange =
+    (typeof start === "number" && typeof end === "number" && end > start) ||
+    Boolean(material.time_range?.trim());
+
+  return Boolean(material.segment_id && hasTimeRange);
+};
+
+const getMaterialDisplayName = (material: V2MaterialAssignment, index: number): string => {
+  const label =
+    material.label ||
+    material.material_id ||
+    material.source_material_id ||
+    material.file_id ||
+    material.segment_id ||
+    `素材 ${index + 1}`;
+  const timeRange = formatMaterialTimeRange(material);
+  return [label, timeRange].filter(Boolean).join(" ");
+};
+
+const getBlockMaterialNames = (block: CanvasBlock): string[] => {
+  const slot = block.v2?.coverageSlot;
+  const materials = [
+    ...(slot?.assigned_segments ?? []),
+    ...(slot?.matched_material_segments ?? []),
+    ...(slot?.assigned_materials ?? [])
+  ];
+  const seen = new Set<string>();
+
+  return materials
+    .filter(isDisplayableMaterialSegment)
+    .map((material, index) => getMaterialDisplayName(material, index))
+    .filter((name) => {
+      if (!name || seen.has(name)) {
+        return false;
+      }
+      seen.add(name);
+      return true;
+    });
 };
 
 const sourceReferenceMarks = (block: CanvasBlock, fallbackIndex: number) => {
@@ -1478,9 +1540,10 @@ const StructureMigrationView = ({
               {blocks.map((block, index) => {
                 const isSelected = selectedRowId === block.id;
                 const voiceoverText = block.timeline?.voiceover ?? "";
-                const baseMaterialName = materialFiles[index]?.original_filename ?? `素材 ${index + 1}`;
-                const materialNames = [baseMaterialName, ...(localMaterials[block.id] ?? [])];
-                const materialNote = block.timeline?.visual_description || "00:00-00:03 裁切 + 加标题字";
+                const materialNames = [
+                  ...getBlockMaterialNames(block),
+                  ...(localMaterials[block.id] ?? [])
+                ];
                 const rowClass = [
                   "migration-row",
                   isSelected ? "selected" : "",
@@ -1577,12 +1640,15 @@ const StructureMigrationView = ({
                     {/* 我的素材: 只读，过多时框内滚动 */}
                     <div className="migration-col col-material">
                       <div className="material-scroll">
-                        {materialNames.map((materialName) => (
-                          <div className="material-name" key={`${block.id}-${materialName}`}>
-                            {materialName}
-                          </div>
-                        ))}
-                        <div className="material-note">{materialNote}</div>
+                        {materialNames.length > 0 ? (
+                          materialNames.map((materialName) => (
+                            <div className="material-name" key={`${block.id}-${materialName}`}>
+                              {materialName}
+                            </div>
+                          ))
+                        ) : (
+                          <div className="material-name">空</div>
+                        )}
                       </div>
                     </div>
 

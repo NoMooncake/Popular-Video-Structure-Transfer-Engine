@@ -674,6 +674,7 @@ const buildReferenceTableRow = (
       title,
       description
     },
+    copywriting: copywriting && copywriting !== "无" ? copywriting : undefined,
     migration_possibility: getReferenceMigrationText(analysis, record, index),
     source_slot_type: normalizeOptionalString(record.slot_type)
   };
@@ -2401,6 +2402,38 @@ const getFallbackSlotCopyDirection = (
   return `围绕${productOrGoal}补一句简短旁白，服务当前分镜节奏。`;
 };
 
+const getFallbackSlotVoiceoverText = (
+  normalized: Required<V2PipelineRequest>,
+  slotType: string,
+  slotName: string | undefined,
+  visualGoal: string | undefined,
+  copyDirection: string | undefined
+): string => {
+  const productOrGoal =
+    normalized.user_request.product_name || normalized.user_request.goal || "目标产品";
+  const audience = normalized.user_request.target_audience;
+  const mustInclude = normalizeStringArray(normalized.user_request.must_include).slice(0, 2);
+  const focus = (visualGoal || copyDirection || slotName || slotType)
+    .replace(/\s+/gu, " ")
+    .trim();
+  const audienceText = audience ? `，给${audience}` : "";
+  const includeText = mustInclude.length > 0 ? `，重点讲清${mustInclude.join("、")}` : "";
+
+  if (/hook/iu.test(slotType)) {
+    return `${productOrGoal}${audienceText}，开场先把最想解决的问题说出来${includeText}。`;
+  }
+
+  if (/cta|action/iu.test(slotType)) {
+    return `想要这类效果，就从${productOrGoal}开始了解${includeText}。`;
+  }
+
+  if (focus) {
+    return `${productOrGoal}${audienceText}，这一段重点看${focus}${includeText}。`;
+  }
+
+  return `${productOrGoal}${audienceText}，用一句清楚的旁白补齐这一段卖点${includeText}。`;
+};
+
 const formatFrontendMaterialSummary = (
   matches: JsonObject[],
   candidateMaterials: JsonObject[]
@@ -2995,6 +3028,20 @@ export const buildV2DeterministicMaterialCoverage = async (
       referenceAnalysisTables
     );
     const sourceReferenceSuperscript = sourceReferenceIndices.map(toSuperscript).join(",");
+    const explicitVoiceoverText =
+      normalizeOptionalString(slot.voiceover_text) ||
+      normalizeOptionalString(slot.copy) ||
+      normalizeOptionalString(slot.text_or_voiceover) ||
+      normalizeOptionalString(slot.subtitle_or_voiceover) ||
+      normalizeOptionalString(slot.caption_text) ||
+      copyDirection ||
+      getFallbackSlotVoiceoverText(
+        normalized,
+        slotType,
+        slotName,
+        visualGoal,
+        copyDirection || displayCopyDirection
+      );
 
     return {
       slot_id:
@@ -3002,6 +3049,12 @@ export const buildV2DeterministicMaterialCoverage = async (
       slot_type: slotType,
       slot_name: slotName,
       visual_goal: visualGoal,
+      voiceover_text: explicitVoiceoverText,
+      text_or_voiceover: normalizeOptionalString(slot.text_or_voiceover),
+      subtitle_or_voiceover: normalizeOptionalString(slot.subtitle_or_voiceover),
+      subtitle_or_vo_direction: normalizeOptionalString(slot.subtitle_or_vo_direction),
+      narration_direction: normalizeOptionalString(slot.narration_direction),
+      caption_text: normalizeOptionalString(slot.caption_text),
       copy_direction: displayCopyDirection,
       packaging_suggestions: normalizeOptionalString(slot.packaging_suggestions),
       source_reference_indices: sourceReferenceIndices,
@@ -3025,7 +3078,7 @@ export const buildV2DeterministicMaterialCoverage = async (
             }
           : {}),
         material_summary: frontendMaterialSummary,
-        copy: displayCopyDirection,
+        copy: explicitVoiceoverText || "",
         material_status: frontendCoverageLabel,
         add_material_button: {
           visible: true,
@@ -3886,7 +3939,7 @@ export const runV2Pipeline = async (
       reference_analysis_tables: referenceAnalysisTables,
       user_material_analysis: userMaterialAnalysis,
       instruction:
-        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。每个 editable slot 必须包含 source_reference_indices 数组，标明该分镜结构参考自第几个样例视频；如果同时迁移多个样例的同类分镜，可返回多个编号。成片节奏和结构取舍必须优先服从用户需求、目标时长和信息密度；如果用户没有明确节奏要求，再把样例和素材作为弱参考。不要根据用户原始素材的长短或一镜到底形式直接判定成片节奏。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、字幕/口播方向、包装建议、需要用户填入或补充的内容。所有生成 prompt 必须中文。"
+        "综合多个商业广告样例的结构，生成一个适合用户新广告的可填写结构。每个 editable slot 必须包含 source_reference_indices 数组，标明该分镜结构参考自第几个样例视频；如果同时迁移多个样例的同类分镜，可返回多个编号。成片节奏和结构取舍必须优先服从用户需求、目标时长和信息密度；如果用户没有明确节奏要求，再把样例和素材作为弱参考。不要根据用户原始素材的长短或一镜到底形式直接判定成片节奏。必须服从 adaptive_slot_planning_rules：目标时长越短，越应该合并或舍弃非必要模块，不能机械输出7个槽位。每个槽位应有足够时长表达清楚，整体逻辑必须完整。请用中文返回每个可编辑槽位、时长、画面方向、包装建议、需要用户填入或补充的内容。每个槽位必须返回 voiceover_text，voiceover_text 是目标成片要使用的旁白/字幕草稿，必须基于 user_request、user_material_analysis 和用户素材中的产品/场景生成；只能迁移样例的视频结构、节奏和表达方法，禁止复制或改写样例视频的原始 copywriting/台词作为目标旁白。所有生成 prompt 必须中文。"
     },
     allowFallback,
     (reason) =>

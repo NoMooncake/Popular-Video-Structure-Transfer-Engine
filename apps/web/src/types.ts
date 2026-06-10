@@ -256,6 +256,12 @@ export type V2MaterialCoverageSlot = {
   slot_name?: string;
   visual_goal?: string;
   copy_direction?: string;
+  voiceover_text?: string;
+  text_or_voiceover?: string;
+  subtitle_or_voiceover?: string;
+  subtitle_or_vo_direction?: string;
+  narration_direction?: string;
+  caption_text?: string;
   required_duration: number;
   matched_material_duration: number;
   missing_duration: number;

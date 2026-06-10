@@ -164,28 +164,11 @@ const normalizeV2Copy = (value: string | undefined): string | undefined => {
   return trimmed;
 };
 
-const getV2FallbackCopy = (slot: V2MaterialCoverageSlot): string => {
-  const focus =
-    slot.frontend_display?.shot_description ||
-    slot.visual_goal ||
-    slot.frontend_display?.migration_result_description ||
-    getV2SlotLabel(slot);
-
-  if (/hook/iu.test(slot.slot_type)) {
-    return "先用一句话抓住注意力，突出产品最直接的吸引点。";
-  }
-
-  if (/cta|action/iu.test(slot.slot_type)) {
-    return "收束核心卖点，引导观众继续了解产品。";
-  }
-
-  return `突出${focus}，让观众快速理解这一段的产品卖点。`;
-};
-
 const getV2Copy = (slot: V2MaterialCoverageSlot): string =>
   normalizeV2Copy(slot.frontend_display?.copy) ||
-  normalizeV2Copy(slot.copy_direction) ||
-  getV2FallbackCopy(slot);
+  normalizeV2Copy(slot.voiceover_text) ||
+  normalizeV2Copy(slot.caption_text) ||
+  "";
 
 const toV2StructureSlot = (slot: V2MaterialCoverageSlot): CanvasBlock["slot"] => ({
   slot_id: slot.slot_id,

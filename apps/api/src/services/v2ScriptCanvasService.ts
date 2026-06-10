@@ -455,8 +455,7 @@ const normalizeScriptSlot = (
   const voiceoverText =
     normalizeOptionalString(slot.voiceover_text) ||
     normalizeOptionalString(slot.copy) ||
-    normalizeOptionalString(slot.copy_direction) ||
-    normalizeOptionalString(slot.subtitle_or_vo_direction) ||
+    normalizeOptionalString(slot.caption_text) ||
     normalizeOptionalString(asJsonObject(slot.frontend_display).copy);
 
   return {
