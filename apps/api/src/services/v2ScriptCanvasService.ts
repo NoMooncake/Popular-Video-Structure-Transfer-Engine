@@ -949,7 +949,6 @@ type MaterialRange = {
   source_in_seconds: number;
   source_out_seconds: number;
   duration_seconds: number;
-  reused?: boolean;
 };
 
 const getSegmentFinalRange = (
@@ -1036,24 +1035,7 @@ const findAvailableSegmentRange = (
     }
   }
 
-  const tailRange = buildRange(cursor, segmentEnd);
-  if (tailRange) {
-    return tailRange;
-  }
-
-  const reusedDuration = Number(
-    Math.min(requestedDuration, segmentRange.duration_seconds).toFixed(3)
-  );
-  if (reusedDuration <= minAllocatableDuration) {
-    return undefined;
-  }
-
-  return {
-    source_in_seconds: Number(segmentRange.source_in_seconds.toFixed(3)),
-    source_out_seconds: Number((segmentRange.source_in_seconds + reusedDuration).toFixed(3)),
-    duration_seconds: reusedDuration,
-    reused: true
-  };
+  return buildRange(cursor, segmentEnd);
 };
 
 const markSegmentRangeUsed = (
@@ -1120,46 +1102,25 @@ const allocateSegmentsForSlot = (
     remainingBySegmentId.set(segmentId, getSegmentFinalDuration(segment));
   }
 
-  let requiredRemaining = slot.required_duration;
   const assignedSegments: JsonObject[] = [];
-  const exactAssignedSegments = candidateSegments.filter(
-    (segment) => normalizeOptionalString(segment.assigned_slot_id) === slot.slot_id
-  );
-  const materialKeys = Array.from(
-    new Set(exactAssignedSegments.map((segment) => getSegmentMaterialKey(segment)))
-  ).sort((left, right) => {
-    const newestLeft = Math.max(
-      ...exactAssignedSegments
-        .filter((segment) => getSegmentMaterialKey(segment) === left)
-        .map((segment) => getSegmentAssignedAtMs(segment))
-    );
-    const newestRight = Math.max(
-      ...exactAssignedSegments
-        .filter((segment) => getSegmentMaterialKey(segment) === right)
-        .map((segment) => getSegmentAssignedAtMs(segment))
-    );
 
-    return newestRight - newestLeft;
-  });
-
-  const allocateFromSegment = (segment: JsonObject, maxDuration?: number): void => {
-    if (requiredRemaining <= 0) {
-      return;
+  const allocateFromSegment = (segment: JsonObject): boolean => {
+    if (assignedSegments.length > 0) {
+      return true;
     }
 
     const segmentId = normalizeOptionalString(segment.segment_id);
     if (!segmentId) {
-      return;
+      return false;
     }
 
     const remainingSegmentDuration = remainingBySegmentId.get(segmentId) || 0;
     if (remainingSegmentDuration <= 0) {
-      return;
+      return false;
     }
 
     const requestedDuration = Number(
-      Math.min(requiredRemaining, remainingSegmentDuration, maxDuration ?? Number.POSITIVE_INFINITY)
-        .toFixed(3)
+      Math.min(slot.required_duration, remainingSegmentDuration).toFixed(3)
     );
     const allocatedRange = findAvailableSegmentRange(
       segment,
@@ -1167,19 +1128,17 @@ const allocateSegmentsForSlot = (
       requestedDuration
     );
     if (!allocatedRange) {
-      return;
+      return false;
     }
 
     const matchedDuration = allocatedRange.duration_seconds;
     if (matchedDuration <= 0) {
-      return;
+      return false;
     }
 
     assignedSegments.push({
       ...makeSegmentAssignment(segment, matchedDuration, allocatedRange),
-      allocation_policy: allocatedRange.reused
-        ? "coherent_reused_material_range"
-        : "coherent_non_overlapping_material_range",
+      allocation_policy: "primary_non_overlapping_material_range",
       physical_material_key: getSegmentPhysicalMaterialKey(segment)
     });
     markSegmentRangeUsed(slot, segment, allocationState, allocatedRange);
@@ -1187,36 +1146,14 @@ const allocateSegmentsForSlot = (
       segmentId,
       Number((remainingSegmentDuration - matchedDuration).toFixed(3))
     );
-    requiredRemaining = Number((requiredRemaining - matchedDuration).toFixed(3));
+
+    return true;
   };
 
-  if (materialKeys.length > 1) {
-    const fairShareDuration = Number((slot.required_duration / materialKeys.length).toFixed(3));
-    for (const materialKey of materialKeys) {
-      let materialRemaining = Math.min(fairShareDuration, requiredRemaining);
-      const segmentsForMaterial = exactAssignedSegments
-        .filter((segment) => getSegmentMaterialKey(segment) === materialKey)
-        .sort(compareCandidateSegments);
-
-      for (const segment of segmentsForMaterial) {
-        if (materialRemaining <= 0 || requiredRemaining <= 0) {
-          break;
-        }
-
-        const before = requiredRemaining;
-        allocateFromSegment(segment, materialRemaining);
-        const allocated = Number((before - requiredRemaining).toFixed(3));
-        materialRemaining = Number((materialRemaining - allocated).toFixed(3));
-      }
-    }
-  }
-
   for (const segment of candidateSegments.sort(compareCandidateSegments)) {
-    if (requiredRemaining <= 0) {
+    if (allocateFromSegment(segment)) {
       break;
     }
-
-    allocateFromSegment(segment);
   }
 
   return assignedSegments;
@@ -1467,7 +1404,7 @@ const buildSegmentAwareMaterialCoverage = (
       ignored_missing_duration: ignoredSmallGap ? rawMissingDuration : 0,
       minimum_ai_completion_gap_seconds: minimumAiCompletionGapSeconds,
       material_reuse_policy: {
-        mode: "prefer_non_overlapping_source_ranges_with_reuse_fallback",
+        mode: "single_primary_non_overlapping_source_range",
         physical_material_keys_seen_so_far: Array.from(allocationState.usedRangesByKey.keys())
       },
       ai_completion_required_duration:

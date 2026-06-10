@@ -270,10 +270,10 @@ const getScriptSlotMaterialSummary = (
 
   if (materials.length === 1) {
     const material = materials[0];
-    return [`${material.label || material.material_id || material.file_id || "素材"} 待节选`];
+    return [`${material.label || material.material_id || material.file_id || "素材"} 待重新匹配`];
   }
 
-  return [`${materials.length} 条素材待节选`];
+  return ["待进入画布重新匹配"];
 };
 
 const sourceReferenceMarks = (block: CanvasBlock, fallbackIndex: number) => {

@@ -515,7 +515,7 @@ const createCanvasDisplayBlocks = (
       .sort(compareCanvasNodes);
 
     const childBlocks = [
-      ...materialNodes.map((node) => materialBlockFromNode(baseBlock, node, slotId)),
+      ...materialNodes.slice(0, 1).map((node) => materialBlockFromNode(baseBlock, node, slotId)),
       ...missingNodes.map((node) => missingBlockFromNode(baseBlock, node, slotId))
     ].sort((first, second) => {
       const firstNode = first.v2?.canvasNodeId ? nodesById.get(first.v2.canvasNodeId) : undefined;
