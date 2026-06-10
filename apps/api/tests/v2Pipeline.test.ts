@@ -2940,6 +2940,7 @@ test(
     const referenceVideos = asRecordArray(continuityContext.referenceVideos);
 
     assert.match(String(candidateData.prompt), /连续性约束/);
+    assert.match(String(candidateData.prompt), /横版 16:9/);
     assert.ok(referenceVideos.some((video) => video.file_id === hookFileId));
     assert.ok(referenceVideos.some((video) => video.file_id === ctaFileId));
   }
@@ -3088,6 +3089,7 @@ test(
       input: {
         image_uri: string;
         generation_mode: string;
+        aspect_ratio: string;
       };
     };
 
@@ -3095,6 +3097,7 @@ test(
     assert.equal(body.status, "mock_ready");
     assert.match(body.input.image_uri, /^data:image\/jpeg;base64,/);
     assert.equal(body.input.generation_mode, "direct_from_material_frame");
+    assert.equal(body.input.aspect_ratio, "16:9");
   }
 );
 

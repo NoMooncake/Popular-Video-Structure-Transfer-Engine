@@ -559,6 +559,7 @@ const buildGapContinuityContext = (
   const promptSuffix = promptLines.length
     ? [
         "",
+        "Demo 画幅要求：必须生成横版 16:9，不要生成竖版、9:16 或手机竖屏构图。",
         "连续性约束：必须参考前后镜头的产品、人物、场景、光线、色调、构图和字幕安全区，生成能自然插入中间的关键帧/视频；不要改变产品包装、品牌、主色调或场景氛围。",
         ...promptLines
       ].join("\n")
@@ -794,6 +795,7 @@ export const generateV2CanvasGapVideo = async (
     source_video_uri: sourceVideoUri,
     duration_seconds: gapDurationSeconds,
     target_duration_seconds: gapDurationSeconds,
+    aspect_ratio: "16:9",
     slot_id: missingNode.slot_id,
     slot_type: slotType,
     slot_description: slotDescription,

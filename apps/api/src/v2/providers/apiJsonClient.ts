@@ -597,6 +597,7 @@ const withImageCandidateInstruction = (
     prompt,
     "",
     "【高优先级生成规则】以下规则优先级高于上方 prompt 中的举例和负面约束。",
+    "Demo 临时要求：必须生成横版 16:9 画面。即使上方 prompt 写了竖屏、9:16、短视频竖版构图，也一律改为横版 16:9；主体、字幕安全区和构图都按横版广告画面处理。",
     count > 1
       ? `请基于以上同一个广告槽位生成 ${count} 张候选图，供用户选择。`
       : "请基于以上广告槽位生成 1 张候选图，供用户确认。",
@@ -834,6 +835,7 @@ export const requestImageCandidates = async (
     model: providerConfig.model,
     prompt,
     size: "2K",
+    aspect_ratio: "16:9",
     output_format: "png",
     response_format: "url",
     watermark: true,

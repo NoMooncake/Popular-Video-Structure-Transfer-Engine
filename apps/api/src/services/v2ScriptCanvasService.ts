@@ -1176,7 +1176,7 @@ const getCanvasFallbackImagePrompt = (
     prompt_ref: `${slot.slot_type}_canvas_gap_image`,
     prompt_source: "deterministic_canvas_gap_fallback",
     prompt: [
-      `竖屏 9:16 商业广告补帧关键图，产品是${productName}。`,
+      `横版 16:9 商业广告补帧关键图，产品是${productName}。`,
       `对应分镜：${slot.shot_description}`,
       slot.voiceover_text ? `字幕/旁白方向：${slot.voiceover_text}` : undefined,
       "画面需要真实商业摄影质感，主体清晰，保留字幕安全区。",
@@ -1205,7 +1205,7 @@ const getCanvasFallbackVideoPrompt = (
       `最终剪入缺口时长约 ${missingDuration}s；若视频模型需要生成更长素材，请确保前 ${missingDuration}s 就能完整覆盖该缺口，后续可被裁剪。`,
       `分镜画面方向：${slot.shot_description}`,
       slot.voiceover_text ? `字幕/旁白方向：${slot.voiceover_text}` : undefined,
-      "保持竖屏 9:16、真实商业广告质感、主体稳定清晰，动作自然延展。",
+      "保持横版 16:9、真实商业广告质感、主体稳定清晰，动作自然延展。",
       "不要纯文字生成；不要生成无关品牌、错误包装、乱码文字或畸形手部。"
     ]
       .filter(Boolean)

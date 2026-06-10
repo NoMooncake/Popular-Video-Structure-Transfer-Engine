@@ -3866,7 +3866,7 @@ const makeFallbackImageToVideoResponse = (
       image_uri: sourceImageUri,
       prompt: payload.video_prompt,
       duration_seconds: payload.duration_seconds || 5,
-      aspect_ratio: payload.aspect_ratio || "9:16",
+      aspect_ratio: payload.aspect_ratio || "16:9",
       generation_mode: payload.generation_mode || "generated_image"
     },
     note:
@@ -4309,7 +4309,7 @@ export const generateV2ImageToVideo = async (
     image_uri: sourceImage.image_uri,
     prompt: payload.video_prompt,
     duration_seconds: payload.duration_seconds || 5,
-    aspect_ratio: payload.aspect_ratio || "9:16",
+    aspect_ratio: payload.aspect_ratio || "16:9",
     camera_fixed: payload.camera_fixed,
     watermark: payload.watermark,
     generation_mode: payload.generation_mode || sourceImage.source_type,
