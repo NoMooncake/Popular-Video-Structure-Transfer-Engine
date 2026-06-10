@@ -1,10 +1,8 @@
 import { useMemo, useRef, useState } from "react";
 import {
-  generateV2CanvasGapVideo,
-  generateV2CanvasImageCandidates,
-  generateV2ImageCandidates,
-  generateV2ImageToVideo
-} from "../api/client";
+  generateVideoAnalysisGapVideo,
+  generateVideoAnalysisImageCandidates
+} from "../api/videoAnalysisApi";
 import type { V2CanvasSession } from "../api/client";
 import type { CanvasBlock } from "../types";
 
@@ -25,7 +23,7 @@ type CanvasPosition = {
   y: number;
 };
 
-type CanvasStatus = "matched" | "missing" | "generating";
+type CanvasStatus = "matched" | "missing" | "duration_insufficient" | "generating";
 
 type VideoGenerationPayload = {
   keyframe_image?: string;
@@ -80,11 +78,14 @@ const fallbackPositions = (blocks: CanvasBlock[]) =>
 const labelForBlock = (block: CanvasBlock, index: number) =>
   figmaLabels[index] ?? block.slot.slot_type ?? block.label;
 
-const imageForBlock = (index: number) => cardImages[index % cardImages.length];
+const imageForBlock = (block: CanvasBlock, index: number) =>
+  block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri ??
+  cardImages[index % cardImages.length];
 
-const portColorByStatus: Record<CanvasStatus, "matched" | "missing"> = {
+const portColorByStatus: Record<CanvasStatus, "matched" | "missing" | "partial"> = {
   matched: "matched",
   missing: "missing",
+  duration_insufficient: "partial",
   generating: "missing"
 };
 
@@ -106,6 +107,18 @@ const defaultVideoPromptFor = (block: CanvasBlock, index: number) =>
 
 const rotateCandidates = (seed: number) =>
   Array.from({ length: 4 }, (_, index) => aiCandidateImages[(seed + index) % aiCandidateImages.length]);
+
+const formatSeconds = (value?: number) => {
+  const seconds = Number(value ?? 0);
+  return `${Number.isFinite(seconds) ? seconds.toFixed(seconds % 1 === 0 ? 0 : 1) : "0"}s`;
+};
+
+const suggestionsForBlock = (block: CanvasBlock) =>
+  block.v2?.coverageSlot?.available_user_actions?.length
+    ? block.v2.coverageSlot.available_user_actions
+    : block.status === "partial"
+      ? ["补拍素材", "放慢节奏", "AI 补全过渡镜头", "压缩原结构"]
+      : ["补充产品特写", "补充使用场景", "使用 AI 生成补全"];
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -220,7 +233,18 @@ export const VideoBlockCanvas = ({
       return "matched";
     }
 
-    return block.status === "matched" ? "matched" : "missing";
+    if (block.status === "matched") {
+      return "matched";
+    }
+
+    if (
+      block.status === "partial" ||
+      block.v2?.coverageSlot?.frontend_coverage_status === "structure_complete_duration_short"
+    ) {
+      return "duration_insufficient";
+    }
+
+    return "missing";
   };
 
   const needsCompletion = (block: CanvasBlock, index: number) =>
@@ -468,22 +492,16 @@ export const VideoBlockCanvas = ({
       const prompt =
         block.v2?.coverageSlot?.recommended_aigc_prompt?.prompt ??
         getKeyframePrompt(block, blockIndex);
-      const response: unknown = canvasSessionId
-        ? await generateV2CanvasImageCandidates(canvasSessionId, {
-            slot_id: block.id,
-            prompt,
-            count: 4,
-            allow_fallback: true
-          })
-        : await generateV2ImageCandidates({
-            prompt,
-            count: 4,
-            allow_fallback: true,
-            reference_video_uris:
-              block.v2?.coverageSlot?.direct_video_reference_materials
-                ?.map((material) => material.uri)
-                .filter((uri): uri is string => Boolean(uri)) ?? []
-          });
+      const response: unknown = await generateVideoAnalysisImageCandidates({
+        canvasSessionId,
+        slotId: block.id,
+        prompt,
+        count: 4,
+        referenceVideoUris:
+          block.v2?.coverageSlot?.direct_video_reference_materials
+            ?.map((material) => material.uri)
+            .filter((uri): uri is string => Boolean(uri)) ?? []
+      });
       if (hasCanvasSession(response)) {
         onCanvasSessionChange?.(response.canvas_session);
       }
@@ -539,7 +557,7 @@ export const VideoBlockCanvas = ({
     }
 
     const sourceVideoUri = block.v2?.coverageSlot?.direct_video_reference_materials?.[0]?.uri;
-    const fallbackImage = keyframeCandidates[block.id]?.[0] ?? imageForBlock(index);
+    const fallbackImage = keyframeCandidates[block.id]?.[0] ?? imageForBlock(block, index);
     const payload: VideoGenerationPayload = {
       keyframe_image: selectedKeyframes[block.id] ?? (sourceVideoUri ? undefined : fallbackImage),
       source_video_uri: sourceVideoUri,
@@ -554,25 +572,16 @@ export const VideoBlockCanvas = ({
         block.v2?.coverageSlot?.ai_completion_required_duration ??
         block.v2?.coverageSlot?.required_duration ??
         5;
-      const response: unknown = canvasSessionId
-        ? await generateV2CanvasGapVideo(canvasSessionId, {
-            approved_image_uri: payload.keyframe_image,
-            duration_seconds: durationSeconds,
-            slot_id: block.id,
-            video_prompt: payload.video_prompt,
-            allow_fallback: true
-          })
-        : await generateV2ImageToVideo({
-            approved_image_uri: payload.keyframe_image,
-            source_video_uri: payload.source_video_uri,
-            video_prompt: payload.video_prompt,
-            generation_mode: payload.keyframe_image ? "generated_image" : "direct_from_material_frame",
-            duration_seconds: durationSeconds,
-            slot_id: block.id,
-            slot_type: block.slot.slot_type,
-            slot_description: block.migrationResult,
-            allow_fallback: true
-          });
+      const response: unknown = await generateVideoAnalysisGapVideo({
+        approvedImageUri: payload.keyframe_image,
+        canvasSessionId,
+        durationSeconds,
+        sourceVideoUri: payload.source_video_uri,
+        slotDescription: block.migrationResult,
+        slotId: block.id,
+        slotType: block.slot.slot_type,
+        videoPrompt: payload.video_prompt
+      });
       if (hasCanvasSession(response)) {
         onCanvasSessionChange?.(response.canvas_session);
       }
@@ -580,7 +589,7 @@ export const VideoBlockCanvas = ({
         extractGeneratedVideoUri(getVideoGenerationPayload(response)) ??
         payload.keyframe_image ??
         keyframeCandidates[block.id]?.[0] ??
-        imageForBlock(index);
+        imageForBlock(block, index);
 
       setGeneratedVideoThumbs((current) => ({
         ...current,
@@ -720,13 +729,20 @@ export const VideoBlockCanvas = ({
             {blocks.map((block, index) => {
               const pos = positions[block.id] ?? basePositions[block.id] ?? { x: 0, y: 0 };
               const selected = selectedBlockId === block.id;
-              const image = generatedVideoThumbs[block.id] ?? imageForBlock(index);
+              const image = generatedVideoThumbs[block.id] ?? imageForBlock(block, index);
               const canvasStatus = getCanvasStatus(block, index);
               const gap = needsCompletion(block, index);
               const portTone = portColorByStatus[canvasStatus];
               const aiCompleted = Boolean(generatedVideoThumbs[block.id]);
               const playable = canvasStatus === "matched";
               const isGeneratingVideo = canvasStatus === "generating";
+              const coverage = block.v2?.coverageSlot;
+              const suggestions = suggestionsForBlock(block);
+              const missingReason =
+                coverage?.gap_reason ||
+                coverage?.frontend_display?.material_status ||
+                block.gap?.missing ||
+                "缺少可匹配素材";
 
               return (
                 <article
@@ -752,8 +768,34 @@ export const VideoBlockCanvas = ({
                         <strong>Generating</strong>
                       </div>
                     ) : gap ? (
-                      <div className="figma-gap-card">
-                        <p>
+                      <div className={`figma-gap-card ${canvasStatus === "duration_insufficient" ? "duration-short" : "missing-material"}`}>
+                        {canvasStatus === "duration_insufficient" ? (
+                          <>
+                            <strong>结构完整但时长不足</strong>
+                            <dl>
+                              <div>
+                                <dt>当前</dt>
+                                <dd>{formatSeconds(coverage?.matched_material_duration)}</dd>
+                              </div>
+                              <div>
+                                <dt>目标</dt>
+                                <dd>{formatSeconds(coverage?.required_duration)}</dd>
+                              </div>
+                              <div>
+                                <dt>差值</dt>
+                                <dd>{formatSeconds(coverage?.missing_duration)}</dd>
+                              </div>
+                            </dl>
+                            <small>{suggestions.slice(0, 2).join(" / ")}</small>
+                          </>
+                        ) : (
+                          <>
+                            <strong>缺失占位</strong>
+                            <p>{missingReason}</p>
+                            <small>{suggestions.slice(0, 3).join(" / ")}</small>
+                          </>
+                        )}
+                        <p className="legacy-gap-copy">
                           缺少必要素材，
                           <br />
                           试试AI补齐吧！

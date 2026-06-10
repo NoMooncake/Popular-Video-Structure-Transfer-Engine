@@ -5198,6 +5198,194 @@ body,
   line-height: 1.5;
 }
 
+.figma-avatar,
+.figma-analysis-avatar {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: #f3d7c5;
+  color: transparent;
+  box-shadow: none;
+}
+
+.figma-avatar::before,
+.figma-analysis-avatar::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 28%;
+  width: 34%;
+  height: 34%;
+  border-radius: 999px;
+  background: #6f4a3c;
+  transform: translateX(-50%);
+}
+
+.figma-avatar::after,
+.figma-analysis-avatar::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -14%;
+  width: 72%;
+  height: 52%;
+  border-radius: 999px 999px 44% 44%;
+  background: #2f6f68;
+  transform: translateX(-50%);
+}
+
+.loading-overlay {
+  background: rgba(10, 10, 10, 0.68);
+}
+
+.loading-modal-content {
+  width: min(420px, calc(100vw - 48px));
+  max-width: 420px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 16px;
+  background: #27272a;
+  padding: 26px;
+  color: #ffffff;
+  text-align: center;
+}
+
+.loading-modal-icon {
+  display: inline-flex;
+  width: 54px;
+  height: 54px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(254, 44, 85, 0.12);
+}
+
+.loading-modal-icon span {
+  width: 30px;
+  height: 30px;
+  border: 3px solid rgba(255, 255, 255, 0.22);
+  border-top-color: #fe2c55;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.loading-modal-copy h3 {
+  margin: 18px 0 8px;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.loading-modal-copy p {
+  margin: 0;
+  color: #dddddd;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.loading-modal-steps {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.loading-modal-steps span {
+  min-width: 54px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #b9b9b9;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.loading-modal-steps span.active {
+  background: #fe2c55;
+  color: #ffffff;
+}
+
+.pipeline-retry-button {
+  width: fit-content;
+  border: 0;
+  border-radius: 999px;
+  background: #fe2c55;
+  color: #ffffff;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.figma-structure-card.status-duration_insufficient .figma-card-frame {
+  border-color: #f7c948;
+}
+
+.figma-port.partial,
+.figma-port.left.partial,
+.figma-port.right.partial {
+  background: #f7c948;
+}
+
+.figma-gap-card {
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  text-align: center;
+}
+
+.figma-gap-card strong {
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.figma-gap-card p,
+.figma-gap-card small {
+  margin: 0;
+  color: #dddddd;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.figma-gap-card .legacy-gap-copy {
+  display: none;
+}
+
+.figma-gap-card.missing-material {
+  background: rgba(254, 44, 85, 0.14);
+}
+
+.figma-gap-card.duration-short {
+  background: rgba(247, 201, 72, 0.16);
+}
+
+.figma-gap-card.duration-short dl {
+  display: grid;
+  width: 100%;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.figma-gap-card.duration-short dl div {
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.24);
+  padding: 7px 6px;
+}
+
+.figma-gap-card.duration-short dt {
+  color: #b9b9b9;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.figma-gap-card.duration-short dd {
+  margin: 2px 0 0;
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
 @media (max-width: 900px) {
   .figma-brand-home::before,
   .figma-canvas-brand span::before {

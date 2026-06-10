@@ -3,16 +3,19 @@ import type { ChangeEvent, KeyboardEvent } from "react";
 
 import type { WorkflowRunResult } from "../App";
 import {
-  assembleV2CanvasFinalVideo,
   analyzeV2Pipeline,
   assembleV2FinalVideo,
   createV2ScriptSession,
-  revalidateV2Canvas,
   reorderV2ScriptSlots,
   updateV2ScriptSlot,
   uploadMaterialFiles,
   uploadSampleVideos
 } from "../api/client";
+import {
+  assembleVideoAnalysisFinalVideo,
+  revalidateVideoAnalysisCanvas,
+  runVideoAnalysisWorkflow
+} from "../api/videoAnalysisApi";
 import type {
   V2CanvasSession,
   V2ScriptSession
@@ -429,12 +432,12 @@ const InputView = ({
   const [pipelineError, setPipelineError] = useState("");
   const [pipelineNote, setPipelineNote] = useState("等待上传样例视频");
   const [pipelineStatus, setPipelineStatus] = useState<
-    "idle" | "uploading" | "analyzing" | "extracting" | "success" | "error"
+    "idle" | "uploading" | "analyzing" | "extracting" | "generating" | "success" | "error"
   >("idle");
   const [sampleFiles, setSampleFiles] = useState<File[]>([]);
   const [showModal, setShowModal] = useState(false);
 
-  const isRunning = ["uploading", "analyzing", "extracting"].includes(pipelineStatus);
+  const isRunning = ["uploading", "analyzing", "extracting", "generating"].includes(pipelineStatus);
 
   const updateSampleFiles = (event: ChangeEvent<HTMLInputElement>) => {
     setSampleFiles(Array.from(event.target.files ?? []));
@@ -455,6 +458,36 @@ const InputView = ({
       setPipelineStatus("error");
       setPipelineError("请先上传至少一个样例视频。");
       setShowModal(true);
+      return;
+    }
+
+    try {
+      setShowModal(true);
+      setPipelineError("");
+      setPipelineStatus("uploading");
+      setPipelineNote("正在准备上传和解析");
+      const result = await runVideoAnalysisWorkflow({
+        brief,
+        materialFiles,
+        sampleFiles,
+        onProgress: (progress) => {
+          setPipelineStatus(progress.stage);
+          setPipelineNote(progress.note);
+        }
+      });
+
+      setPipelineStatus("success");
+      setPipelineNote("分析完成");
+      setShowModal(false);
+      onWorkflowReady(result);
+      onNext();
+      return;
+    } catch (error) {
+      console.warn("Video analysis workflow failed.", error);
+      setPipelineStatus("error");
+      setPipelineNote("接口连接失败");
+      setPipelineError(getErrorMessage(error));
+      setShowModal(false);
       return;
     }
 
@@ -568,6 +601,11 @@ const InputView = ({
                <div className="status-content">
                  <p className="status-note">{pipelineNote}</p>
                  {pipelineError && <p className="error-text">{pipelineError}</p>}
+                 {pipelineStatus === "error" ? (
+                   <button className="pipeline-retry-button" onClick={runPipeline} type="button">
+                     重试
+                   </button>
+                 ) : null}
                </div>
              </div>
           )}
@@ -648,7 +686,26 @@ const InputView = ({
         ) : null}
       </main>
 
-      {showModal && (
+      {isRunning ? (
+        <div className="modal-overlay loading-overlay" aria-live="polite">
+          <div className="modal-content loading-modal-content">
+            <div className="loading-modal-icon" aria-hidden="true">
+              <span />
+            </div>
+            <div className="loading-modal-copy">
+              <h3>{pipelineStatus === "generating" ? "正在生成迁移结果" : "正在解析素材"}</h3>
+              <p>{pipelineNote}</p>
+            </div>
+            <div className="loading-modal-steps">
+              <span className={pipelineStatus === "uploading" ? "active" : ""}>上传</span>
+              <span className={pipelineStatus === "extracting" ? "active" : ""}>拆解</span>
+              <span className={pipelineStatus === "generating" ? "active" : ""}>匹配</span>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showModal && !isRunning && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
@@ -1320,10 +1377,7 @@ const StructureMigrationView = ({
     }
 
     try {
-      const revalidateResult = await revalidateV2Canvas({
-        session_id: scriptSession.session_id,
-        persist_canvas_session: true
-      });
+      const revalidateResult = await revalidateVideoAnalysisCanvas(scriptSession.session_id);
       onWorkflowPatch({
         canvasRevalidateResult: revalidateResult,
         canvasSession: revalidateResult.canvas_session
@@ -1587,15 +1641,11 @@ const GapFillView = ({
     }
 
     try {
-      const finalVideo = await assembleV2CanvasFinalVideo(
-        canvasSession.canvas_session_id,
-        {
-          generate_bgm: true
-        }
-      );
+      const finalVideo = await assembleVideoAnalysisFinalVideo(canvasSession.canvas_session_id);
+      const nextCanvasSession = finalVideo.canvas_session as V2CanvasSession | undefined;
       onWorkflowPatch({
-        canvasSession: finalVideo.canvas_session,
-        canvasSessionId: finalVideo.canvas_session?.canvas_session_id,
+        canvasSession: nextCanvasSession,
+        canvasSessionId: nextCanvasSession?.canvas_session_id,
         finalAssembly: finalVideo.final_assembly,
         finalVideo
       });
@@ -1885,13 +1935,7 @@ const DemoView = ({
       let exportedUrl = finalVideoUrl;
 
       if (canvasSessionId) {
-        const result = await assembleV2CanvasFinalVideo(canvasSessionId, {
-          resolution: "1280x720",
-          fps: 24,
-          background_color: "black",
-          allow_loop_short_clips: true,
-          generate_bgm: true
-        });
+        const result = await assembleVideoAnalysisFinalVideo(canvasSessionId);
         exportedUrl = result.final_assembly?.final_video_url;
       } else {
         const slots: V2FinalAssemblySlot[] = segments
