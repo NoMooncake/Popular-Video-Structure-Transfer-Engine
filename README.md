@@ -100,14 +100,15 @@ flowchart LR
 - 中间补全片段不单独生成 BGM，最终成片只拥有一条全局 BGM。
 - 未补全缺口进入导出时，当前策略是跳过缺口对应片段；如果传入目标时长且实际时长不匹配，后端会报错。
 
+## Demo 视频
+
+- [迁镜（ShotSwift）Demo 录屏](https://drive.google.com/file/d/15fAEcLFS13N_siFWHdYVx7fD9uemRiBH/view?usp=drive_link)
+
 ## 仓库文档
 
 - [代码说明与运行手册](docs/codebase-runbook.md)
 - [Backend API Contract](docs/backend-api-contract.md)
-- [P0 Pipeline Demo Guide](docs/p0-pipeline-demo-guide.md)
-- [团队协作与 Git 工作流](docs/team-collaboration-workflow.md)
-- [GitHub 小白使用手册](docs/github-beginner-guide.md)
 
 ## 当前状态
 
-当前主验证分支为 `v2`。V2 后端真实链路已完成样例分析、结构迁移、画布缺口补全、最终拼接、封面/标题/简介建议和 ModelsLab BGM 接入。
+当前主分支为 `main`。V2 后端真实链路已完成样例分析、结构迁移、画布缺口补全、最终拼接、封面/标题/简介建议和 ModelsLab BGM 接入。
