@@ -4931,10 +4931,20 @@ input {
   bottom: 8px;
   width: 30px;
   height: 30px;
-  background: rgba(113, 115, 117, 0.5);
+  background: #fe2c55;
   box-shadow: none;
   font-size: 18px;
   font-weight: 400;
+}
+
+.input-page-redesign .submit-arrow-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #ffffff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
 }
 
 .input-page-redesign .upload-section-large {
@@ -5543,6 +5553,226 @@ body,
 
 .figma-port.top.matched {
   background: #34b77a;
+}
+
+/* front_3 home polish: keep the override narrow to reduce merge conflicts. */
+.simple-top-bar,
+.figma-analysis-topbar,
+.figma-canvas-topbar,
+.preview-topbar {
+  padding: 16px 48px;
+}
+
+.migration-fixed-frame {
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
+.input-page-redesign {
+  padding: 0 48px 72px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.input-page-redesign::-webkit-scrollbar {
+  display: none;
+}
+
+.input-page-redesign .content-container {
+  gap: 56px;
+  padding-top: 219px;
+}
+
+.input-page-redesign .main-section {
+  width: min(100%, 1000px);
+}
+
+.input-page-redesign .prompt-box-wide {
+  margin-bottom: 48px;
+}
+
+.input-page-redesign .upload-section-large {
+  gap: 32px;
+}
+
+.input-page-redesign .upload-card-large::before,
+.input-page-redesign .upload-card-large:nth-child(1)::before,
+.input-page-redesign .upload-card-large:nth-child(2)::before {
+  content: none;
+}
+
+.input-page-redesign .upload-card-large:nth-child(1) .upload-placeholder,
+.input-page-redesign .upload-card-large:nth-child(1) .upload-placeholder::after {
+  width: auto;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.input-page-redesign .canvas-section {
+  margin-top: 0;
+}
+
+.input-page-redesign .existing-canvases-scroll {
+  overflow: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.input-page-redesign .existing-canvases-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.input-page-redesign .canvas-card-placeholder {
+  cursor: default;
+  pointer-events: none;
+}
+
+.input-page-redesign .canvas-card-placeholder img {
+  display: block;
+  object-fit: cover;
+}
+
+.input-page-redesign .canvas-card-placeholder:focus-visible {
+  outline: 0;
+}
+
+.loading-overlay {
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(12px);
+}
+
+.loading-modal-content {
+  width: min(840px, calc(100vw - 64px));
+  min-height: 464px;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 30px;
+  background: #27272a;
+  padding: 52px 64px 48px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
+}
+
+.loading-modal-icon {
+  width: 108px;
+  height: 108px;
+  margin: 0 auto 36px;
+  background: rgba(254, 44, 85, 0.16);
+}
+
+.loading-modal-icon span {
+  width: 58px;
+  height: 58px;
+  border-width: 6px;
+  border-color: rgba(255, 255, 255, 0.24);
+  border-top-color: #ff2f64;
+}
+
+.loading-modal-copy h3 {
+  margin: 0 0 22px;
+  color: #ffffff;
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.loading-modal-copy p {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 28px;
+  line-height: 1.35;
+}
+
+.upload-loading-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  min-height: 36px;
+  margin: -28px 0 20px;
+  color: #dddddd;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.upload-loading-inline span {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.26);
+  border-top-color: #fe2c55;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+@media (max-width: 900px) {
+  .simple-top-bar,
+  .figma-analysis-topbar,
+  .figma-canvas-topbar,
+  .preview-topbar {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+
+  .migration-fixed-frame {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+
+  .input-page-redesign {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .loading-modal-content {
+    min-height: 360px;
+    padding: 36px 28px;
+  }
+
+  .loading-modal-icon {
+    width: 86px;
+    height: 86px;
+    margin-bottom: 28px;
+  }
+
+  .loading-modal-icon span {
+    width: 46px;
+    height: 46px;
+  }
+
+  .loading-modal-copy h3 {
+    font-size: 30px;
+  }
+
+  .loading-modal-copy p {
+    font-size: 20px;
+  }
+}
+
+/* Final nav padding lock: keep all page navigation bars aligned at 48px. */
+.simple-top-bar,
+.figma-analysis-topbar,
+.figma-canvas-topbar,
+.preview-topbar,
+.migration-fixed-frame {
+  padding-left: 48px;
+  padding-right: 48px;
+}
+
+.workspace.page-input {
+  height: 100vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.workspace.page-input::-webkit-scrollbar {
+  display: none;
+}
+
+.workspace.page-input .simple-top-bar {
+  left: 50%;
+  width: min(100%, 1728px);
+  padding-left: 48px;
+  padding-right: 48px;
+  transform: translateX(-50%);
 }
 
 .figma-port.top.missing,

@@ -339,11 +339,6 @@ export const WorkspaceViews = ({
   if (activeStep === "input") {
     return (
       <InputView
-        hasExistingCanvas={Boolean(
-          workflowResult?.canvasSession ||
-            workflowResult?.canvasSessionId ||
-            workflowResult?.canvasRevalidateResult
-        )}
         onNext={() => onStepChange("analysis")}
         onStepChange={onStepChange}
         onWorkflowReady={onWorkflowReady}
@@ -475,21 +470,17 @@ const CanvasTopBar = ({
 };
 
 const InputView = ({
-  hasExistingCanvas,
   onNext,
   onStepChange,
   onWorkflowReady,
   projectName
 }: {
-  hasExistingCanvas: boolean;
   onNext: () => void;
   onStepChange: (step: StepKey) => void;
   onWorkflowReady: (result: WorkflowRunResult) => void;
   projectName: string;
 }) => {
-  const [brief, setBrief] = useState(
-    "开始一次分镜迁移：我想基于几条爆款样例，生成一条“新手养猫怎么选猫粮”的 20 秒短视频。"
-  );
+  const [brief, setBrief] = useState("");
   const [materialFiles, setMaterialFiles] = useState<File[]>([]);
   const [pipelineError, setPipelineError] = useState("");
   const [pipelineNote, setPipelineNote] = useState("等待上传样例视频");
@@ -497,7 +488,6 @@ const InputView = ({
     "idle" | "uploading" | "analyzing" | "extracting" | "generating" | "success" | "error"
   >("idle");
   const [sampleFiles, setSampleFiles] = useState<File[]>([]);
-  const [showModal, setShowModal] = useState(false);
 
   const isRunning = ["uploading", "analyzing", "extracting", "generating"].includes(pipelineStatus);
 
@@ -519,28 +509,21 @@ const InputView = ({
     if (sampleFiles.length === 0) {
       setPipelineStatus("error");
       setPipelineError("请先上传至少一个样例视频。");
-      setShowModal(true);
       return;
     }
 
     try {
-      setShowModal(true);
       setPipelineError("");
       setPipelineStatus("uploading");
-      setPipelineNote("正在准备上传和解析");
+      setPipelineNote("正在上传");
       const result = await runVideoAnalysisWorkflow({
         brief,
         materialFiles,
-        sampleFiles,
-        onProgress: (progress) => {
-          setPipelineStatus(progress.stage);
-          setPipelineNote(progress.note);
-        }
+        sampleFiles
       });
 
       setPipelineStatus("success");
       setPipelineNote("分析完成");
-      setShowModal(false);
       onWorkflowReady(result);
       onNext();
       return;
@@ -549,79 +532,7 @@ const InputView = ({
       setPipelineStatus("error");
       setPipelineNote("接口连接失败");
       setPipelineError(getErrorMessage(error));
-      setShowModal(false);
       return;
-    }
-
-    try {
-      setPipelineError("");
-      setPipelineStatus("uploading");
-      setPipelineNote("正在上传样例视频");
-      const uploadedSample = await uploadSampleVideos(sampleFiles);
-      const uploadedSampleFile = uploadedSample.files[0];
-
-      if (!uploadedSampleFile) {
-        throw new Error("上传接口没有返回样例视频 file_id。");
-      }
-
-      const videoMaterialFiles = materialFiles.filter((file) => file.type.startsWith("video/"));
-      const skippedMaterialCount = materialFiles.length - videoMaterialFiles.length;
-      const uploadedMaterials =
-        videoMaterialFiles.length > 0
-          ? await uploadMaterialFiles(videoMaterialFiles)
-          : { files: [] };
-
-      setPipelineStatus("extracting");
-      setPipelineNote("正在调用 Mimo 提取结构");
-      const textAssets = await readTextAssets(materialFiles);
-      const pipelineResult = await analyzeV2Pipeline({
-        reference_file_ids: uploadedSample.files.map((file) => file.file_id),
-        user_material_file_ids: uploadedMaterials.files.map((file) => file.file_id),
-        text_assets: [
-          {
-            asset_id: "brief_01",
-            type: "brief",
-            content: brief
-          },
-          ...textAssets
-        ],
-        user_request: {
-          goal: brief
-        },
-        options: {
-          allow_fallback: true,
-          generate_image_candidates: false,
-          image_candidate_count: 4,
-          target_duration_seconds: getTargetDurationSeconds(brief)
-        }
-      });
-      const scriptSession = await createV2ScriptSession({
-        pipeline_result: pipelineResult,
-        user_request: {
-          goal: brief
-        },
-        target_duration_seconds: pipelineResult.summary.target_duration_seconds
-      });
-
-      setPipelineStatus("success");
-      setPipelineNote(
-        skippedMaterialCount > 0
-          ? `已完成分析；${skippedMaterialCount} 个非视频素材暂未上传到当前后端。`
-          : "已完成真实接口分析"
-      );
-      onWorkflowReady({
-        materialFiles: uploadedMaterials.files,
-        sampleFile: uploadedSampleFile,
-        sampleFiles: uploadedSample.files,
-        scriptSession,
-        v2PipelineResult: pipelineResult
-      });
-      onNext();
-    } catch (error) {
-      console.warn("V2 pipeline failed.", error);
-      setPipelineStatus("error");
-      setPipelineNote("接口连接失败");
-      setPipelineError(getErrorMessage(error));
     }
   };
 
@@ -637,7 +548,7 @@ const InputView = ({
       <main className="content-container">
         <section className="main-section">
           <div className="hero-simple">
-            <h2>开始一次视频迁移</h2>
+            <h2>今天想做个什么样的视频？</h2>
             <p>描述你想生成的视频主题、核心目的和风格参考</p>
           </div>
 
@@ -649,25 +560,26 @@ const InputView = ({
               placeholder="详细描述一下今天的任务吧..."
             />
             <button aria-label="提交需求" onClick={runPipeline} type="button" className="submit-arrow-btn">
-              {isRunning ? "..." : "↑"}
+              {isRunning ? "..." : <ArrowUpIcon />}
             </button>
           </div>
 
-          {pipelineStatus !== "idle" && pipelineStatus !== "success" && (
+          {isRunning ? (
+            <div className="upload-loading-inline" role="status" aria-live="polite">
+              <span aria-hidden="true" />
+              正在上传
+            </div>
+          ) : null}
+
+          {pipelineStatus === "error" && (
              <div className={`pipeline-status ${pipelineStatus === "error" ? "status-error" : ""}`}>
-               {pipelineStatus === "error" ? (
-                 <div className="status-icon-error">!</div>
-               ) : (
-                 <span className="status-badge">{pipelineStatus}</span>
-               )}
+               <div className="status-icon-error">!</div>
                <div className="status-content">
                  <p className="status-note">{pipelineNote}</p>
                  {pipelineError && <p className="error-text">{pipelineError}</p>}
-                 {pipelineStatus === "error" ? (
-                   <button className="pipeline-retry-button" onClick={runPipeline} type="button">
-                     重试
-                   </button>
-                 ) : null}
+                 <button className="pipeline-retry-button" onClick={runPipeline} type="button">
+                   重试
+                 </button>
                </div>
              </div>
           )}
@@ -731,60 +643,20 @@ const InputView = ({
           </div>
         </section>
 
-        {hasExistingCanvas ? (
         <section className="canvas-section">
-          <h3>画布初始</h3>
+          <h3>现有画布</h3>
           <div className="existing-canvases-scroll">
-            {figmaSampleImages.slice(0, 3).map((src, i) => (
-              <button className="canvas-card" key={i} onClick={() => onStepChange("gap-fill")} type="button">
+            {homeCanvasPlaceholderImages.map((src, i) => (
+              <article className="canvas-card canvas-card-placeholder" key={i}>
                 <img src={src} alt="Canvas placeholder" />
                 <div className="canvas-card-title">
-                  {i === 0 ? projectName || "未命名项目" : ["Vlog", "TF口红", "Canvas广告"][i - 1] ?? `画布 ${i + 1}`}
+                  {["Canvas广告", "TF口红", "Vlog"][i] ?? `画布 ${i + 1}`}
                 </div>
-              </button>
+              </article>
             ))}
           </div>
         </section>
-        ) : null}
       </main>
-
-      {isRunning ? (
-        <div className="modal-overlay loading-overlay" aria-live="polite">
-          <div className="modal-content loading-modal-content">
-            <div className="loading-modal-icon" aria-hidden="true">
-              <span />
-            </div>
-            <div className="loading-modal-copy">
-              <h3>{pipelineStatus === "generating" ? "正在生成迁移结果" : "正在解析素材"}</h3>
-              <p>{pipelineNote}</p>
-            </div>
-            <div className="loading-modal-steps">
-              <span className={pipelineStatus === "uploading" ? "active" : ""}>上传</span>
-              <span className={pipelineStatus === "extracting" ? "active" : ""}>拆解</span>
-              <span className={pipelineStatus === "generating" ? "active" : ""}>匹配</span>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showModal && !isRunning && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>提示</h3>
-              <button className="close-btn" onClick={() => setShowModal(false)} aria-label="关闭">×</button>
-            </div>
-            <div className="modal-body">
-              <p>需要添加样例视频，请先上传样例视频再继续。</p>
-            </div>
-            <div className="modal-footer">
-              <button className="primary-action" onClick={() => setShowModal(false)}>
-                确定
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -807,6 +679,19 @@ const PlaceholderBlock = ({ label }: { label: string }) => (
     <span>{label}</span>
   </div>
 );
+
+const ArrowUpIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M12 19V5" />
+    <path d="m5 12 7-7 7 7" />
+  </svg>
+);
+
+const homeCanvasPlaceholderImages = [
+  "https://www.figma.com/api/mcp/asset/1a99447e-d01c-4566-820d-5c1265890eaa",
+  "https://www.figma.com/api/mcp/asset/4651d5ff-b7fa-40bf-a7e2-bbabaa707218",
+  "https://www.figma.com/api/mcp/asset/44e8c1d6-40ab-40da-98c2-6a94cc3b0d06"
+];
 
 const figmaSampleImages = [
   "https://www.figma.com/api/mcp/asset/539affc8-2d0c-423d-a2cd-d4c5dd4afa48",
