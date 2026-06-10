@@ -4925,10 +4925,20 @@ input {
   bottom: 8px;
   width: 30px;
   height: 30px;
-  background: rgba(113, 115, 117, 0.5);
+  background: #fe2c55;
   box-shadow: none;
   font-size: 18px;
   font-weight: 400;
+}
+
+.input-page-redesign .submit-arrow-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: #ffffff;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
 }
 
 .input-page-redesign .upload-section-large {

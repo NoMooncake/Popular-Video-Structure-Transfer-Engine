@@ -498,7 +498,7 @@ const InputView = ({
               placeholder="详细描述一下今天的任务吧..."
             />
             <button aria-label="提交需求" onClick={runPipeline} type="button" className="submit-arrow-btn">
-              {isRunning ? "..." : "↑"}
+              {isRunning ? "..." : <ArrowUpIcon />}
             </button>
           </div>
 
@@ -584,7 +584,7 @@ const InputView = ({
         <section className="canvas-section">
           <h3>现有画布</h3>
           <div className="existing-canvases-scroll">
-            {figmaSampleImages.slice(0, 3).map((src, i) => (
+            {homeCanvasPlaceholderImages.map((src, i) => (
               <article className="canvas-card canvas-card-placeholder" key={i}>
                 <img src={src} alt="Canvas placeholder" />
                 <div className="canvas-card-title">
@@ -617,6 +617,19 @@ const PlaceholderBlock = ({ label }: { label: string }) => (
     <span>{label}</span>
   </div>
 );
+
+const ArrowUpIcon = () => (
+  <svg aria-hidden="true" viewBox="0 0 24 24">
+    <path d="M12 19V5" />
+    <path d="m5 12 7-7 7 7" />
+  </svg>
+);
+
+const homeCanvasPlaceholderImages = [
+  "https://www.figma.com/api/mcp/asset/1a99447e-d01c-4566-820d-5c1265890eaa",
+  "https://www.figma.com/api/mcp/asset/4651d5ff-b7fa-40bf-a7e2-bbabaa707218",
+  "https://www.figma.com/api/mcp/asset/44e8c1d6-40ab-40da-98c2-6a94cc3b0d06"
+];
 
 const figmaSampleImages = [
   "https://www.figma.com/api/mcp/asset/539affc8-2d0c-423d-a2cd-d4c5dd4afa48",
