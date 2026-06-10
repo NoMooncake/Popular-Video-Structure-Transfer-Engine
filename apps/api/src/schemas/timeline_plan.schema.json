@@ -1,0 +1,304 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NoMooncake/Popular-Video-Structure-Transfer-Engine/schemas/timeline_plan.schema.json",
+  "title": "Timeline Plan",
+  "description": "结构迁移后的新视频方案，包含脚本、分镜、时间线、包装和素材/缺口引用。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "created_at",
+    "source",
+    "target_video",
+    "timeline"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "structure_blueprint_ref": {
+      "type": "string"
+    },
+    "material_analysis_ref": {
+      "type": "string"
+    },
+    "gap_report_ref": {
+      "type": "string"
+    },
+    "slot_mapping_ref": {
+      "type": "string"
+    },
+    "target_video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "duration_seconds",
+        "aspect_ratio"
+      ],
+      "properties": {
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 1
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform_style": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      }
+    },
+    "script": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "full_text": {
+          "type": "string"
+        }
+      }
+    },
+    "timeline": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/timeline_item"
+      }
+    },
+    "packaging_suggestions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/packaging"
+      }
+    },
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "variant_id",
+          "name",
+          "changes"
+        ],
+        "properties": {
+          "variant_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "llm",
+            "rule",
+            "mock",
+            "manual"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        }
+      }
+    },
+    "timeline_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_id",
+        "time_range",
+        "slot_type",
+        "visual_source",
+        "subtitle",
+        "packaging"
+      ],
+      "properties": {
+        "item_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "slot_id": {
+          "type": "string"
+        },
+        "time_range": {
+          "$ref": "#/$defs/time_range"
+        },
+        "slot_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content_goal": {
+          "type": "string"
+        },
+        "visual_source": {
+          "type": "string",
+          "enum": [
+            "user_material",
+            "aigc",
+            "stock",
+            "text_card",
+            "generated_graphic",
+            "reuse",
+            "missing"
+          ]
+        },
+        "visual_description": {
+          "type": "string"
+        },
+        "subtitle": {
+          "type": "string"
+        },
+        "voiceover": {
+          "type": "string"
+        },
+        "packaging": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/packaging"
+          }
+        },
+        "material_ref": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "gap_ref": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "fill_strategy_ref": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "transition": {
+          "type": "string"
+        }
+      }
+    },
+    "packaging": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "style": {
+              "type": "string"
+            },
+            "position": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "time_range": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "start_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "end_seconds": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "minProperties": 1
+        }
+      ]
+    }
+  }
+}

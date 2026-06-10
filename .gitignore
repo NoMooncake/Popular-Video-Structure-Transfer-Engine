@@ -12,10 +12,19 @@ node_modules/
 
 # Local generated files
 uploads/
+!uploads/
+uploads/*
+!uploads/.gitkeep
 outputs/
+!outputs/
+outputs/*
+!outputs/frames/
+outputs/frames/*
+!outputs/frames/.gitkeep
 dist/
 build/
 coverage/
+.vite/
 
 # Logs
 *.log

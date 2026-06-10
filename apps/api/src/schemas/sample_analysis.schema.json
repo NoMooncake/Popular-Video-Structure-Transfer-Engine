@@ -1,0 +1,441 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NoMooncake/Popular-Video-Structure-Transfer-Engine/schemas/sample_analysis.schema.json",
+  "title": "Sample Analysis",
+  "description": "样例视频基础解析结果，包含视频元数据、封面、关键帧、镜头、字幕/语音概览和基础包装观察。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "created_at",
+    "source",
+    "video",
+    "shot_count",
+    "keyframes",
+    "transcript"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "video": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "duration_seconds",
+        "resolution",
+        "aspect_ratio"
+      ],
+      "properties": {
+        "duration_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "resolution": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aspect_ratio": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fps": {
+          "type": "number",
+          "minimum": 0
+        },
+        "codec": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "cover_frame": {
+          "$ref": "#/$defs/media_ref"
+        }
+      }
+    },
+    "shot_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "shots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "shot_id",
+          "time_range"
+        ],
+        "properties": {
+          "shot_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "time_range": {
+            "$ref": "#/$defs/time_range"
+          },
+          "keyframe_refs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "visual_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "confidence": {
+            "$ref": "#/$defs/confidence"
+          }
+        }
+      }
+    },
+    "keyframes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "frame_id",
+          "time_seconds",
+          "media"
+        ],
+        "properties": {
+          "frame_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "time_seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "media": {
+            "$ref": "#/$defs/media_ref"
+          },
+          "visual_tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "analysis_table": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "properties": {
+        "columns": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "时长"
+            },
+            {
+              "const": "样例视频"
+            },
+            {
+              "const": "分镜描述"
+            },
+            {
+              "const": "迁移可能性"
+            }
+          ],
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "row_id",
+              "duration",
+              "sample_video",
+              "shot_description",
+              "migration_possibility"
+            ],
+            "properties": {
+              "row_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "duration": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sample_video": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "frame_id",
+                  "time_seconds",
+                  "media"
+                ],
+                "properties": {
+                  "frame_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "time_seconds": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "media": {
+                    "$ref": "#/$defs/media_ref"
+                  }
+                }
+              },
+              "shot_description": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "title",
+                  "description"
+                ],
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "migration_possibility": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "transcript": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "summary"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "manual",
+            "generated",
+            "failed"
+          ]
+        },
+        "language": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "full_text": {
+          "type": "string"
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "time_range",
+              "text"
+            ],
+            "properties": {
+              "time_range": {
+                "$ref": "#/$defs/time_range"
+              },
+              "text": {
+                "type": "string"
+              },
+              "speaker": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "packaging_observations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "subtitle_density": {
+          "type": "string",
+          "enum": [
+            "none",
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "title_bars": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "stickers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "transitions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cover_style": {
+          "type": "string"
+        }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "uploaded_video",
+            "reference_video",
+            "mock",
+            "manual"
+          ]
+        },
+        "file_id": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "reference_id": {
+          "type": "string"
+        }
+      }
+    },
+    "media_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "uri"
+      ],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mime_type": {
+          "type": "string"
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "time_range": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "start_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "end_seconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "relative_start_percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "relative_end_percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          },
+          "minProperties": 1
+        }
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    }
+  }
+}

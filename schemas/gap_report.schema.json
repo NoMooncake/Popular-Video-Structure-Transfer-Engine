@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/NoMooncake/Popular-Video-Structure-Transfer-Engine/schemas/gap_report.schema.json",
+  "title": "Gap Report",
+  "description": "结构槽位需求与用户素材之间的缺口识别结果，以及建议补全策略。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "created_at",
+    "source",
+    "gaps"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "structure_blueprint_ref": {
+      "type": "string"
+    },
+    "material_analysis_ref": {
+      "type": "string"
+    },
+    "slot_mapping_ref": {
+      "type": "string"
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "total_gaps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "blocking_gaps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "overall_status": {
+          "type": "string",
+          "enum": [
+            "sufficient",
+            "partial",
+            "insufficient"
+          ]
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "gaps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/gap"
+      }
+    }
+  },
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "rule",
+            "llm",
+            "mock",
+            "manual"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "prompt_version": {
+          "type": "string"
+        }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gap_id",
+        "slot_id",
+        "slot_type",
+        "missing",
+        "impact",
+        "strategy"
+      ],
+      "properties": {
+        "gap_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "slot_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "slot_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "missing": {
+          "type": "string",
+          "minLength": 1
+        },
+        "impact": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "blocking"
+          ]
+        },
+        "required_materials": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "available_material_refs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "strategy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fill_options": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fill_option"
+          }
+        }
+      }
+    },
+    "fill_option": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "description"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "structure_reorder",
+            "copy_or_subtitle",
+            "packaging",
+            "aigc",
+            "material_reuse",
+            "text_overlay_fill",
+            "packaging_card_fill",
+            "reuse_existing_material",
+            "aigc_prompt_candidate"
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "timeline_usage": {
+          "type": "string"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "requires_aigc": {
+          "type": "boolean"
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "primary",
+            "fallback"
+          ]
+        }
+      }
+    }
+  }
+}

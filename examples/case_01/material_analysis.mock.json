@@ -1,0 +1,314 @@
+{
+  "id": "material_analysis_case_01_mock",
+  "version": "0.1.0",
+  "created_at": "2026-05-28T14:00:00+08:00",
+  "source": {
+    "type": "mock",
+    "project_id": "case_01",
+    "material_input_ref": "material_input_case_01_mock"
+  },
+  "target_content_ref": "case_01",
+  "materials": [
+    {
+      "material_id": "m1",
+      "type": "image",
+      "asset_role": "user_uploaded",
+      "uri": "mock://case_01/user/pet_food_pack_01.jpg",
+      "file_id": "mock_file_pet_food_pack_01",
+      "description": "猫粮包装图 1，适合展示肠胃养护型方向。",
+      "tags": [
+        "pet_food_packaging",
+        "product_image",
+        "gut_care"
+      ],
+      "content_roles": [
+        "product_packaging",
+        "product_reveal"
+      ],
+      "candidate_slot_types": [
+        "product_reveal",
+        "decision_warning"
+      ],
+      "metadata": {
+        "width": 1080,
+        "height": 1440
+      }
+    },
+    {
+      "material_id": "m2",
+      "type": "image",
+      "asset_role": "user_uploaded",
+      "uri": "mock://case_01/user/pet_food_pack_02.jpg",
+      "file_id": "mock_file_pet_food_pack_02",
+      "description": "猫粮包装图 2，适合展示单一肉源方向。",
+      "tags": [
+        "pet_food_packaging",
+        "product_image",
+        "single_protein"
+      ],
+      "content_roles": [
+        "product_packaging",
+        "product_reveal"
+      ],
+      "candidate_slot_types": [
+        "product_reveal",
+        "proof_comparison"
+      ],
+      "metadata": {
+        "width": 1080,
+        "height": 1440
+      }
+    },
+    {
+      "material_id": "m3",
+      "type": "video",
+      "asset_role": "user_uploaded",
+      "uri": "mock://case_01/user/cat_eating.mp4",
+      "file_id": "mock_file_cat_eating_video",
+      "description": "猫咪吃粮视频，可用于问题背景、产品出现或 CTA。",
+      "tags": [
+        "cat",
+        "feeding_scene",
+        "daily_life"
+      ],
+      "content_roles": [
+        "usage_scene",
+        "daily_life",
+        "cta_visual"
+      ],
+      "candidate_slot_types": [
+        "pain_desire",
+        "usage_scene",
+        "cta"
+      ],
+      "metadata": {
+        "duration_seconds": 8,
+        "width": 1080,
+        "height": 1920
+      }
+    },
+    {
+      "material_id": "m4",
+      "type": "image",
+      "asset_role": "user_uploaded",
+      "uri": "mock://case_01/user/ingredient_table.jpg",
+      "file_id": "mock_file_ingredient_table",
+      "description": "猫粮成分表截图，可用于选购标准说明。",
+      "tags": [
+        "ingredient_table",
+        "criteria",
+        "proof"
+      ],
+      "content_roles": [
+        "proof",
+        "comparison_support",
+        "detail_card"
+      ],
+      "candidate_slot_types": [
+        "proof_comparison",
+        "decision_warning"
+      ],
+      "metadata": {
+        "width": 1080,
+        "height": 1920
+      }
+    },
+    {
+      "material_id": "m5",
+      "type": "text",
+      "asset_role": "text_asset",
+      "description": "产品卖点文案：肠胃养护、单一肉源、适口性、低油。",
+      "tags": [
+        "selling_points",
+        "copy",
+        "text"
+      ],
+      "content_roles": [
+        "subtitle_copy",
+        "selling_point_copy",
+        "warning_copy"
+      ],
+      "candidate_slot_types": [
+        "risk_or_pain_hook",
+        "decision_warning",
+        "cta"
+      ],
+      "metadata": {
+        "language": "zh-CN"
+      }
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "seg_01",
+      "material_ref": "m3",
+      "time_range": "0-3s",
+      "content": "猫咪低头吃粮的日常画面，可以承接问题背景或结尾 CTA。",
+      "tags": [
+        "cat_eating",
+        "daily_life"
+      ],
+      "recommended_slot": "pain_desire",
+      "recommended_slot_types": [
+        "pain_desire",
+        "cta"
+      ],
+      "quality_score": 0.78,
+      "fit_score": 0.74,
+      "usable": true,
+      "match_reasons": [
+        "真实猫咪进食画面能提供生活化场景。",
+        "可以承接用户痛点，也能做结尾行动号召背景。"
+      ],
+      "limitations": [
+        "情绪冲击不够强，不适合直接做开头风险 Hook。"
+      ],
+      "missing_risks": [
+        "缺少明确风险瞬间，不能直接表达踩雷后果。"
+      ]
+    },
+    {
+      "segment_id": "seg_02",
+      "material_ref": "m1",
+      "content": "肠胃养护型猫粮包装图，可用于产品方向展示。",
+      "tags": [
+        "product_packaging",
+        "gut_care"
+      ],
+      "recommended_slot": "product_reveal",
+      "recommended_slot_types": [
+        "product_reveal",
+        "decision_warning"
+      ],
+      "quality_score": 0.86,
+      "fit_score": 0.88,
+      "usable": true,
+      "match_reasons": [
+        "包装图清晰，可以用于产品首次出现。",
+        "肠胃养护标签能和卖点文案直接匹配。"
+      ],
+      "limitations": [
+        "单张产品图无法形成横向对比。"
+      ],
+      "missing_risks": [
+        "缺少产品细节特写，需要用局部放大或卖点卡片补足。"
+      ]
+    },
+    {
+      "segment_id": "seg_03",
+      "material_ref": "m2",
+      "content": "单一肉源猫粮包装图，可用于产品方向展示。",
+      "tags": [
+        "product_packaging",
+        "single_protein"
+      ],
+      "recommended_slot": "product_reveal",
+      "recommended_slot_types": [
+        "product_reveal",
+        "proof_comparison"
+      ],
+      "quality_score": 0.84,
+      "fit_score": 0.82,
+      "usable": true,
+      "match_reasons": [
+        "第二张包装图可与 m1 组成对比。",
+        "单一肉源信息适合承接选购标准。"
+      ],
+      "limitations": [
+        "缺少清晰产品特写和使用结果。"
+      ],
+      "missing_risks": [
+        "对比素材只有包装维度，缺少喂食反馈或检测结果。"
+      ]
+    },
+    {
+      "segment_id": "seg_04",
+      "material_ref": "m4",
+      "content": "成分表截图，可以用于选购标准和理由证明。",
+      "tags": [
+        "ingredient_table",
+        "selection_criteria",
+        "proof"
+      ],
+      "recommended_slot": "proof_comparison",
+      "recommended_slot_types": [
+        "proof_comparison",
+        "decision_warning"
+      ],
+      "quality_score": 0.72,
+      "fit_score": 0.76,
+      "usable": true,
+      "match_reasons": [
+        "成分表截图可作为选购标准证明。",
+        "适合包装成高亮卡片解释为什么推荐。"
+      ],
+      "limitations": [
+        "信息密度高，需要包装成卡片或高亮。"
+      ],
+      "missing_risks": [
+        "截图本身不够直观，前端展示时需要标题条或重点标注。"
+      ]
+    },
+    {
+      "segment_id": "seg_05",
+      "material_ref": "m5",
+      "content": "卖点文案可以生成分类推荐字幕和避坑提醒。",
+      "tags": [
+        "copy",
+        "selling_points",
+        "warning_copy"
+      ],
+      "recommended_slot": "decision_warning",
+      "recommended_slot_types": [
+        "risk_or_pain_hook",
+        "decision_warning",
+        "cta"
+      ],
+      "quality_score": 0.9,
+      "fit_score": 0.9,
+      "usable": true,
+      "match_reasons": [
+        "文本卖点可以补齐缺少画面的解释信息。",
+        "适合生成字幕、标题条和结尾 CTA。"
+      ],
+      "limitations": [
+        "仅有文字，必须依赖字幕或包装表达。"
+      ],
+      "missing_risks": [
+        "没有对应视觉素材时，画面吸引力依然不足。"
+      ]
+    }
+  ],
+  "coverage_summary": {
+    "supported_slot_types": [
+      "pain_desire",
+      "product_reveal",
+      "proof_comparison",
+      "decision_warning",
+      "cta"
+    ],
+    "weak_slot_types": [
+      "risk_or_pain_hook",
+      "proof_comparison"
+    ],
+    "unsupported_slot_types": [
+      "strong_before_after",
+      "product_closeup"
+    ],
+    "material_gaps": [
+      {
+        "slot_type": "risk_or_pain_hook",
+        "reason": "现有视频只有猫咪正常吃粮，没有拉肚子、挑食、黑下巴等强痛点画面。",
+        "severity": "high",
+        "suggested_strategy": "用文字标题和包装卡片先补齐风险 Hook，后续可接图生视频生成痛点画面。"
+      },
+      {
+        "slot_type": "product_closeup",
+        "reason": "包装图可以展示产品，但缺少颗粒、油脂、成分表局部等近景细节。",
+        "severity": "medium",
+        "suggested_strategy": "通过局部放大、截图裁切或补拍产品特写补齐。"
+      }
+    ],
+    "notes": "现有素材可以支撑产品出现、卖点说明和部分证明，但缺少强开头风险画面和多产品横向对比图。"
+  }
+}
