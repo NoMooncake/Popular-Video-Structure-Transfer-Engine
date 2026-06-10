@@ -2744,9 +2744,12 @@ export const buildV2DeterministicMaterialCoverage = async (
       })
       .map((asset) => ({
         material_id: asset.material_id,
+        file_id: asset.file_id,
+        uri: asset.uri,
         label: asset.label,
         model_label: asset.model_label,
         duration_seconds: asset.duration_seconds,
+        usable_duration_seconds: asset.usable_duration_seconds,
         duration_status: asset.duration_status,
         candidate_slot_types: asset.candidate_slot_types,
         candidate_segments: asJsonObjectArray(asset.material_segments)
@@ -2755,8 +2758,17 @@ export const buildV2DeterministicMaterialCoverage = async (
           )
           .map((segment) => ({
             segment_id: segment.segment_id,
+            material_id: asset.material_id,
+            source_material_id: asset.material_id,
+            file_id: asset.file_id,
+            uri: asset.uri,
             time_range: segment.time_range,
+            start_seconds: segment.start_seconds,
+            end_seconds: segment.end_seconds,
+            source_in_seconds: segment.start_seconds,
+            source_out_seconds: segment.end_seconds,
             duration_seconds: segment.duration_seconds,
+            usable_duration_seconds: segment.duration_seconds,
             visual_description: segment.visual_description,
             recommended_usage: segment.recommended_usage
           })),
@@ -2946,6 +2958,7 @@ export const buildV2DeterministicMaterialCoverage = async (
     );
     const directVideoReferenceMaterials = directReferenceMaterialSource.map((material) => ({
       material_id: material.material_id,
+      file_id: material.file_id,
       label: material.label,
       uri: material.uri,
       duration_seconds: material.duration_seconds,

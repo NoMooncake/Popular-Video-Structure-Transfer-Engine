@@ -217,11 +217,61 @@ const getSlotRequiredDuration = (
   return Number((targetDurationSeconds / Math.max(1, slotCount)).toFixed(3));
 };
 
+const extractFileIdFromUploadUri = (uri: string | undefined): string | undefined => {
+  if (!uri) {
+    return undefined;
+  }
+
+  const match = uri.match(/\/api\/upload\/files\/([^/?#]+)/u);
+  return match ? decodeURIComponent(match[1]) : undefined;
+};
+
+const getSlotCandidateMaterials = (slot: JsonObject): JsonObject[] =>
+  (Array.isArray(slot.candidate_materials) ? slot.candidate_materials : [])
+    .map(asJsonObject)
+    .flatMap((material) => {
+      const candidateSegments = Array.isArray(material.candidate_segments)
+        ? material.candidate_segments.map(asJsonObject)
+        : [];
+      const baseMaterial = {
+        ...material,
+        role: "user_material"
+      };
+
+      return [
+        baseMaterial,
+        ...candidateSegments.map((segment) => ({
+          ...segment,
+          material_id:
+            normalizeOptionalString(segment.material_id) ||
+            normalizeOptionalString(material.material_id),
+          source_material_id:
+            normalizeOptionalString(segment.source_material_id) ||
+            normalizeOptionalString(material.material_id),
+          file_id:
+            normalizeOptionalString(segment.file_id) ||
+            normalizeOptionalString(material.file_id),
+          uri:
+            normalizeOptionalString(segment.uri) ||
+            normalizeOptionalString(material.uri),
+          label:
+            normalizeOptionalString(segment.label) ||
+            normalizeOptionalString(material.label) ||
+            normalizeOptionalString(material.model_label)
+        }))
+      ];
+    });
+
 const getSlotMaterials = (slot: JsonObject): V2ScriptSlotMaterial[] => {
   const materials = [
     ...(Array.isArray(slot.materials) ? slot.materials : []),
     ...(Array.isArray(slot.assigned_materials) ? slot.assigned_materials : []),
+    ...(Array.isArray(slot.assigned_segments) ? slot.assigned_segments : []),
     ...(Array.isArray(slot.matched_materials) ? slot.matched_materials : []),
+    ...(Array.isArray(slot.matched_material_segments)
+      ? slot.matched_material_segments
+      : []),
+    ...getSlotCandidateMaterials(slot),
     ...(Array.isArray(slot.direct_video_reference_materials)
       ? slot.direct_video_reference_materials
       : [])
@@ -230,11 +280,16 @@ const getSlotMaterials = (slot: JsonObject): V2ScriptSlotMaterial[] => {
 
   return materials
     .map((material, index): V2ScriptSlotMaterial | undefined => {
-      const fileId = normalizeOptionalString(material.file_id);
       const uri =
         normalizeOptionalString(material.uri) ||
-        (fileId ? `/api/upload/files/${fileId}` : undefined);
-      if (!uri) {
+        normalizeOptionalString(material.url) ||
+        normalizeOptionalString(material.video_uri);
+      const fileId =
+        normalizeOptionalString(material.file_id) ||
+        normalizeOptionalString(material.fileId) ||
+        extractFileIdFromUploadUri(uri);
+      const resolvedUri = uri || (fileId ? `/api/upload/files/${fileId}` : undefined);
+      if (!resolvedUri) {
         return undefined;
       }
 
@@ -242,7 +297,7 @@ const getSlotMaterials = (slot: JsonObject): V2ScriptSlotMaterial[] => {
         normalizeOptionalString(material.material_id) ||
         normalizeOptionalString(material.id) ||
         `slot_material_${String(index + 1).padStart(2, "0")}`;
-      const dedupeKey = `${fileId || ""}:${uri}:${materialId}`;
+      const dedupeKey = `${fileId || ""}:${resolvedUri}:${materialId}`;
       if (seen.has(dedupeKey)) {
         return undefined;
       }
@@ -251,8 +306,10 @@ const getSlotMaterials = (slot: JsonObject): V2ScriptSlotMaterial[] => {
       return {
         material_id: materialId,
         file_id: fileId,
-        uri,
-        label: normalizeOptionalString(material.label),
+        uri: resolvedUri,
+        label:
+          normalizeOptionalString(material.label) ||
+          normalizeOptionalString(material.model_label),
         role: "user_material",
         assigned_at: new Date().toISOString()
       };
@@ -872,7 +929,6 @@ type UsedMaterialRange = {
 
 type MaterialAllocationState = {
   usedRangesByKey: Map<string, UsedMaterialRange[]>;
-  usedSlotByKey: Map<string, string>;
 };
 
 const getSegmentFinalRange = (
@@ -911,11 +967,6 @@ const isSegmentRangeAvailable = (
   allocationState: MaterialAllocationState
 ): boolean => {
   const materialKey = getSegmentPhysicalMaterialKey(segment);
-  const usedSlotId = allocationState.usedSlotByKey.get(materialKey);
-  if (usedSlotId && usedSlotId !== slot.slot_id) {
-    return false;
-  }
-
   const usedRanges = allocationState.usedRangesByKey.get(materialKey) || [];
   const segmentRange = getSegmentFinalRange(segment);
 
@@ -938,7 +989,6 @@ const markSegmentRangeUsed = (
     segment_id: normalizeOptionalString(segment.segment_id)
   });
   allocationState.usedRangesByKey.set(materialKey, usedRanges);
-  allocationState.usedSlotByKey.set(materialKey, slot.slot_id);
 };
 
 const getSegmentAssignedAtMs = (segment: JsonObject): number => {
@@ -1162,8 +1212,7 @@ const buildSegmentAwareMaterialCoverage = (
   }
 
   const allocationState: MaterialAllocationState = {
-    usedRangesByKey: new Map<string, UsedMaterialRange[]>(),
-    usedSlotByKey: new Map<string, string>()
+    usedRangesByKey: new Map<string, UsedMaterialRange[]>()
   };
   const slotCoverage = session.slots.map((slot) => {
     const base =
